@@ -1,8 +1,10 @@
+import http from "http";
 import app from "./app.js";
 import connectDB from "./config/db.js";
 import { initRedis } from "./config/redis.js";
 import { initRabbit } from "./config/rabbit.js";
 import { env } from "./config/env.js";
+import { attachSignaling } from "./realtime/signaling.js";
 
 async function startServer() {
   try {
@@ -10,7 +12,12 @@ async function startServer() {
     await initRedis();
     await initRabbit();
 
-    app.listen(env.PORT, () => {
+    // Plain http.Server wrapping app so Socket.IO (interview room signaling) can attach
+    // its own WebSocket upgrade handling to the same port, alongside the existing REST API.
+    const httpServer = http.createServer(app);
+    attachSignaling(httpServer);
+
+    httpServer.listen(env.PORT, () => {
       console.log(`🚀 Server running on port ${env.PORT}`);
     });
   } catch (err) {

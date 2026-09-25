@@ -1,7 +1,7 @@
 import * as submissionsService from "../services/submissions.service.js";
 
 export async function submitSolution(req, res, next) {
-  const { problemId, code, language, assessmentId, attemptId } = req.body;
+  const { problemId, code, language, selectedOptions, answerText, assessmentId, attemptId } = req.body;
   const userId = req.user && req.user._id;
 
   try {
@@ -13,6 +13,8 @@ export async function submitSolution(req, res, next) {
       problemId,
       code,
       language,
+      selectedOptions,
+      answerText,
       userId,
       collegeId: req.user && req.user.collegeId,
       assessmentId,
@@ -77,6 +79,35 @@ export async function getMyAnalytics(req, res, next) {
     const result = await submissionsService.getMyAnalytics(userId);
     res.json(result);
   } catch (err) {
+    next(err);
+  }
+}
+
+export async function listUngradedSubjectiveSubmissions(req, res, next) {
+  const { assessmentId } = req.params;
+
+  try {
+    const result = await submissionsService.listUngradedSubjectiveSubmissions(assessmentId, req.user);
+    res.json(result);
+  } catch (err) {
+    if (err.status) {
+      return res.status(err.status).json(err.body || { msg: err.message });
+    }
+    next(err);
+  }
+}
+
+export async function gradeSubjectiveSubmission(req, res, next) {
+  const { _id } = req.params;
+  const { score, feedback } = req.body;
+
+  try {
+    const result = await submissionsService.gradeSubjectiveSubmission(_id, { score, feedback }, req.user);
+    res.json(result);
+  } catch (err) {
+    if (err.status) {
+      return res.status(err.status).json(err.body || { msg: err.message });
+    }
     next(err);
   }
 }

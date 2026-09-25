@@ -98,7 +98,77 @@ describe('Problems API', () => {
       .post('/api/problems')
       .set('Authorization', `Bearer ${studentToken}`)
       .send({ title: 'Unauthorized' });
-    
+
     expect(res.status).toBe(403);
+  });
+
+  it('POST /api/problems creates an mcq problem without needing a reference solution', async () => {
+    const res = await request(app)
+      .post('/api/problems')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        title: 'Capital of France',
+        description: 'Pick the capital of France',
+        difficulty: 'Easy',
+        problemType: 'mcq',
+        options: [
+          { text: 'Paris', isCorrect: true },
+          { text: 'London', isCorrect: false }
+        ]
+      });
+
+    expect(res.status).toBe(201);
+    expect(res.body.problem.problemType).toBe('mcq');
+    expect(res.body.problem.options.length).toBe(2);
+  });
+
+  it('POST /api/problems rejects an mcq problem with no correct option', async () => {
+    const res = await request(app)
+      .post('/api/problems')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        title: 'Bad MCQ',
+        description: 'No correct answer',
+        difficulty: 'Easy',
+        problemType: 'mcq',
+        options: [
+          { text: 'A', isCorrect: false },
+          { text: 'B', isCorrect: false }
+        ]
+      });
+
+    expect(res.status).toBe(400);
+  });
+
+  it('POST /api/problems rejects an mcq problem with only one option', async () => {
+    const res = await request(app)
+      .post('/api/problems')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        title: 'Bad MCQ',
+        description: 'Only one option',
+        difficulty: 'Easy',
+        problemType: 'mcq',
+        options: [{ text: 'A', isCorrect: true }]
+      });
+
+    expect(res.status).toBe(400);
+  });
+
+  it('POST /api/problems creates a subjective problem without needing test cases', async () => {
+    const res = await request(app)
+      .post('/api/problems')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        title: 'Explain recursion',
+        description: 'In your own words, explain recursion',
+        difficulty: 'Medium',
+        problemType: 'subjective',
+        maxWords: 200
+      });
+
+    expect(res.status).toBe(201);
+    expect(res.body.problem.problemType).toBe('subjective');
+    expect(res.body.problem.maxWords).toBe(200);
   });
 });

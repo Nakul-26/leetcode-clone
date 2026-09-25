@@ -29,17 +29,22 @@ const SubmissionSchema = new Schema({
         type: Number,
         default: 0
     },
+    // Required for coding (function/stdin) submissions only, enforced in
+    // submissions.service.js — mcq/subjective submissions have no code/language and
+    // use selectedOptions/answerText below instead.
     code: {
-        type: String,
-        required: true
+        type: String
     },
     language: {
-        type: String,
-        required: true
+        type: String
     },
     status: {
         type: String,
-        enum: ['Pending', 'Running', 'Success', 'Fail', 'Error'],
+        // PendingReview: a subjective answer awaiting manual faculty grading.
+        // Graded: a subjective answer that has been manually graded (see gradedBy/
+        // gradedAt/feedback/score below). mcq submissions resolve synchronously to
+        // Success/Fail exactly like coding submissions, no new status needed for them.
+        enum: ['Pending', 'Running', 'Success', 'Fail', 'Error', 'PendingReview', 'Graded'],
         default: 'Pending'
     },
     output: {
@@ -50,6 +55,26 @@ const SubmissionSchema = new Schema({
     },
     tests: {
         type: Array
+    },
+    // mcq-only: indexes into the Problem.options array the student selected.
+    selectedOptions: {
+        type: [Number]
+    },
+    // subjective-only: the student's free-text answer.
+    answerText: {
+        type: String
+    },
+    // subjective-only, set when a faculty/admin grades the answer (see
+    // submissions.service.js's gradeSubjectiveSubmission).
+    gradedBy: {
+        type: Schema.Types.ObjectId,
+        ref: 'User'
+    },
+    gradedAt: {
+        type: Date
+    },
+    feedback: {
+        type: String
     },
     // Opaque traceability metadata for submissions that originate from an external
     // system (Arventiq) via the shared service account — not used for auth or

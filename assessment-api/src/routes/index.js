@@ -11,11 +11,15 @@ import questionsRoutes from "./questions.routes.js";
 import arventiqRoutes from "./arventiq.routes.js";
 import codeAssessShimRoutes from "./codeAssessShim.routes.js";
 import billingRoutes from "./billing.routes.js";
+import drivesRoutes from "./drives.routes.js";
+import interviewSlotsRoutes from "./interviewSlots.routes.js";
 
 const router = express.Router();
 
 router.use("/problems", problemsRoutes);
 router.use("/assessments", assessmentsRoutes);
+router.use("/drives", drivesRoutes);
+router.use("/interview-slots", interviewSlotsRoutes);
 router.use("/submissions", submissionsRoutes);
 router.use("/preview", previewRoutes);
 router.use("/auth", authRoutes);

@@ -17,6 +17,10 @@
       "type": "string",
       "enum": ["Easy", "Medium", "Hard"]
     },
+    "problemType": {
+      "type": "string",
+      "enum": ["function", "mcq", "subjective"]
+    },
     "functionName": {
       "type": "string",
       "minLength": 1,
@@ -95,6 +99,29 @@
     "isPremium": {
       "type": "boolean"
     },
+    "options": {
+      "type": "array",
+      "minItems": 2,
+      "items": {
+        "type": "object",
+        "properties": {
+          "text": { "type": "string", "minLength": 1 },
+          "isCorrect": { "type": "boolean" }
+        },
+        "required": ["text"],
+        "additionalProperties": false
+      }
+    },
+    "allowMultipleAnswers": {
+      "type": "boolean"
+    },
+    "maxWords": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "rubricNotes": {
+      "type": "string"
+    },
     "referenceSolution": {
       "type": "string"
     },
@@ -107,5 +134,27 @@
       "format": "date-time"
     }
   },
-  "required": ["title", "description", "difficulty", "functionName", "parameters", "returnType", "testCases"]
+  "required": ["title", "description", "difficulty"],
+  "allOf": [
+    {
+      "if": {
+        "anyOf": [
+          { "not": { "required": ["problemType"] } },
+          { "properties": { "problemType": { "const": "function" } }, "required": ["problemType"] }
+        ]
+      },
+      "then": {
+        "required": ["functionName", "parameters", "returnType", "testCases"]
+      }
+    },
+    {
+      "if": {
+        "properties": { "problemType": { "const": "mcq" } },
+        "required": ["problemType"]
+      },
+      "then": {
+        "required": ["options"]
+      }
+    }
+  ]
 }

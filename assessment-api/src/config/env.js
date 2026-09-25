@@ -46,7 +46,19 @@ export const env = {
   // H8: browser-facing CORS allowlist for cookie-based auth (comma-separated origins).
   // No production default on purpose - there is no deployed frontend yet, so this stays
   // unset until one exists; set it then, no code change needed at that point.
-  CORS_ALLOWED_ORIGINS: process.env.CORS_ALLOWED_ORIGINS || ""
+  CORS_ALLOWED_ORIGINS: process.env.CORS_ALLOWED_ORIGINS || "",
+  // Phase C notifications (SMTP via nodemailer) - optional, same soft-fail-when-unconfigured
+  // pattern as Stripe above: no live mail provider yet, so these have no production
+  // fail-fast. notification.service.js/mailer.js no-op instead of throwing when unset.
+  SMTP_HOST: process.env.SMTP_HOST || null,
+  SMTP_PORT: Number(process.env.SMTP_PORT) || 587,
+  SMTP_USER: process.env.SMTP_USER || null,
+  SMTP_PASS: process.env.SMTP_PASS || null,
+  SMTP_FROM: process.env.SMTP_FROM || null,
+  // Base URL of the deployed frontend, used to build links embedded in emails (e.g. an
+  // external interviewer's signed access link). No production default for the same reason
+  // as CORS_ALLOWED_ORIGINS - unset until a frontend is actually deployed against this API.
+  APP_BASE_URL: process.env.APP_BASE_URL || "http://localhost:5173"
 };
 
 if (process.env.NODE_ENV === "production" && !env.JWT_SECRET) {

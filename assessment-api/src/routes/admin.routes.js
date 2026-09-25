@@ -16,7 +16,7 @@ const router = express.Router();
 
 router.get("/audit-logs", verifyToken, authorizeRoles("admin", "superadmin", "faculty"), async (req, res) => {
   try {
-    const logs = await auditService.listLogs(req.query);
+    const logs = await auditService.listLogs(req.query, req.user);
     res.json(logs);
   } catch (error) {
     console.error("Audit logs error:", error);
@@ -26,10 +26,49 @@ router.get("/audit-logs", verifyToken, authorizeRoles("admin", "superadmin", "fa
 
 router.get("/users", verifyToken, authorizeRoles("admin", "superadmin", "faculty"), async (req, res) => {
   try {
-    const results = await authService.listUsers(req.query);
+    const results = await authService.listUsers(req.query, req.user);
     res.json(results);
   } catch (error) {
     console.error("List users error:", error);
+    res.status(error.status || 500).json({ error: safeErrorMessage(error) });
+  }
+});
+
+router.post("/users", verifyToken, authorizeRoles("admin", "superadmin", "faculty"), async (req, res) => {
+  try {
+    const { name, email, password, role, usn, section } = req.body;
+    if (!name || !email) return res.status(400).json({ error: "Name and email are required" });
+
+    const auditInfo = {
+      ip: req.ip || req.headers['x-forwarded-for'] || req.socket.remoteAddress,
+      userAgent: req.headers['user-agent']
+    };
+
+    const result = await authService.adminCreateUser({ name, email, password, role, usn, section }, req.user, auditInfo);
+    res.status(201).json(result);
+  } catch (error) {
+    console.error("Create user error:", error);
+    if (error.status && error.body) {
+      return res.status(error.status).json(error.body);
+    }
+    res.status(error.status || 500).json({ error: safeErrorMessage(error) });
+  }
+});
+
+router.delete("/users/:userId", verifyToken, authorizeRoles("admin", "superadmin", "faculty"), async (req, res) => {
+  try {
+    const auditInfo = {
+      ip: req.ip || req.headers['x-forwarded-for'] || req.socket.remoteAddress,
+      userAgent: req.headers['user-agent']
+    };
+
+    const result = await authService.deleteUser(req.params.userId, req.user, auditInfo);
+    res.json(result);
+  } catch (error) {
+    console.error("Delete user error:", error);
+    if (error.status && error.body) {
+      return res.status(error.status).json(error.body);
+    }
     res.status(error.status || 500).json({ error: safeErrorMessage(error) });
   }
 });
@@ -64,9 +103,12 @@ router.post("/bulk-import-students", verifyToken, authorizeRoles("admin", "super
       return res.status(400).json({ error: "Default password is required" });
     }
 
-    // Faculty can only import into their own college context if we had one
-    // For now, let's just pass the collegeId if provided in body or from user
-    const collegeId = req.body.collegeId || req.user.collegeId;
+    // A non-superadmin is always scoped to their own college — only a superadmin may
+    // target an arbitrary collegeId via the body (e.g. onboarding a specific college on
+    // a fresh tenant's behalf).
+    const collegeId = req.user.role === 'superadmin'
+      ? (req.body.collegeId || req.user.collegeId)
+      : req.user.collegeId;
 
     const results = await authService.bulkRegister(users, defaultPassword, collegeId);
     
@@ -82,20 +124,30 @@ router.post("/bulk-import-students", verifyToken, authorizeRoles("admin", "super
 
 router.get("/system-stats", verifyToken, authorizeRoles("admin", "superadmin"), async (req, res) => {
   try {
+    // Tenant scoping: a college-scoped admin sees only their own college's metrics/feed.
+    // Problem stays global since it's an intentionally unscoped shared catalog (no
+    // collegeId field at all), same as everywhere else in this codebase. Queue/judge/
+    // infra health below stays global too — that's shared platform infrastructure state,
+    // not any one college's data.
+    const scope = req.user.role === 'superadmin' ? undefined : (req.user.collegeId || undefined);
+    const collegeFilter = scope ? { collegeId: scope } : {};
+
     // 1. Metrics
     const [totalProblems, totalSubmissions, totalAssessments, totalUsers] = await Promise.all([
       Problem.countDocuments(),
-      Submission.countDocuments(),
-      Assessment.countDocuments(),
-      User.countDocuments()
+      Submission.countDocuments(collegeFilter),
+      Assessment.countDocuments(collegeFilter),
+      User.countDocuments(collegeFilter)
     ]);
 
     const startOfDay = new Date();
     startOfDay.setHours(0, 0, 0, 0);
     const submissionsToday = await Submission.countDocuments({
+      ...collegeFilter,
       createdAt: { $gte: startOfDay }
     });
     const acceptedToday = await Submission.countDocuments({
+      ...collegeFilter,
       status: "Success",
       createdAt: { $gte: startOfDay }
     });
@@ -151,7 +203,7 @@ router.get("/system-stats", verifyToken, authorizeRoles("admin", "superadmin"), 
     }
 
     // 5. Recent Submissions Feed
-    const recentSubmissions = await Submission.find()
+    const recentSubmissions = await Submission.find(collegeFilter)
       .sort({ createdAt: -1 })
       .limit(10)
       .populate("problemId", "title")
@@ -182,7 +234,7 @@ import * as submissionsService from "../services/submissions.service.js";
 
 router.post("/rejudge/submission/:submissionId", verifyToken, authorizeRoles("admin", "superadmin", "faculty"), async (req, res) => {
   try {
-    const result = await submissionsService.rejudgeSubmission(req.params.submissionId);
+    const result = await submissionsService.rejudgeSubmission(req.params.submissionId, req.user);
     
     const auditInfo = {
       ip: req.ip || req.headers['x-forwarded-for'] || req.socket.remoteAddress,
@@ -191,6 +243,7 @@ router.post("/rejudge/submission/:submissionId", verifyToken, authorizeRoles("ad
     await auditService.logEvent({
       event: "REJUDGE_SUBMISSION",
       userId: req.user._id,
+      collegeId: req.user.collegeId || undefined,
       details: { submissionId: req.params.submissionId, problemId: result.problemId },
       ...auditInfo
     });
@@ -205,7 +258,7 @@ router.post("/rejudge/submission/:submissionId", verifyToken, authorizeRoles("ad
 router.post("/rejudge/problem/:problemId", verifyToken, authorizeRoles("admin", "superadmin", "faculty"), async (req, res) => {
   try {
     const assessmentId = req.query.assessmentId || null;
-    const result = await submissionsService.rejudgeProblemSubmissions(req.params.problemId, assessmentId);
+    const result = await submissionsService.rejudgeProblemSubmissions(req.params.problemId, assessmentId, req.user);
     
     const auditInfo = {
       ip: req.ip || req.headers['x-forwarded-for'] || req.socket.remoteAddress,
@@ -214,6 +267,7 @@ router.post("/rejudge/problem/:problemId", verifyToken, authorizeRoles("admin", 
     await auditService.logEvent({
       event: "REJUDGE_PROBLEM",
       userId: req.user._id,
+      collegeId: req.user.collegeId || undefined,
       details: { problemId: req.params.problemId, assessmentId },
       ...auditInfo
     });
@@ -227,7 +281,7 @@ router.post("/rejudge/problem/:problemId", verifyToken, authorizeRoles("admin", 
 
 router.post("/rejudge/assessment/:assessmentId", verifyToken, authorizeRoles("admin", "superadmin", "faculty"), async (req, res) => {
   try {
-    const result = await submissionsService.rejudgeAssessmentSubmissions(req.params.assessmentId);
+    const result = await submissionsService.rejudgeAssessmentSubmissions(req.params.assessmentId, req.user);
     
     const auditInfo = {
       ip: req.ip || req.headers['x-forwarded-for'] || req.socket.remoteAddress,
@@ -236,6 +290,7 @@ router.post("/rejudge/assessment/:assessmentId", verifyToken, authorizeRoles("ad
     await auditService.logEvent({
       event: "REJUDGE_ASSESSMENT",
       userId: req.user._id,
+      collegeId: req.user.collegeId || undefined,
       details: { assessmentId: req.params.assessmentId },
       ...auditInfo
     });
@@ -256,6 +311,7 @@ router.post("/banner", verifyToken, authorizeRoles("admin", "superadmin", "facul
     await auditService.logEvent({
       event: "UPDATE_INCIDENT_BANNER",
       userId: req.user._id,
+      collegeId: req.user.collegeId || undefined,
       details: { active, message, type },
       ip: req.ip || req.headers['x-forwarded-for'] || req.socket.remoteAddress,
       userAgent: req.headers['user-agent']

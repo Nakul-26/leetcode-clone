@@ -3,6 +3,7 @@ import * as problemsRepo from "../repositories/problems.repo.js";
 import * as attemptsRepo from "../repositories/assessmentAttempts.repo.js";
 import * as assessmentsRepo from "../repositories/assessments.repo.js";
 import { publishSubmissionMessage } from "./evaluation.service.js";
+import { recalculateAttemptScore } from "./assessments.service.js";
 import { getCacheJSON, setCacheJSON } from "./cache.service.js";
 import { checkCollegeSubmissionQuota, checkStudentSubmissionQuota } from "./quota.service.js";
 import { checkPlanUsageLimit, collegeAllowsPremium } from "./billing.service.js";
@@ -137,6 +138,102 @@ async function validateAssessmentSubmission({ problemId, language, userId, asses
   }
 }
 
+// Shared by the coding/mcq/subjective submit paths below so the attempt-timeline
+// audit log (see AssessmentAttempt.timeline, "Anti-cheating tracking" comment) covers
+// every problem type uniformly, not just coding submissions.
+async function logSubmitProblemEvent(attemptId, problem, submission) {
+  if (!attemptId) return;
+  try {
+    await attemptsRepo.updateById(attemptId, {
+      $push: {
+        timeline: {
+          event: 'SUBMIT_PROBLEM',
+          timestamp: new Date(),
+          details: {
+            problemId: problem._id,
+            problemTitle: problem ? problem.title : 'Unknown Problem',
+            submissionId: submission._id
+          }
+        }
+      }
+    });
+  } catch (err) {
+    console.error("Failed to log submission event to attempt timeline:", err);
+  }
+}
+
+function baseSubmissionFields({ problem, userId, collegeId, assessmentId, attemptId, externalStudentId, externalAssessmentId }) {
+  const data = { problemId: problem._id, userId };
+  if (collegeId) data.collegeId = collegeId;
+  if (assessmentId) data.assessmentId = assessmentId;
+  if (attemptId) data.attemptId = attemptId;
+  if (externalStudentId) data.externalStudentId = externalStudentId;
+  if (externalAssessmentId) data.externalAssessmentId = externalAssessmentId;
+  return data;
+}
+
+// Correct iff the submitted selection set exactly equals the set of isCorrect option
+// indexes — a single wrong or missing pick on a multi-select MCQ fails the whole
+// question, same all-or-nothing shape as a coding submission's test cases.
+function isMcqSelectionCorrect(problem, selectedOptions) {
+  const options = Array.isArray(problem.options) ? problem.options : [];
+  const correctIndexes = new Set(
+    options.map((o, i) => (o.isCorrect ? i : null)).filter((i) => i !== null)
+  );
+  const selected = new Set((selectedOptions || []).map(Number));
+  return selected.size === correctIndexes.size && [...selected].every((i) => correctIndexes.has(i));
+}
+
+async function submitMcqAnswer({ problem, selectedOptions, ...rest }) {
+  const options = Array.isArray(problem.options) ? problem.options : [];
+  if (!Array.isArray(selectedOptions) || selectedOptions.length === 0) {
+    throw new HttpError(400, "selectedOptions is required for MCQ problems");
+  }
+  if (selectedOptions.some((i) => !Number.isInteger(i) || i < 0 || i >= options.length)) {
+    throw new HttpError(400, "selectedOptions contains an invalid option index");
+  }
+  if (!problem.allowMultipleAnswers && selectedOptions.length > 1) {
+    throw new HttpError(400, "Only one option may be selected for this problem");
+  }
+
+  const isCorrect = isMcqSelectionCorrect(problem, selectedOptions);
+  const submission = await submissionsRepo.create({
+    ...baseSubmissionFields({ problem, ...rest }),
+    selectedOptions,
+    status: isCorrect ? "Success" : "Fail",
+    score: isCorrect ? 100 : 0
+  });
+
+  await logSubmitProblemEvent(rest.attemptId, problem, submission);
+  return { submission };
+}
+
+async function submitSubjectiveAnswer({ problem, answerText, ...rest }) {
+  if (typeof answerText !== "string" || !answerText.trim()) {
+    throw new HttpError(400, "answerText is required for subjective problems");
+  }
+  if (problem.maxWords) {
+    const wordCount = answerText.trim().split(/\s+/).length;
+    if (wordCount > problem.maxWords) {
+      throw new HttpError(400, `Answer exceeds the ${problem.maxWords}-word limit`, {
+        msg: `Answer exceeds the ${problem.maxWords}-word limit (${wordCount} words submitted).`
+      });
+    }
+  }
+
+  // Ungraded until a faculty/admin calls gradeSubjectiveSubmission below — score
+  // stays 0 and contributes nothing to the attempt total until then.
+  const submission = await submissionsRepo.create({
+    ...baseSubmissionFields({ problem, ...rest }),
+    answerText,
+    status: "PendingReview",
+    score: 0
+  });
+
+  await logSubmitProblemEvent(rest.attemptId, problem, submission);
+  return { submission };
+}
+
 function parseOutputJSON(output) {
   if (!output || typeof output !== "string") return null;
   try {
@@ -214,7 +311,7 @@ export function sanitizeSubmissionForStudent(submission, problem) {
   return normalized;
 }
 
-export async function submitSolution({ problemId, code, language, userId, collegeId = null, assessmentId = null, attemptId = null, requestId = null, externalStudentId = null, externalAssessmentId = null }) {
+export async function submitSolution({ problemId, code, language, selectedOptions = null, answerText = null, userId, collegeId = null, assessmentId = null, attemptId = null, requestId = null, externalStudentId = null, externalAssessmentId = null }) {
   await validateAssessmentSubmission({ problemId, language, userId, assessmentId, attemptId });
 
   // Checked before any submission record is created so a rejected request never
@@ -259,6 +356,23 @@ export async function submitSolution({ problemId, code, language, userId, colleg
     });
   }
 
+  const problemType = problem.problemType || "function";
+  const passthrough = { userId, collegeId, assessmentId, attemptId, externalStudentId, externalAssessmentId };
+
+  // mcq/subjective never reach judge-service-go — graded (or queued for manual
+  // grading) entirely within assessment-api. See submitMcqAnswer/
+  // submitSubjectiveAnswer above.
+  if (problemType === "mcq") {
+    return submitMcqAnswer({ problem, selectedOptions, ...passthrough });
+  }
+  if (problemType === "subjective") {
+    return submitSubjectiveAnswer({ problem, answerText, ...passthrough });
+  }
+
+  if (typeof code !== "string" || !code.trim() || typeof language !== "string" || !language.trim()) {
+    throw new HttpError(400, "code and language are required for this problem");
+  }
+
   const submissionData = {
     problemId,
     code,
@@ -275,25 +389,7 @@ export async function submitSolution({ problemId, code, language, userId, colleg
 
   const submission = await submissionsRepo.create(submissionData);
 
-  if (attemptId) {
-    try {
-      await attemptsRepo.updateById(attemptId, {
-        $push: {
-          timeline: {
-            event: 'SUBMIT_PROBLEM',
-            timestamp: new Date(),
-            details: {
-              problemId,
-              problemTitle: problem ? problem.title : 'Unknown Problem',
-              submissionId: submission._id
-            }
-          }
-        }
-      });
-    } catch (err) {
-      console.error("Failed to log submission event to attempt timeline:", err);
-    }
-  }
+  await logSubmitProblemEvent(attemptId, problem, submission);
 
   const messageBody = buildJudgeMessageBody({
     submissionId: submission._id.toString(),
@@ -458,8 +554,17 @@ export async function getMyAnalytics(userId) {
 
 import Submission from "../../models/Submission.mjs";
 
-export async function rejudgeSubmission(submissionId) {
-  const submission = await submissionsRepo.findById(submissionId);
+// superadmin operates across colleges; everyone else is scoped to their own. Mirrors
+// assessments.service.js's collegeScopeFor exactly. `user` is optional here so existing
+// non-HTTP callers (tests, internal jobs) keep working unscoped — only the admin routes
+// pass a real requesting user.
+function collegeScopeFor(user) {
+  if (!user || user.role === 'superadmin') return undefined;
+  return user.collegeId || undefined;
+}
+
+export async function rejudgeSubmission(submissionId, user) {
+  const submission = await submissionsRepo.findById(submissionId, collegeScopeFor(user));
   if (!submission) {
     throw new HttpError(404, "Submission not found");
   }
@@ -467,6 +572,14 @@ export async function rejudgeSubmission(submissionId) {
   const problem = await problemsRepo.findById(submission.problemId);
   if (!problem) {
     throw new HttpError(404, "Problem not found for this submission");
+  }
+
+  // mcq is auto-graded deterministically (nothing for a judge to re-run) and
+  // subjective is manually graded (see gradeSubjectiveSubmission) — "rejudge" only
+  // makes sense for the two judge-executed problem types.
+  const rejudgeType = problem.problemType || "function";
+  if (rejudgeType === "mcq" || rejudgeType === "subjective") {
+    throw new HttpError(400, `Cannot rejudge a ${rejudgeType} submission — it is not judge-executed`);
   }
 
   // Reset status, score, output
@@ -492,7 +605,7 @@ export async function rejudgeSubmission(submissionId) {
   return submission;
 }
 
-export async function rejudgeProblemSubmissions(problemId, assessmentId = null) {
+export async function rejudgeProblemSubmissions(problemId, assessmentId = null, user) {
   const problem = await problemsRepo.findById(problemId);
   if (!problem) {
     throw new HttpError(404, "Problem not found");
@@ -501,6 +614,21 @@ export async function rejudgeProblemSubmissions(problemId, assessmentId = null) 
   const filter = { problemId };
   if (assessmentId) {
     filter.assessmentId = assessmentId;
+  }
+  // Problem itself is a shared, unscoped catalog entry (no collegeId), but its
+  // submissions are per-college — scope the rejudge to the caller's own college so an
+  // admin/faculty can't requeue (and burn judge compute on) another college's attempts.
+  const scope = collegeScopeFor(user);
+  if (scope) {
+    filter.collegeId = scope;
+  }
+
+  // Guard mirrors rejudgeSubmission above — never applies to this loop in practice
+  // since mcq/subjective problems have no test cases to rejudge against, kept here
+  // as a defensive no-op in case that ever changes.
+  const rejudgeType = problem.problemType || "function";
+  if (rejudgeType === "mcq" || rejudgeType === "subjective") {
+    return { count: 0 };
   }
 
   const submissions = await Submission.find(filter);
@@ -525,8 +653,8 @@ export async function rejudgeProblemSubmissions(problemId, assessmentId = null) 
   return { count: submissions.length };
 }
 
-export async function rejudgeAssessmentSubmissions(assessmentId) {
-  const assessment = await assessmentsRepo.findById(assessmentId);
+export async function rejudgeAssessmentSubmissions(assessmentId, user) {
+  const assessment = await assessmentsRepo.findById(assessmentId, collegeScopeFor(user));
   if (!assessment) {
     throw new HttpError(404, "Assessment not found");
   }
@@ -542,6 +670,11 @@ export async function rejudgeAssessmentSubmissions(assessmentId) {
 
     const problem = problemsCache[pId];
     if (!problem) continue;
+
+    // See rejudgeSubmission's guard above — skip mcq/subjective entries in a mixed
+    // assessment, only judge-executed submissions get requeued.
+    const rejudgeType = problem.problemType || "function";
+    if (rejudgeType === "mcq" || rejudgeType === "subjective") continue;
 
     submission.status = "Pending";
     submission.score = 0;
@@ -560,4 +693,88 @@ export async function rejudgeAssessmentSubmissions(assessmentId) {
   }
 
   return { count: submissions.length };
+}
+
+function isPrivilegedGrader(role) {
+  return role === "admin" || role === "faculty" || role === "superadmin";
+}
+
+// Faculty-facing grading queue: every subjective submission in an assessment still
+// awaiting manual grading, for the "Grade subjective answers" page.
+export async function listUngradedSubjectiveSubmissions(assessmentId, user) {
+  if (!isPrivilegedGrader(user?.role)) {
+    throw new HttpError(403, "Forbidden");
+  }
+
+  const assessment = await assessmentsRepo.findById(assessmentId);
+  if (!assessment) {
+    throw new HttpError(404, "Assessment not found");
+  }
+  if (user.role !== "superadmin" && assessment.collegeId && String(assessment.collegeId) !== String(user.collegeId)) {
+    throw new HttpError(404, "Assessment not found");
+  }
+
+  const submissions = await Submission.find({ assessmentId, status: "PendingReview" })
+    .populate("problemId", "title maxWords rubricNotes")
+    .populate("userId", "name email usn")
+    .sort({ createdAt: 1 });
+
+  return submissions;
+}
+
+// Manual grading for a single subjective submission — the only way its status ever
+// leaves "PendingReview". Re-grading an already-"Graded" submission is allowed (a
+// faculty correction), everything else must go through this once first.
+export async function gradeSubjectiveSubmission(submissionId, { score, feedback = "" }, grader) {
+  if (!isPrivilegedGrader(grader?.role)) {
+    throw new HttpError(403, "Forbidden");
+  }
+
+  const submission = await submissionsRepo.findById(submissionId);
+  if (!submission) {
+    throw new HttpError(404, "Submission not found");
+  }
+  if (grader.role !== "superadmin" && submission.collegeId && String(submission.collegeId) !== String(grader.collegeId)) {
+    throw new HttpError(404, "Submission not found");
+  }
+  if (submission.status !== "PendingReview" && submission.status !== "Graded") {
+    throw new HttpError(409, `Submission is ${submission.status.toLowerCase()} and cannot be graded`);
+  }
+
+  const problem = await problemsRepo.findById(submission.problemId);
+  if (!problem || (problem.problemType || "function") !== "subjective") {
+    throw new HttpError(400, "Submission is not for a subjective problem");
+  }
+
+  const numericScore = Number(score);
+  if (!Number.isFinite(numericScore) || numericScore < 0) {
+    throw new HttpError(400, "score must be a non-negative number");
+  }
+
+  // Cap to the problem's configured maxScore within this assessment, when known —
+  // a practice-mode (no assessmentId) subjective submission has no assessment
+  // problem entry to cap against, so any non-negative score is accepted there.
+  if (submission.assessmentId) {
+    const assessment = await assessmentsRepo.findById(submission.assessmentId);
+    const entry = assessment?.problems?.find(
+      (p) => String(p.problemId?._id || p.problemId) === String(submission.problemId)
+    );
+    if (entry && numericScore > entry.maxScore) {
+      throw new HttpError(400, `score cannot exceed this problem's max score of ${entry.maxScore}`);
+    }
+  }
+
+  const updated = await submissionsRepo.updateById(submissionId, {
+    status: "Graded",
+    score: numericScore,
+    feedback,
+    gradedBy: grader._id,
+    gradedAt: new Date()
+  });
+
+  if (submission.attemptId) {
+    await recalculateAttemptScore(submission.attemptId);
+  }
+
+  return updated;
 }
