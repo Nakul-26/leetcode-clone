@@ -1,0 +1,23 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(go test *)",
+      "Bash(go build *)",
+      "Bash(go vet *)",
+      "Bash(docker cp *)",
+      "Bash(docker exec *)",
+      "Bash(docker inspect *)",
+      "Bash(docker network inspect *)",
+      "Bash(docker compose *)",
+      "Bash(git commit *)",
+      "Bash(npm --version)",
+      "Bash(node --check src/services/submissions.service.js)",
+      "Bash(npx vitest *)",
+      "Bash(curl *)",
+      "Bash(node *)",
+      "Bash(git tag *)",
+      "Bash(xargs -r docker rmi)",
+      "Bash(docker system *)"
+    ]
+  }
+}
