@@ -159,8 +159,18 @@ services:
       dockerfile: assessment-api/Dockerfile
     restart: unless-stopped
     command: npm start    # runs: node src/server.js  (confirmed in package.json)
+    # Host port is overridable because more than one stack is built from this same file
+    # on the same host. Two of them cannot both publish 5000: the second to start fails
+    # with "Bind for :::5000 failed: port is already allocated" and its assessment-api
+    # never comes up, while every other service does — a half-broken deploy that still
+    # looks healthy because the judge itself is fine on 8081.
+    #
+    # The default stays 5000 so existing deploys are completely unaffected. A second
+    # stack sets API_HOST_PORT to something free (e.g. 5001) in its own Dokploy
+    # environment. Traefik routes each domain to container port 5000 over the compose
+    # network either way, so this only affects direct host access.
     ports:
-      - "5000:5000"
+      - "${API_HOST_PORT:-5000}:5000"
     environment:
       NODE_ENV: production
       PORT: "5000"
