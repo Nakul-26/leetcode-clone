@@ -99,10 +99,31 @@ a local `assessment-api`), then walk through both bullets above in a real browse
   (e.g. `1`) — reloading the workspace should show the dismissible "Draft conflict" warning
   banner. Unverified here since it needs a live attempt + browser DevTools.
 
-## 5. judge-service-go compile-command dedup and dead-code removal — no Go toolchain here
+## 5. judge-service-go compile-command dedup and dead-code removal — VERIFIED 2026-09-25
 
-This environment has no Go toolchain at all (`go`/`gofmt` not found), so `judge-service-go`'s
-changes from the Medium-findings cleanup pass were reviewed by hand only, not built or tested:
+**Update 2026-09-25: this section's premise is no longer true and its checklist is now done.**
+The local Windows environment now has Go (`go1.26.5`) and Docker (`29.5.3`) available, so the
+changes below — hand-reviewed only since the Medium-findings pass — were finally built and
+tested for real. Results: `go build ./...` clean, `go vet ./...` clean, `go test ./...` passing,
+and `go test -tags integration -run Go` passing all 7 real container-spawning Go tests
+(Primitive/Array/LinkedList/Tree/CompileError/RuntimeError/Timeout), which is the specific
+`go_integration_test.go` coverage this section asked for. The offline-build env vars
+(`GOPROXY=off` etc.) work in a real network-disabled sandbox. The Python, JavaScript and Java
+integration suites pass too. **Do not assume "no Go toolchain" in this repo again without checking
+`go version` first** — that stale assumption was carried in notes and memory for ~2 months.
+
+Two caveats on what "passing" means here:
+- `pkg/workspace` has 2 pre-existing failures on Windows (`TestWriteFileRejectsSymlink`,
+  `TestValidateNoExternalSymlinksRejectsAbsoluteTarget`) — they fail in *setup*, not on an
+  assertion: creating a symlink needs Administrator or Developer Mode on Windows. Verified
+  identical on a clean checkout, so not a regression. They pass in CI/Linux.
+- `gofmt -l main.go` flags the file, but for two pre-existing reasons unrelated to any recent
+  change: the file is CRLF, and the autoscaling const block (`defaultPoolGlobalCap` ...
+  `defaultScaleDownCooldown`) is over-aligned by 2 spaces. Left alone deliberately — running
+  `gofmt -w` would rewrite every line of a 1800-line file as a line-ending flip and bury real
+  diffs. Worth doing as its own isolated commit if ever desired.
+
+The changes this section originally covered, all now verified:
 
 - `pkg/languages/languages.go`: Go's `CompileCmd` now includes the offline-safe env vars
   (`GOFLAGS=-mod=mod GOPROXY=off GOSUMDB=off GO111MODULE=on GOTOOLCHAIN=local`) that were
@@ -120,12 +141,37 @@ changes from the Medium-findings cleanup pass were reviewed by hand only, not bu
   `strconv.Atoi` instead of `fmt.Sscanf(val, "%d", &target)` (Low finding, pure code-quality —
   behavior is equivalent, `strconv` added to the import block).
 
-**To check in Codespace/locally**: `go build ./...` and `go vet ./...` in `judge-service-go/`
-to confirm everything still compiles, then run `go test ./...` (includes real
-container-spawning integration tests per language, per the C6 notes above) — pay particular
-attention to `go_integration_test.go` (the compile-command change) and, if the
-`JUDGE_CENTRAL_COMPARE_JAVA` env var is ever actually exercised in that environment,
-`java_integration_test.go` with it set to `false`.
+**Status of the original checklist: fully closed (2026-09-25).** Everything it asked for has
+now been run — `go build`, `go vet`, `go test`, `go test -tags integration` for Go, Python, JS and
+Java, plus the `JUDGE_CENTRAL_COMPARE_JAVA=false` case. Three traps worth knowing for next time:
+
+1. **Integration tests are gated behind `//go:build integration`**, so a plain `go test ./...`
+   silently does not run them. You need `-tags integration` *and* the `judge-<lang>-env` image
+   built locally, or each test `t.Skipf`s itself as "container warm-up failed" — which reads
+   like a pass in summary output. Always grep the output for `SKIP`.
+2. **Go caches test results, and an env var in front of the command does not always bust that
+   cache.** Running `JUDGE_CENTRAL_COMPARE_JAVA=false go test -tags integration -run Java` came
+   back `ok (cached)` with timings identical to the previous unset run — i.e. it never actually
+   ran. Always add `-count=1` when the thing under test is an env var.
+3. **`JUDGE_CENTRAL_COMPARE_*` does not reach the integration tests at all.** They call the
+   adapters directly via `setupIntegration`, so they enter below `main.go`'s
+   `isCentralCompareEnabled` check (`main.go:1084`/`1324`). Setting the killswitch and re-running
+   them proves nothing about the killswitch path, which is why that path needed a unit test
+   instead — see below.
+
+**The `pkg/wrapper/generator.go` dead-branch removal is now covered** by
+`judge-service-go/wrapper_java_fallback_test.go` (plain unit test, no build tag, no Docker). It
+flips the killswitch, calls `wrapper.GenerateWrapper` for Java on the fallback path that
+`main.go:321` uses, and asserts the template comes back with `{{FUNCTION_NAME}}` substituted and
+no error. Confirmed non-vacuous by mutation: breaking the substitution in `generator.go` makes
+both assertions fail. This matters because Java reaches `GenerateWrapper` *only* via that
+killswitch — the live path is `JavaAdapter`, which never calls it — so the fallback was
+previously reachable-but-untested code.
+
+Confirmed while writing it: `java_single_wrapper.tpl` (Java's actual `WrapperTemplate`) contains
+exactly two `{{FUNCTION_NAME}}` markers and no other `{{...}}` markers, which is why the generic
+string-replacement path is correct for it and why the removed `text/template` branch could never
+have parsed it. The removal was right.
 
 ## 6. Backend lint cleanup — `problemDifficultyStats` fix has no test coverage
 

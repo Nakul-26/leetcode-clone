@@ -200,6 +200,27 @@ credentials. Needs to run before/at any second-customer cutover (see the C2 tena
 fix). Confirm it's safe to re-run if it's ever unclear whether it already ran, then run it
 for real once you have DB access to prod (or its staging equivalent).
 
+## 5a. Check whether `MONGO_DB_NAME` is set in Dokploy (bug fixed 2026-09-25)
+
+`judge-service-go` never read `MONGO_DB_NAME` — it hardcoded `.Database("assessment_db")` at
+three call sites (`problems`, `submissions`, `usageevents`), even though **both** compose files
+pass the var to it (`docker-compose.prod.yml` line 295). `assessment-api` *does* honour it
+(`src/config/env.js` → `src/config/db.js`). Fixed 2026-09-25: the Go service now reads the env
+var with the same `assessment_db` default, so the two services agree.
+
+**What you need to check**: if `MONGO_DB_NAME` is set to anything *other than* `assessment_db`
+in your Dokploy environment, then before this fix the API and the judge were reading and
+writing **two different databases**. Symptom would be submissions stuck in `pending` forever
+(the API enqueues them, the judge writes results to the wrong DB, the API never sees them),
+plus wrong `usageevents` metering and unincremented problem counters.
+
+- If it is unset or set to `assessment_db` — nothing was ever broken, no data action needed.
+  This fix is purely preventative.
+- If it is set to something else — the judge has been writing to `assessment_db` while the API
+  used your value. Check both databases for stranded `submissions`/`usageevents` documents
+  before redeploying, since the fix will move the judge onto your DB and stop writing to the
+  old one. Billing/metering figures from that period would be understated.
+
 ## 6. Priority 3 (lower priority, deprioritized by design)
 
 Untouched, no action needed yet: H3 integration-route auth scoping, IDE run/submit logic

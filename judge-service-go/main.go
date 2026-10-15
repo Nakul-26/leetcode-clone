@@ -42,6 +42,7 @@ const (
 	defaultRabbitMQURL      = "amqp://user:password@rabbitmq:5672"
 	defaultSubmissionQueue  = "submission_queue"
 	defaultMongoURI         = "mongodb://mongo:27017/assessment_db"
+	defaultMongoDBName      = "assessment_db"
 	defaultRedisURI         = "redis://redis:6379"
 	defaultSandboxTimeout   = 10 * time.Second
 	centralComparePythonEnv = "JUDGE_CENTRAL_COMPARE_PY"
@@ -1423,6 +1424,13 @@ func main() {
 	if mongoURI == "" {
 		mongoURI = defaultMongoURI
 	}
+	// Must agree with assessment-api's env.MONGO_DB_NAME (config/env.js), which defaults
+	// the same way — the two services share these collections, so a mismatch silently
+	// splits them onto separate databases and leaves submissions stuck pending.
+	mongoDBName := os.Getenv("MONGO_DB_NAME")
+	if mongoDBName == "" {
+		mongoDBName = defaultMongoDBName
+	}
 	redisURI := os.Getenv("REDIS_URI")
 	if redisURI == "" {
 		redisURI = defaultRedisURI
@@ -1545,12 +1553,12 @@ func main() {
 		}
 	}()
 
-	problemsCollection := mongoClient.Database("assessment_db").Collection("problems")
-	submissionsCollection := mongoClient.Database("assessment_db").Collection("submissions")
+	problemsCollection := mongoClient.Database(mongoDBName).Collection("problems")
+	submissionsCollection := mongoClient.Database(mongoDBName).Collection("submissions")
 	// Collection name matches the default Mongoose pluralization of the "UsageEvent"
 	// model in assessment-api/models/UsageEvent.mjs, so both sides agree on it without
 	// either one owning the write path exclusively.
-	usageEventsCollection := mongoClient.Database("assessment_db").Collection("usageevents")
+	usageEventsCollection := mongoClient.Database(mongoDBName).Collection("usageevents")
 
 	// Start Health/Stats/Run Server
 	healthPort := os.Getenv("HEALTH_PORT")
