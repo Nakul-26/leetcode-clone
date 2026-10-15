@@ -200,13 +200,18 @@ credentials. Needs to run before/at any second-customer cutover (see the C2 tena
 fix). Confirm it's safe to re-run if it's ever unclear whether it already ran, then run it
 for real once you have DB access to prod (or its staging equivalent).
 
-## 5a. Check whether `MONGO_DB_NAME` is set in Dokploy (bug fixed 2026-09-25)
+## 5a. `MONGO_DB_NAME` in Dokploy — RESOLVED 2026-10-15, no action needed
 
 `judge-service-go` never read `MONGO_DB_NAME` — it hardcoded `.Database("assessment_db")` at
 three call sites (`problems`, `submissions`, `usageevents`), even though **both** compose files
-pass the var to it (`docker-compose.prod.yml` line 295). `assessment-api` *does* honour it
+pass the var to it (`docker-compose.prod.yml`, the judge-service-go env block). `assessment-api` *does* honour it
 (`src/config/env.js` → `src/config/db.js`). Fixed 2026-09-25: the Go service now reads the env
 var with the same `assessment_db` default, so the two services agree.
+
+**Checked 2026-10-15 in Dokploy (GO Judge -> Environment): `MONGO_DB_NAME` is not set.**
+Both services therefore fell back to `assessment_db` and always agreed, so nothing was ever
+broken in production by this bug and no data migration is needed. The fix is purely
+preventative, guarding against someone setting that var later. Original write-up kept below.
 
 **What you need to check**: if `MONGO_DB_NAME` is set to anything *other than* `assessment_db`
 in your Dokploy environment, then before this fix the API and the judge were reading and
@@ -220,6 +225,59 @@ plus wrong `usageevents` metering and unincremented problem counters.
   used your value. Check both databases for stranded `submissions`/`usageevents` documents
   before redeploying, since the fix will move the judge onto your DB and stop writing to the
   old one. Billing/metering figures from that period would be understated.
+
+## 5b. Redeploy GO Judge — its deploy has been failing since 2026-09-30 (port 5000 clash)
+
+**Found 2026-10-15.** The GO Judge compose in Dokploy (`exam-portal` project) last deployed
+successfully about two months ago. Its most recent deployment, commit `ebd83c5` (current
+`main`), **errored** and has stayed broken since. Everything built and started — mongo, redis,
+rabbitmq, docker-socket-proxy, judge-service-go and all eleven `judge-*-env` language
+containers — and then:
+
+```
+Bind for :::5000 failed: port is already allocated
+```
+
+Cause: a second service on the same host, `Exam Sandbox` (`examportal-exam-sandbox-*`), is a
+full duplicate of this same stack built from `leetcode-clone main`, so it inherited the
+hardcoded `ports: - "5000:5000"` that `docker-compose.prod.yml` used to declare. It has held
+host port 5000 for days, so our `assessment-api` can never bind it. Every other container in
+our stack is up and healthy; `assessment-api` is the only one missing, which is why the
+service shows red while the judge itself answers fine on 8081.
+
+**Fixed in the compose file** (2026-10-16): the host port is now
+`"${API_HOST_PORT:-5000}:5000"`. **The default is still 5000, so Exam Sandbox and any other
+existing deploy are byte-for-byte unaffected** — only a stack that explicitly sets
+`API_HOST_PORT` changes. Verified with `docker compose config` both ways: unset renders
+`published: "5000"`, `API_HOST_PORT=5001` renders `published: "5001"`, and the container
+target stays 5000 in both, so Traefik routing never changes.
+
+An earlier attempt simply deleted the publish. That was rejected as unsafe: Exam Sandbox has
+**no Dokploy domain**, so Traefik does not route to it, yet it is healthy and publishing 5000 —
+meaning host port 5000 is plausibly the only way anything reaches it. Deleting the publish
+would land on its deploy too (see the shared-autodeploy warning below) and could take it down.
+
+**Your action, in this order:**
+1. In Dokploy, GO Judge -> Environment, add `API_HOST_PORT=5001` (or any free port). Do this
+   **before** the code reaches `main`, otherwise GO Judge still defaults to 5000 and the
+   deploy fails exactly as before.
+2. Get this commit onto `main`.
+3. Confirm afterwards that `examportal-go-judge-*-assessment-api-1` exists and is healthy
+   (Docker tab, filter `go-judge`). Its absence is the signature of this bug.
+
+**WARNING — a push to `main` redeploys TWO stacks, one of them not yours.** GO Judge *and*
+Exam Sandbox both have Autodeploy ON, both pointed at the **same repo, same `main` branch, and
+the same `./docker-compose.prod.yml`**. Any push to `main` therefore rebuilds and restarts the
+friend's production stack as well as ours. The port change itself is a no-op for them, but the
+restart is not. **Do not push to `main` near an exam window** — exams are run on that platform.
+Co-ordinate the timing with the friend first.
+**Also worth settling while you are in there**: GO Judge publishes the domain
+`coding2.fortifyhub.net`, but this repo and `docs/` only ever reference
+`coding.fortifyhub.net` — the host the Judge0/Arventiq partner integrations actually call.
+Both answer `200` healthy right now even though our `assessment-api` is not running, so
+something other than our stack is serving at least one of them. The two stacks have separate
+MongoDB instances, so if partner traffic is landing on the sandbox stack it is reading and
+writing the wrong database. Worth confirming which service owns each hostname.
 
 ## 6. Priority 3 (lower priority, deprioritized by design)
 
