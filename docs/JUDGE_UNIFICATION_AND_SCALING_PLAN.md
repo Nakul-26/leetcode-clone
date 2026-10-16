@@ -1,6 +1,6 @@
 # Judge Unification and Scaling Plan
 
-**Status:** proposed, not started. Written 2026-10-16.
+**Status:** Phases 0-2 built and verified locally, nothing deployed. Written 2026-10-16.
 **Goal:** one execution pipeline behind every API surface, with per-client identity,
 metering and burst handling, supporting both LeetCode-style (`function`) and
 stdin/stdout (`stdin`) problems — so the judge can be sold as a service.
@@ -13,7 +13,7 @@ There are two execution paths, and they share almost nothing.
 
 | | Queue path | Shim path (`/raw-run`) |
 |---|---|---|
-| Entry points | frontend, `/integration/submissions`, `/arventiq/submissions` | `/api/codeAssess/*` (Judge0-compatible) |
+| Entry points | frontend, `/integration/submissions`, `/arventiq/submissions` | `/api/codeAssess/*` (GO Judge public API) |
 | Transport | RabbitMQ | direct synchronous HTTP |
 | Problem model | yes (`function` or `stdin`) | none — raw source + one stdin |
 | Test cases | N per submission, judged internally | 1 per call, **caller-driven** |
@@ -57,7 +57,7 @@ Consequences, all of which block selling this:
 ### 1.3 The efficiency problem: one compile per test case
 
 `/raw-run` accepts a single `stdin` per call and has no concept of a test case. With the
-Judge0 shim, the *caller* loops the test cases. A 6-test Java problem therefore costs:
+GO Judge shim, the *caller* loops the test cases. A 6-test Java problem therefore costs:
 
 | Path | Compiles | JVM starts |
 |---|---|---|
@@ -75,7 +75,7 @@ done six times. This dwarfs every other tuning knob.
 One pipeline. Every surface becomes a thin adapter in front of it.
 
 ```
-  frontend          /integration/*        /arventiq/*        /codeAssess/*  (Judge0)
+  frontend          /integration/*        /arventiq/*        /codeAssess/*  (GO Judge)
       |                   |                    |                   |
       +-------------------+--------------------+-------------------+
                                    |
@@ -95,7 +95,7 @@ One pipeline. Every surface becomes a thin adapter in front of it.
                         (submissions, problem counters, usageevents)
 ```
 
-Key idea: **a raw Judge0 execution is just a `stdin` problem with one test case and no
+Key idea: **a raw GO Judge execution is just a `stdin` problem with one test case and no
 expected output.** It needs no new execution machinery — only a way to express "this
 submission has inline tests and no stored problem".
 
@@ -183,15 +183,15 @@ This is the unification itself.
    carries `Tests []TestCase`, so this is a small, contained change — roughly 15 lines
    — and everything downstream (strategy dispatch, batching, persistence, metering)
    then works unchanged.
-3. **Real Judge0 tokens.** Today the shim returns a fabricated
+3. **Real tokens.** Today the shim returns a fabricated
    `` `sync-${Date.now()}` `` and its GET always 404s. Make the token the submission id,
-   and make `GET /submissions/:token` return the real status mapped to Judge0's shape.
-   This is *more* Judge0-compatible than today, not less.
+   and make `GET /submissions/:token` return the real status mapped to GO Judge's shape.
+   This is *more* GO Judge public API than today, not less.
 4. **Keep `wait=true` working.** Existing callers (including the friend's platform)
    expect a synchronous response. Enqueue, then wait on the result with a bounded
    timeout (Redis pub/sub on submission completion, or poll Mongo). On timeout, return
    the token with a `Processing` status so the caller can poll — which is exactly
-   Judge0's own documented behaviour.
+   GO Judge's own documented behaviour.
 5. **Protect interactive latency.** Adding a queue hop helps bursts but can hurt p50
    under light load. Use a RabbitMQ priority queue (or a second `submission_queue_fast`)
    so `wait=true` requests are served ahead of bulk/async work.
@@ -199,11 +199,40 @@ This is the unification itself.
 After this phase: the shim gets retry, DLQ, persistence, metering, batching and
 concurrency control for free, because it is no longer a separate path.
 
-### Phase 3 — Judge0 batch endpoint with same-source coalescing
+### Phase 2 result (built and measured locally, 2026-10-16)
+
+Implemented for **keyed** clients; shared-secret callers deliberately keep the synchronous path.
+
+Measured against the local stack, with the harness in `scripts/judge_contract_check.mjs`:
+
+| Check | Result |
+|---|---|
+| Contract: 21 fixtures, shared secret | 0 differences |
+| Contract: 21 fixtures, keyed (queue) | 0 differences, after the fixes below |
+| Latency, Java, alternating runs, no other load | p50 2.10-2.20s keyed vs 2.12-2.14s legacy: no measurable queue-hop cost |
+| Keyed request behind a 60-job bulk backlog, first design | **failed**: still "In Queue" at the 25s cap |
+| Same probe after dedicated workers + container reserve | 3.1-3.4s over four runs, vs 1.8s with empty queues |
+
+Two defects were found only by running the real stack, not by unit tests:
+
+1. **Source corruption.** The stdin runner's `UnescapeCode` turned every `
+` in a string literal
+   into a real newline, breaking 6 of 21 fixtures. Fixed for ad-hoc submissions; the stored-problem
+   stdin path is unchanged and is flagged in `FRIEND_PORTAL_CHANGES.md` section 7.
+2. **Priority did not work.** Reading the fast queue first changes nothing when every worker is blocked
+   waiting for a container, because Go wakes blocked receivers in FIFO order. Fixed with dedicated
+   interactive workers (`JUDGE_INTERACTIVE_WORKERS`) and `pool.AcquireBulk`, which leaves
+   `JUDGE_INTERACTIVE_RESERVE` idle containers per language for interactive callers.
+
+The remaining wait (about one in-flight submission) is a floor: nothing here preempts a running container.
+
+What the exam portal may need to change is in `docs/FRIEND_PORTAL_CHANGES.md`.
+
+### Phase 3 — GO Judge batch endpoint with same-source coalescing
 
 This is where the 5-6x C++/Java win is actually captured.
 
-1. Implement `POST /submissions/batch`, which real Judge0 CE already defines — so this
+1. Implement `POST /submissions/batch`, a standard batch shape — so this
    is wire-compatible and callers like `judge.js` can adopt it without inventing
    anything custom.
 2. **Coalesce**: group the incoming array by `(language, source_code)`. Each group
@@ -238,7 +267,7 @@ and may remove the need entirely for current load.
 
 ## 4. Compatibility constraints
 
-- **Do not break the Judge0 wire format.** The shim exists so an external platform can
+- **Do not break the GO Judge wire format.** The shim exists so an external platform can
   point `JUDGE_URL` at us with no code change. Request/response shapes, base64 handling
   and status codes must stay as they are. Phases 2-3 only *add* correct behaviour
   (real tokens, working GET, a batch endpoint).

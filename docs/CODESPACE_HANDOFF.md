@@ -156,7 +156,7 @@ and pre-date this fix. Not investigated further here; folds into Priority 1 item
 ### How to test
 
 **Route renamed** — `/api/judge0/*` is now `/api/codeAssess/*` (branding: avoid exposing that
-this shim speaks Judge0's wire format). The header name (`x-rapidapi-key`) is unchanged — it's
+this shim speaks GO Judge's wire format). The header name (`x-rapidapi-key`) is unchanged — it's
 hardcoded in the exam-platform's own `judge.js`, not something this repo controls.
 
 ```

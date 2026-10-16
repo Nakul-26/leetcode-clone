@@ -8,7 +8,7 @@
 
 | File | What it captures |
 |---|---|
-| [`01-original-plan-raw.md`](./history/01-original-plan-raw.md) | First rough plan — assumed a Judge0-mimicry adapter |
+| [`01-original-plan-raw.md`](./history/01-original-plan-raw.md) | First rough plan — assumed a GO Judge-mimicry adapter |
 | [`02-coding-platform-draft-notes.md`](./history/02-coding-platform-draft-notes.md) | Reframed as "coding platform = execution engine"; doc-split proposed |
 | [`03-plan-review-discussion.md`](./history/03-plan-review-discussion.md) | Codebase-grounded gap review; surfaced the problem-model question |
 | [`04-arventiq-real-schema-and-payload.md`](./history/04-arventiq-real-schema-and-payload.md) | Real Arventiq schema + sample payload — confirmed stdin/stdout, not function-signature |

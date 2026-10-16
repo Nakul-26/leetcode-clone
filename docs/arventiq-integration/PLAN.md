@@ -5,7 +5,7 @@
 **Status:** architecture stabilized (language × execution-strategy split, stdin/stdout confirmed as required, phased rollout agreed). Ready to move into low-level design / per-file implementation tasks.
 
 **History:** the full discussion that produced this document is preserved, in order, in [`history/`](./history/):
-1. [`01-original-plan-raw.md`](./history/01-original-plan-raw.md) — first rough plan (assumed a Judge0-mimicry adapter)
+1. [`01-original-plan-raw.md`](./history/01-original-plan-raw.md) — first rough plan (assumed a GO Judge-mimicry adapter)
 2. [`02-coding-platform-draft-notes.md`](./history/02-coding-platform-draft-notes.md) — reframed as "coding platform = execution engine," documentation split proposed
 3. [`03-plan-review-discussion.md`](./history/03-plan-review-discussion.md) — codebase-grounded gap review; identified the problem-model question as the real blocker
 4. [`04-arventiq-real-schema-and-payload.md`](./history/04-arventiq-real-schema-and-payload.md) — real Arventiq `supabase_schema.sql` + sample payload; confirmed stdin/stdout, not function-signature
