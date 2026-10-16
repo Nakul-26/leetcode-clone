@@ -84,6 +84,13 @@ const SubmissionSchema = new Schema({
     },
     externalAssessmentId: {
         type: String
+    },
+    // Which external API key produced this submission (plan Phase 1). Absent for
+    // submissions made through the frontend, and for callers still using a legacy
+    // global shared secret - those stay unattributable until they are issued a key.
+    apiClientId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'ApiClient'
     }
 }, { timestamps: true });
 
@@ -94,5 +101,7 @@ SubmissionSchema.index({ assessmentId: 1 });
 SubmissionSchema.index({ attemptId: 1 });
 SubmissionSchema.index({ assessmentId: 1, userId: 1 });
 SubmissionSchema.index({ collegeId: 1 });
+// Per-client usage reporting and quota windows.
+SubmissionSchema.index({ apiClientId: 1, createdAt: -1 });
 
 export default mongoose.model('Submission', SubmissionSchema);

@@ -10,9 +10,45 @@ import { verifyToken, authorizeRoles } from "../middleware/auth.mjs";
 import * as authService from "../services/auth.service.js";
 import * as auditService from "../services/audit.service.js";
 import * as systemService from "../services/system.service.js";
+import * as apiClientsService from "../services/apiClients.service.js";
 import { safeErrorMessage } from "../utils/safeErrorMessage.js";
 
 const router = express.Router();
+
+// ---- External API keys (plan Phase 1) -------------------------------------
+// admin/superadmin only: faculty have no reason to mint machine credentials.
+// Every handler scopes by the caller's own college inside the service; collegeId
+// is never read from the request body except for a superadmin naming a tenant.
+
+router.post("/api-clients", verifyToken, authorizeRoles("admin", "superadmin"), async (req, res) => {
+  try {
+    const { client, key } = await apiClientsService.createApiClient(req.body, req.user);
+    // The plaintext key is returned exactly once and is not recoverable afterwards.
+    res.status(201).json({
+      client,
+      key,
+      warning: "Store this key now - it is shown once and cannot be retrieved later."
+    });
+  } catch (error) {
+    res.status(error.status || 500).json({ error: safeErrorMessage(error) });
+  }
+});
+
+router.get("/api-clients", verifyToken, authorizeRoles("admin", "superadmin"), async (req, res) => {
+  try {
+    res.json(await apiClientsService.listApiClients(req.user));
+  } catch (error) {
+    res.status(error.status || 500).json({ error: safeErrorMessage(error) });
+  }
+});
+
+router.delete("/api-clients/:clientId", verifyToken, authorizeRoles("admin", "superadmin"), async (req, res) => {
+  try {
+    res.json(await apiClientsService.revokeApiClient(req.params.clientId, req.user));
+  } catch (error) {
+    res.status(error.status || 500).json({ error: safeErrorMessage(error) });
+  }
+});
 
 router.get("/audit-logs", verifyToken, authorizeRoles("admin", "superadmin", "faculty"), async (req, res) => {
   try {

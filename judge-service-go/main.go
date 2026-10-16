@@ -947,6 +947,13 @@ func processAndStoreResults(ctx context.Context, executionPath string, stdout, s
 			usageEvent["collegeId"] = collegeObjID
 		}
 	}
+	// Attribution for per-customer metering and invoicing. Same best-effort posture as
+	// the rest of this block: a malformed id is dropped rather than failing the result.
+	if submissionMsg.ApiClientID != "" {
+		if apiClientObjID, err := primitive.ObjectIDFromHex(submissionMsg.ApiClientID); err == nil {
+			usageEvent["apiClientId"] = apiClientObjID
+		}
+	}
 	if _, err := usageEventsCollection.InsertOne(ctx, usageEvent); err != nil {
 		slog.Error("Failed to record usage event", "submissionId", submissionMsg.SubmissionID, "error", err)
 	}

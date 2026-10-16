@@ -311,7 +311,7 @@ export function sanitizeSubmissionForStudent(submission, problem) {
   return normalized;
 }
 
-export async function submitSolution({ problemId, code, language, selectedOptions = null, answerText = null, userId, collegeId = null, assessmentId = null, attemptId = null, requestId = null, externalStudentId = null, externalAssessmentId = null }) {
+export async function submitSolution({ problemId, code, language, selectedOptions = null, answerText = null, userId, collegeId = null, assessmentId = null, attemptId = null, requestId = null, externalStudentId = null, externalAssessmentId = null, apiClientId = null }) {
   await validateAssessmentSubmission({ problemId, language, userId, assessmentId, attemptId });
 
   // Checked before any submission record is created so a rejected request never
@@ -386,6 +386,7 @@ export async function submitSolution({ problemId, code, language, selectedOption
   if (attemptId) submissionData.attemptId = attemptId;
   if (externalStudentId) submissionData.externalStudentId = externalStudentId;
   if (externalAssessmentId) submissionData.externalAssessmentId = externalAssessmentId;
+  if (apiClientId) submissionData.apiClientId = apiClientId;
 
   const submission = await submissionsRepo.create(submissionData);
 
@@ -402,6 +403,10 @@ export async function submitSolution({ problemId, code, language, selectedOption
   // Carried through so judge-service-go can tag the usage_events record it writes
   // per submission (H4 metering) without a round-trip lookup of userId -> collegeId.
   if (collegeId) messageBody.collegeId = String(collegeId);
+  // Same reason, for per-customer attribution: the judge stamps apiClientId onto the
+  // usage event so a submission can be billed to the API key that produced it, with no
+  // lookup back into assessment-api (plan Phase 1).
+  if (apiClientId) messageBody.apiClientId = String(apiClientId);
 
   if (!validateSubmissionMessage(messageBody)) {
     throw new HttpError(500, "Invalid submission message", { msg: "Internal server error: invalid submission message" });

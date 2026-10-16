@@ -19,7 +19,10 @@ export async function submitSolution(req, res, next) {
       collegeId: req.user && req.user.collegeId,
       assessmentId,
       attemptId,
-      requestId: req.id
+      requestId: req.id,
+      // Attribution when this came in through an external API key rather than the
+      // frontend. Undefined for browser traffic and for legacy shared-secret callers.
+      apiClientId: req.apiClient ? req.apiClient._id : undefined
     });
     if (result.notFound) {
       return res.status(404).json({ msg: "Problem not found" });

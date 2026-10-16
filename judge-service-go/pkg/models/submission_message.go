@@ -22,6 +22,10 @@ type SubmissionMessage struct {
 	RequestID     string      `json:"requestId,omitempty"`
 	RetryCount    int         `json:"retryCount,omitempty"`
 	CollegeID     string      `json:"collegeId,omitempty"`
+	// Which external API key produced this submission, so usage can be attributed
+	// to a paying customer (plan Phase 1). Empty for frontend traffic and for
+	// callers still authenticating with a legacy global shared secret.
+	ApiClientID   string      `json:"apiClientId,omitempty"`
 }
 
 // Limits — tweak as needed

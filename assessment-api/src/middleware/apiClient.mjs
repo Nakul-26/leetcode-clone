@@ -32,15 +32,25 @@ function touchLastUsed(clientId) {
   ApiClient.updateOne({ _id: clientId }, { $set: { lastUsedAt: new Date() } }).catch(() => {});
 }
 
-export function apiClientAuth({ scope, extractKey, legacySecret, legacyLabel }) {
+// `legacySecret` may be a value or a getter. It is a getter at the call sites so the
+// env var is read per request rather than captured at import time, which keeps tests
+// that set env before exercising a route working.
+// `unauthorizedBody` exists because the 401 body is part of a public contract on at
+// least one surface: the Judge0 shim answers {error:"Unauthorized"}, and reshaping
+// that would break callers written against a Judge0-shaped service.
+export function apiClientAuth({ scope, extractKey, legacySecret, legacyLabel, unauthorizedBody }) {
   if (!scope) throw new Error("apiClientAuth requires a scope");
   if (typeof extractKey !== "function") throw new Error("apiClientAuth requires extractKey");
 
+  const deny = (res) =>
+    res.status(401).json(unauthorizedBody || { success: false, message: "Unauthorized: invalid credentials" });
+
   return async function apiClientAuthMiddleware(req, res, next) {
     const presented = extractKey(req);
+    const legacy = typeof legacySecret === "function" ? legacySecret() : legacySecret;
 
     if (!presented) {
-      return res.status(401).json({ success: false, message: "Unauthorized: missing credentials" });
+      return deny(res);
     }
 
     try {
@@ -55,7 +65,7 @@ export function apiClientAuth({ scope, extractKey, legacySecret, legacyLabel }) 
             `[APIKEY][REQ:${req.id}] rejected key prefix=${extractKeyPrefix(presented)} scope=${scope} ` +
             `reason=${!client ? "unknown" : !client.active ? "revoked" : "scope"}`
           );
-          return res.status(401).json({ success: false, message: "Unauthorized: invalid credentials" });
+          return deny(res);
         }
 
         req.apiClient = client;
@@ -64,7 +74,7 @@ export function apiClientAuth({ scope, extractKey, legacySecret, legacyLabel }) 
         return next();
       }
 
-      if (legacySecret && safeCompare(presented, legacySecret)) {
+      if (legacy && safeCompare(presented, legacy)) {
         req.apiClient = null;
         req.legacyApiAuth = true;
         console.warn(
@@ -74,7 +84,7 @@ export function apiClientAuth({ scope, extractKey, legacySecret, legacyLabel }) 
         return next();
       }
 
-      return res.status(401).json({ success: false, message: "Unauthorized: invalid credentials" });
+      return deny(res);
     } catch (err) {
       return next(err);
     }

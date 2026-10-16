@@ -93,7 +93,7 @@ export async function syncProblem(payload) {
   return problemsRepo.create(doc);
 }
 
-export async function submitArventiqSolution({ userId, questionId, code, codeLanguage, externalStudentId, externalAssessmentId, requestId }) {
+export async function submitArventiqSolution({ userId, questionId, code, codeLanguage, externalStudentId, externalAssessmentId, requestId, apiClientId = null }) {
   if (questionId === undefined || questionId === null || questionId === "") {
     throw new HttpError(400, "questionId is required");
   }
@@ -118,7 +118,8 @@ export async function submitArventiqSolution({ userId, questionId, code, codeLan
     userId,
     externalStudentId: externalStudentId != null ? String(externalStudentId) : null,
     externalAssessmentId: externalAssessmentId != null ? String(externalAssessmentId) : null,
-    requestId
+    requestId,
+    apiClientId
   });
 
   if (result.notFound) {

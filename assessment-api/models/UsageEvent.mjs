@@ -10,6 +10,9 @@ const UsageEventSchema = new Schema(
     collegeId: { type: Schema.Types.ObjectId, ref: "College" },
     userId: { type: Schema.Types.ObjectId, ref: "User" },
     submissionId: { type: Schema.Types.ObjectId, ref: "Submission" },
+    // Which external API key this usage is billable to (plan Phase 1). Absent for
+    // frontend traffic and for legacy shared-secret callers.
+    apiClientId: { type: Schema.Types.ObjectId, ref: "ApiClient" },
     language: { type: String },
     status: { type: String },
     elapsedMs: { type: Number },
@@ -20,5 +23,7 @@ const UsageEventSchema = new Schema(
 
 UsageEventSchema.index({ collegeId: 1, createdAt: -1 });
 UsageEventSchema.index({ collegeId: 1, language: 1 });
+// Per-client metering: "how much did this customer use this period".
+UsageEventSchema.index({ apiClientId: 1, createdAt: -1 });
 
 export default mongoose.model("UsageEvent", UsageEventSchema);

@@ -32,7 +32,10 @@ export async function submitSolution(req, res, next) {
       codeLanguage,
       externalStudentId,
       externalAssessmentId,
-      requestId: req.id
+      requestId: req.id,
+      // Attribution for per-customer metering (plan Phase 1); undefined when the
+      // caller is still using the legacy global ARVENTIQ_SECRET.
+      apiClientId: req.apiClient ? req.apiClient._id : undefined
     });
 
     res.status(202).json({
