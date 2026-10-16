@@ -1,0 +1,170 @@
+{
+  "cpp/accepted-sum": {
+    "statusId": 3,
+    "stdout": "5",
+    "stderrEmpty": true,
+    "compileOutputEmpty": true,
+    "exitCode": 0,
+    "tokenPresent": true
+  },
+  "cpp/multiline-echo": {
+    "statusId": 3,
+    "stdout": "alpha\nbeta\ngamma",
+    "stderrEmpty": true,
+    "compileOutputEmpty": true,
+    "exitCode": 0,
+    "tokenPresent": true
+  },
+  "cpp/stdin-one-newline": {
+    "statusId": 3,
+    "stdout": "[]",
+    "stderrEmpty": true,
+    "compileOutputEmpty": true,
+    "exitCode": 0,
+    "tokenPresent": true
+  },
+  "cpp/stdin-empty-eof": {
+    "statusId": 3,
+    "stdout": "[]",
+    "stderrEmpty": true,
+    "compileOutputEmpty": true,
+    "exitCode": 0,
+    "tokenPresent": true
+  },
+  "cpp/compile-error": {
+    "statusId": 6,
+    "stdout": "",
+    "stderrEmpty": true,
+    "compileOutputEmpty": false,
+    "exitCode": -1,
+    "tokenPresent": true
+  },
+  "cpp/runtime-error": {
+    "statusId": 13,
+    "stdout": "",
+    "stderrEmpty": false,
+    "compileOutputEmpty": true,
+    "exitCode": 134,
+    "tokenPresent": true
+  },
+  "cpp/timeout": {
+    "statusId": 5,
+    "stdout": "",
+    "stderrEmpty": true,
+    "compileOutputEmpty": true,
+    "exitCode": -1,
+    "tokenPresent": true
+  },
+  "java/accepted-sum": {
+    "statusId": 3,
+    "stdout": "5",
+    "stderrEmpty": true,
+    "compileOutputEmpty": true,
+    "exitCode": 0,
+    "tokenPresent": true
+  },
+  "java/multiline-echo": {
+    "statusId": 3,
+    "stdout": "alpha\nbeta\ngamma",
+    "stderrEmpty": true,
+    "compileOutputEmpty": true,
+    "exitCode": 0,
+    "tokenPresent": true
+  },
+  "java/stdin-one-newline": {
+    "statusId": 3,
+    "stdout": "[]",
+    "stderrEmpty": true,
+    "compileOutputEmpty": true,
+    "exitCode": 0,
+    "tokenPresent": true
+  },
+  "java/stdin-empty-eof": {
+    "statusId": 3,
+    "stdout": "[]",
+    "stderrEmpty": true,
+    "compileOutputEmpty": true,
+    "exitCode": 0,
+    "tokenPresent": true
+  },
+  "java/compile-error": {
+    "statusId": 6,
+    "stdout": "",
+    "stderrEmpty": true,
+    "compileOutputEmpty": false,
+    "exitCode": -1,
+    "tokenPresent": true
+  },
+  "java/runtime-error": {
+    "statusId": 13,
+    "stdout": "",
+    "stderrEmpty": false,
+    "compileOutputEmpty": true,
+    "exitCode": 1,
+    "tokenPresent": true
+  },
+  "java/timeout": {
+    "statusId": 5,
+    "stdout": "",
+    "stderrEmpty": true,
+    "compileOutputEmpty": true,
+    "exitCode": -1,
+    "tokenPresent": true
+  },
+  "python/accepted-sum": {
+    "statusId": 3,
+    "stdout": "5",
+    "stderrEmpty": true,
+    "compileOutputEmpty": true,
+    "exitCode": 0,
+    "tokenPresent": true
+  },
+  "python/multiline-echo": {
+    "statusId": 3,
+    "stdout": "alpha\nbeta\ngamma",
+    "stderrEmpty": true,
+    "compileOutputEmpty": true,
+    "exitCode": 0,
+    "tokenPresent": true
+  },
+  "python/stdin-one-newline": {
+    "statusId": 3,
+    "stdout": "[]",
+    "stderrEmpty": true,
+    "compileOutputEmpty": true,
+    "exitCode": 0,
+    "tokenPresent": true
+  },
+  "python/stdin-empty-eof": {
+    "statusId": 3,
+    "stdout": "[]",
+    "stderrEmpty": true,
+    "compileOutputEmpty": true,
+    "exitCode": 0,
+    "tokenPresent": true
+  },
+  "python/compile-error": {
+    "statusId": 13,
+    "stdout": "",
+    "stderrEmpty": false,
+    "compileOutputEmpty": true,
+    "exitCode": 1,
+    "tokenPresent": true
+  },
+  "python/runtime-error": {
+    "statusId": 13,
+    "stdout": "",
+    "stderrEmpty": false,
+    "compileOutputEmpty": true,
+    "exitCode": 1,
+    "tokenPresent": true
+  },
+  "python/timeout": {
+    "statusId": 5,
+    "stdout": "",
+    "stderrEmpty": true,
+    "compileOutputEmpty": true,
+    "exitCode": -1,
+    "tokenPresent": true
+  }
+}
