@@ -1622,6 +1622,46 @@ func main() {
 	)
 	failOnError(err, "Failed to declare retry queue")
 
+	// A second queue for latency-sensitive work: a caller waiting synchronously on a
+	// result (the Judge0-compatible surface with wait=true) should not queue behind a
+	// bulk backlog it has nothing to do with.
+	//
+	// A separate queue rather than x-max-priority on the existing one, because adding
+	// that argument to an already-declared queue fails with PRECONDITION_FAILED and
+	// takes publishing down until someone deletes the queue by hand. This is purely
+	// additive, so a judge running this code against an older broker, or an older judge
+	// against this one, both keep working.
+	interactiveQueueName := submissionQueueName + "_fast"
+	_, err = ch.QueueDeclare(
+		interactiveQueueName,
+		true,
+		false,
+		false,
+		false,
+		amqp.Table{
+			"x-dead-letter-exchange": dlxName,
+		},
+	)
+	failOnError(err, "Failed to declare interactive submission queue")
+
+	// Its own retry queue, dead-lettering back to the interactive queue: sending these
+	// retries to the bulk retry queue would quietly demote a waiting caller to bulk
+	// priority the first time no container was free.
+	interactiveRetryQueueName := interactiveQueueName + "_retry"
+	_, err = ch.QueueDeclare(
+		interactiveRetryQueueName,
+		true,
+		false,
+		false,
+		false,
+		amqp.Table{
+			"x-dead-letter-exchange":    "",
+			"x-dead-letter-routing-key": interactiveQueueName,
+			"x-message-ttl":             5000,
+		},
+	)
+	failOnError(err, "Failed to declare interactive retry queue")
+
 	msgs, err := ch.Consume(
 		submissionQueueName, // queue
 		"",                  // consumer
@@ -1633,7 +1673,18 @@ func main() {
 	)
 	failOnError(err, "Failed to register a consumer")
 
-	slog.Info("Waiting for messages", "queue", submissionQueueName)
+	interactiveMsgs, err := ch.Consume(
+		interactiveQueueName,
+		"",
+		false,
+		false,
+		false,
+		false,
+		nil,
+	)
+	failOnError(err, "Failed to register the interactive consumer")
+
+	slog.Info("Waiting for messages", "queue", submissionQueueName, "interactiveQueue", interactiveQueueName)
 
 	// Graceful Shutdown implementation
 	sigChan := make(chan os.Signal, 1)
@@ -1648,8 +1699,42 @@ func main() {
 		go func(workerID int) {
 			defer workerWg.Done()
 			slog.Debug("Worker started", "workerId", workerID)
-			for d := range msgs {
-				processSubmission(d, ch, retryQueueName, problemsCollection, submissionsCollection, usageEventsCollection, redisClient, executor, containerPool)
+			bulk, interactive := msgs, interactiveMsgs
+			for bulk != nil || interactive != nil {
+				// Check the interactive queue first and without blocking, so a caller
+				// waiting on a result is never served after bulk work that was already
+				// buffered here. This bounds the wait at roughly one in-flight
+				// submission rather than the whole backlog; it cannot preempt a
+				// submission that has already started, since nothing here interrupts a
+				// running container.
+				select {
+				case d, ok := <-interactive:
+					if !ok {
+						interactive = nil
+						continue
+					}
+					processSubmission(d, ch, interactiveRetryQueueName, problemsCollection, submissionsCollection, usageEventsCollection, redisClient, executor, containerPool)
+					continue
+				default:
+				}
+
+				// Nothing interactive waiting: block on whichever queue delivers next.
+				// A nil channel blocks forever, which is what retires a closed queue
+				// without spinning.
+				select {
+				case d, ok := <-interactive:
+					if !ok {
+						interactive = nil
+						continue
+					}
+					processSubmission(d, ch, interactiveRetryQueueName, problemsCollection, submissionsCollection, usageEventsCollection, redisClient, executor, containerPool)
+				case d, ok := <-bulk:
+					if !ok {
+						bulk = nil
+						continue
+					}
+					processSubmission(d, ch, retryQueueName, problemsCollection, submissionsCollection, usageEventsCollection, redisClient, executor, containerPool)
+				}
 			}
 			slog.Debug("Worker stopped", "workerId", workerID)
 		}(i)

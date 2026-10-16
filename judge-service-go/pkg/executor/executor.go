@@ -559,14 +559,19 @@ func (e *Executor) RunInContainer(ctx context.Context, containerID string, files
 // exact-text compare (see pkg/comparator.CompareText). RunInContainer itself
 // is untouched, so the function-mode path is provably unaffected by this
 // addition.
-func (e *Executor) RunInContainerWithStdin(ctx context.Context, containerID string, files []string, hostWorkDir string, containerWorkDir string, compileCmd []string, runCmd []string, stdinInput string, timeout time.Duration, memoryLimitMb int64) (string, string, error) {
+//
+// The process's exit code is returned alongside its output because the public
+// Judge0-compatible surface reports it as exit_code, and a caller uses it to tell a
+// crashing program apart from a merely wrong one. It is 0 when the run never
+// happened at all (a file-copy or compile failure).
+func (e *Executor) RunInContainerWithStdin(ctx context.Context, containerID string, files []string, hostWorkDir string, containerWorkDir string, compileCmd []string, runCmd []string, stdinInput string, timeout time.Duration, memoryLimitMb int64) (string, string, int, error) {
 	submissionTimeout := timeout * 3
 	subCtx, cancel := context.WithTimeout(ctx, submissionTimeout)
 	defer cancel()
 
 	if len(files) > 0 {
 		if err := e.copyFilesToContainer(subCtx, containerID, hostWorkDir, containerWorkDir, files); err != nil {
-			return "", "", err
+			return "", "", 0, err
 		}
 	}
 
@@ -584,7 +589,7 @@ func (e *Executor) RunInContainerWithStdin(ctx context.Context, containerID stri
 		slog.Info("Compiling in container (stdin mode)", "containerId", containerID, "cmd", compileCmd)
 		compileStdout, compileStderr, _, err := e.runExecWithTimeout(subCtx, containerID, getJudgeUser(), containerWorkDir, rewriteCommandForWorkspace(compileCmd, containerWorkDir), timeout)
 		if err != nil {
-			return "", "", NewExecutionError(ErrCompilationFailed, fmt.Sprintf("%v | stdout=%s stderr=%s", err, compileStdout, compileStderr), -1)
+			return "", "", 0, NewExecutionError(ErrCompilationFailed, fmt.Sprintf("%v | stdout=%s stderr=%s", err, compileStdout, compileStderr), -1)
 		}
 	}
 
@@ -594,7 +599,7 @@ func (e *Executor) RunInContainerWithStdin(ctx context.Context, containerID stri
 		}
 	}
 
-	runStdout, runStderr, _, err := e.runExecWithStdinTimeout(subCtx, containerID, getJudgeUser(), containerWorkDir, rewriteCommandForWorkspace(runCmd, containerWorkDir), stdinInput, timeout)
+	runStdout, runStderr, runExit, err := e.runExecWithStdinTimeout(subCtx, containerID, getJudgeUser(), containerWorkDir, rewriteCommandForWorkspace(runCmd, containerWorkDir), stdinInput, timeout)
 
 	if memoryLimitMb > 0 {
 		if resetErr := e.UpdateContainerResources(context.Background(), containerID, 1024); resetErr != nil {
@@ -612,7 +617,7 @@ func (e *Executor) RunInContainerWithStdin(ctx context.Context, containerID stri
 		slog.Error("failed to cleanup container", "containerId", containerID, "error", cErr, "stdout", cStdout, "stderr", cStderr, "exitCode", cExit)
 	}
 
-	return runStdout, runStderr, err
+	return runStdout, runStderr, runExit, err
 }
 
 func (e *Executor) CompileInContainer(ctx context.Context, containerID string, files []string, hostWorkDir string, containerWorkDir string, compileCmd []string, timeout time.Duration, memoryLimitMb int64) (string, string, error) {

@@ -94,7 +94,7 @@ func runSubmissionStdinDetailed(ctx context.Context, exec *executor.Executor, po
 		}
 
 		testCtx, cancel := context.WithTimeout(ctx, testTimeout)
-		stdout, stderr, runErr := exec.RunInContainerWithStdin(
+		stdout, stderr, exitCode, runErr := exec.RunInContainerWithStdin(
 			testCtx,
 			pooledContainer.ID,
 			filesToCopy,
@@ -112,6 +112,9 @@ func runSubmissionStdinDetailed(ctx context.Context, exec *executor.Executor, po
 		stderrForLog, stderrTruncated := truncateString(strings.TrimSpace(stderr), maxLogOutputBytes)
 		tr.Stdout = stdoutForResult
 		tr.Stderr = stderrForLog
+		// Reported as Judge0 exit_code on the public surface, which a caller uses to
+		// distinguish a crash from a wrong answer.
+		tr.ExitCode = exitCode
 
 		if runErr != nil {
 			errStr := strings.ToLower(runErr.Error())
