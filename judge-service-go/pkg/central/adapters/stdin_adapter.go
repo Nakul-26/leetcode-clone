@@ -25,18 +25,155 @@ type CompilingStdinLanguageAdapter interface {
 	CompileCommand() []string
 }
 
-// StdinAdapterRegistry mirrors AdapterRegistry's dispatch shape for the
-// stdin problem model. Deliberately a smaller language set than
-// AdapterRegistry for the MVP (see docs/arventiq-integration/TASKS.md
-// Milestone 3) — languages not listed here return ok=false from
-// GetStdinAdapter, which the stdin runner turns into a clean submission
-// error rather than a panic.
+// This registry is the single definition of "how do I build and run a
+// standalone program that reads stdin and writes stdout" for every supported
+// language. main.go's rawRunFilesAndCommands (the /raw-run endpoint) resolves
+// its files and commands from here too, so the queue-backed stdin path and the
+// synchronous raw path cannot drift apart.
+//
+// They previously did drift, in ways that mattered:
+//   - Only python, javascript, cpp, c and go had stdin adapters at all, so the
+//     stdin path silently rejected the other seven languages — including Java,
+//     the second most used language in exams. /raw-run supported all twelve.
+//   - cpp and c compiled at -O2 here but at the default -O0 via
+//     languages.go's CompileCmd, which /raw-run reused.
+//   - This file's Go compile command omitted the GOPROXY=off/GOTOOLCHAIN=local
+//     hardening that languages.go documents as necessary: without it a build in
+//     a network-disabled sandbox can hang until the sandbox timeout instead of
+//     failing fast.
+//
+// Paths are written as /app/... and rewritten to the real per-submission
+// workspace by executor.rewriteCommandForWorkspace, which also sets it as the
+// working directory — so a relative path such as `.` on a classpath resolves to
+// the same place.
+//
+// Two concrete types rather than one with a nillable compile command, so that
+// "needs compiling" stays a type-level fact: the runner's
+// CompilingStdinLanguageAdapter type assertion is the only thing that decides
+// whether a compile step runs.
+
+// interpretedStdinAdapter runs source directly, with no build step.
+type interpretedStdinAdapter struct {
+	name     string
+	fileName string
+	runCmd   []string
+}
+
+func (a interpretedStdinAdapter) Name() string { return a.name }
+
+func (a interpretedStdinAdapter) PrepareFiles(workDir string, code string) ([]string, error) {
+	return writeStdinSource(workDir, a.fileName, code)
+}
+
+func (a interpretedStdinAdapter) RunCommand() []string { return a.runCmd }
+
+// compiledStdinAdapter builds an artifact once, then executes it per test case.
+type compiledStdinAdapter struct {
+	name       string
+	fileName   string
+	compileCmd []string
+	runCmd     []string
+}
+
+func (a compiledStdinAdapter) Name() string { return a.name }
+
+func (a compiledStdinAdapter) PrepareFiles(workDir string, code string) ([]string, error) {
+	return writeStdinSource(workDir, a.fileName, code)
+}
+
+func (a compiledStdinAdapter) CompileCommand() []string { return a.compileCmd }
+
+func (a compiledStdinAdapter) RunCommand() []string { return a.runCmd }
+
+func writeStdinSource(workDir, fileName, code string) ([]string, error) {
+	if err := workspace.WriteFile(workDir, fileName, []byte(code), 0644); err != nil {
+		return nil, fmt.Errorf("failed to write %s: %w", fileName, err)
+	}
+	return []string{fileName}, nil
+}
+
+// StdinAdapterRegistry mirrors AdapterRegistry's dispatch shape for the stdin
+// problem model, and now covers the same twelve languages as
+// languages.Languages.
+//
+// Two languages constrain what the student may submit, because the run command
+// has to name an entry point before the source exists:
+//   - Java: the program's class must be `Main` (compiled as Main.java).
+//   - Kotlin: the file compiles to class `MainKt`, i.e. a top-level `fun main()`.
 var StdinAdapterRegistry = map[string]StdinLanguageAdapter{
-	"python":     PythonStdinAdapter{},
-	"javascript": JavaScriptStdinAdapter{},
-	"cpp":        CppStdinAdapter{},
-	"c":          CStdinAdapter{},
-	"go":         GoStdinAdapter{},
+	"python": interpretedStdinAdapter{
+		name: "python", fileName: "solution.py",
+		runCmd: []string{"python", "/app/solution.py"},
+	},
+	"javascript": interpretedStdinAdapter{
+		name: "javascript", fileName: "solution.js",
+		runCmd: []string{"node", "/app/solution.js"},
+	},
+	"typescript": interpretedStdinAdapter{
+		name: "typescript", fileName: "solution.ts",
+		runCmd: []string{"tsx", "/app/solution.ts"},
+	},
+	"ruby": interpretedStdinAdapter{
+		name: "ruby", fileName: "solution.rb",
+		runCmd: []string{"ruby", "/app/solution.rb"},
+	},
+	"php": interpretedStdinAdapter{
+		name: "php", fileName: "solution.php",
+		runCmd: []string{"php", "/app/solution.php"},
+	},
+	"c": compiledStdinAdapter{
+		name: "c", fileName: "main.c",
+		// -ljson-c is kept from languages.go's CompileCmd even though a stdin
+		// program has no reason to use it: dropping a link flag could only break
+		// a submission that does, and linking it unused costs nothing.
+		compileCmd: []string{"gcc", "-O2", "-o", "/app/main", "/app/main.c", "-ljson-c", "-lm"},
+		runCmd:     []string{"/app/main"},
+	},
+	"cpp": compiledStdinAdapter{
+		name: "cpp", fileName: "main.cpp",
+		compileCmd: []string{"g++", "-O2", "-o", "/app/main", "/app/main.cpp"},
+		runCmd:     []string{"/app/main"},
+	},
+	"go": compiledStdinAdapter{
+		name: "go", fileName: "main.go",
+		// The environment exports are load-bearing, not cargo-culted: with the
+		// network disabled, an unconfigured `go build` can try to reach the module
+		// proxy or check for a toolchain switch and hang for the full sandbox
+		// timeout rather than failing fast (see languages.go).
+		compileCmd: []string{"sh", "-c",
+			"export GOFLAGS=-mod=mod GOPROXY=off GOSUMDB=off GO111MODULE=on GOTOOLCHAIN=local; " +
+				"go mod init solution 2>/dev/null || true; go build -o main ."},
+		runCmd: []string{"./main"},
+	},
+	"rust": compiledStdinAdapter{
+		name: "rust", fileName: "main.rs",
+		compileCmd: []string{"rustc", "--edition", "2021", "-O", "-o", "/app/main", "/app/main.rs"},
+		runCmd:     []string{"/app/main"},
+	},
+	"java": compiledStdinAdapter{
+		name: "java", fileName: "Main.java",
+		// gson stays on both paths' classpath because the image ships it and a
+		// submission may import it; -Xmx256m bounds the heap so one submission
+		// cannot exhaust the sandbox's memory ceiling on its own.
+		compileCmd: []string{"javac", "-cp", "/usr/share/java/gson.jar:.", "/app/Main.java"},
+		runCmd:     []string{"java", "-Xmx256m", "-cp", "/usr/share/java/gson.jar:.", "Main"},
+	},
+	"kotlin": compiledStdinAdapter{
+		name: "kotlin", fileName: "Main.kt",
+		// Unlike the wrapper flow (Solution.kt + Harness.kt), a stdin submission is
+		// a single self-contained file whose own top-level main() is the entry point.
+		compileCmd: []string{"kotlinc", "-cp", "/usr/share/java/gson.jar", "-d", "/app/out", "/app/Main.kt"},
+		runCmd:     []string{"java", "-cp", "/app/out:/opt/kotlinc/lib/kotlin-stdlib.jar:/usr/share/java/gson.jar", "MainKt"},
+	},
+	"csharp": compiledStdinAdapter{
+		name: "csharp", fileName: "Program.cs",
+		// The image pre-warms a `dotnet new console` project at /home/judge/app so
+		// the first real build isn't paying SDK/restore cold-start cost. No
+		// /p:StartupObject override here: unlike the wrapper flow there is no
+		// Harness class competing with the student's entry point.
+		compileCmd: []string{"sh", "-c", "cp /home/judge/app/app.csproj . && dotnet build -c Release -o out"},
+		runCmd:     []string{"dotnet", "out/app.dll"},
+	},
 }
 
 func GetStdinAdapter(language string) (StdinLanguageAdapter, bool) {
@@ -44,89 +181,13 @@ func GetStdinAdapter(language string) (StdinLanguageAdapter, bool) {
 	return adapter, ok
 }
 
-type PythonStdinAdapter struct{}
-
-func (PythonStdinAdapter) Name() string { return "python" }
-
-func (PythonStdinAdapter) PrepareFiles(workDir string, code string) ([]string, error) {
-	if err := workspace.WriteFile(workDir, "solution.py", []byte(code), 0644); err != nil {
-		return nil, fmt.Errorf("failed to write solution.py: %w", err)
+// StdinCompileCommand returns the adapter's compile command, or nil when the
+// language is interpreted. Exposed so callers that drive compile and run
+// themselves (main.go's /raw-run) don't each have to repeat the
+// CompilingStdinLanguageAdapter type assertion.
+func StdinCompileCommand(adapter StdinLanguageAdapter) []string {
+	if compiling, ok := adapter.(CompilingStdinLanguageAdapter); ok {
+		return compiling.CompileCommand()
 	}
-	return []string{"solution.py"}, nil
-}
-
-func (PythonStdinAdapter) RunCommand() []string {
-	return []string{"python", "/app/solution.py"}
-}
-
-type JavaScriptStdinAdapter struct{}
-
-func (JavaScriptStdinAdapter) Name() string { return "javascript" }
-
-func (JavaScriptStdinAdapter) PrepareFiles(workDir string, code string) ([]string, error) {
-	if err := workspace.WriteFile(workDir, "solution.js", []byte(code), 0644); err != nil {
-		return nil, fmt.Errorf("failed to write solution.js: %w", err)
-	}
-	return []string{"solution.js"}, nil
-}
-
-func (JavaScriptStdinAdapter) RunCommand() []string {
-	return []string{"node", "/app/solution.js"}
-}
-
-type CppStdinAdapter struct{}
-
-func (CppStdinAdapter) Name() string { return "cpp" }
-
-func (CppStdinAdapter) PrepareFiles(workDir string, code string) ([]string, error) {
-	if err := workspace.WriteFile(workDir, "main.cpp", []byte(code), 0644); err != nil {
-		return nil, fmt.Errorf("failed to write main.cpp: %w", err)
-	}
-	return []string{"main.cpp"}, nil
-}
-
-func (CppStdinAdapter) CompileCommand() []string {
-	return []string{"g++", "-O2", "-o", "/app/main", "/app/main.cpp"}
-}
-
-func (CppStdinAdapter) RunCommand() []string {
-	return []string{"/app/main"}
-}
-
-type CStdinAdapter struct{}
-
-func (CStdinAdapter) Name() string { return "c" }
-
-func (CStdinAdapter) PrepareFiles(workDir string, code string) ([]string, error) {
-	if err := workspace.WriteFile(workDir, "main.c", []byte(code), 0644); err != nil {
-		return nil, fmt.Errorf("failed to write main.c: %w", err)
-	}
-	return []string{"main.c"}, nil
-}
-
-func (CStdinAdapter) CompileCommand() []string {
-	return []string{"gcc", "-O2", "-o", "/app/main", "/app/main.c", "-lm"}
-}
-
-func (CStdinAdapter) RunCommand() []string {
-	return []string{"/app/main"}
-}
-
-type GoStdinAdapter struct{}
-
-func (GoStdinAdapter) Name() string { return "go" }
-
-func (GoStdinAdapter) PrepareFiles(workDir string, code string) ([]string, error) {
-	if err := workspace.WriteFile(workDir, "main.go", []byte(code), 0644); err != nil {
-		return nil, fmt.Errorf("failed to write main.go: %w", err)
-	}
-	return []string{"main.go"}, nil
-}
-
-func (GoStdinAdapter) CompileCommand() []string {
-	return []string{"sh", "-c", "go mod init solution 2>/dev/null || true; go build -o main ."}
-}
-
-func (GoStdinAdapter) RunCommand() []string {
-	return []string{"./main"}
+	return nil
 }

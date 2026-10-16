@@ -304,6 +304,24 @@ func fetchProblemData(ctx context.Context, problemsCollection *mongo.Collection,
 	return problem, nil
 }
 
+// adHocProblem builds the in-memory Problem for a submission that carries its own
+// test cases instead of referencing a stored one (SubmissionMessage.Kind ==
+// SubmissionKindAdHoc). Always stdin-mode — Validate enforces that — so there is no
+// function signature, wrapper or comparison config to reconstruct.
+//
+// Title and Description exist only to satisfy Problem.ValidateBasic; nothing renders
+// them, because an ad-hoc submission has no problem page to render them on.
+func adHocProblem(submissionMsg models.SubmissionMessage) models.Problem {
+	return models.Problem{
+		Title:         "Ad-hoc execution",
+		Description:   "Submitted through the public execution API; no stored problem.",
+		Type:          models.StdinProblem,
+		TestCases:     submissionMsg.Tests,
+		TimeLimitMs:   submissionMsg.TimeLimitMs,
+		MemoryLimitMb: submissionMsg.MemoryLimitMb,
+	}
+}
+
 // prepareSubmissionFiles generates the necessary wrapper and source files for execution.
 func prepareSubmissionFiles(submissionMsg models.SubmissionMessage, problem models.Problem, lang *languages.Language, tempDir string) ([]string, []string, []string, error) {
 	// The problem's TestCases have been parsed and normalized by ValidateBasic().
@@ -396,94 +414,25 @@ func prepareSubmissionFiles(submissionMsg models.SubmissionMessage, problem mode
 
 // rawRunFilesAndCommands returns the file(s) to write, compile command, and run command
 // for RAW (unwrapped) execution of a single source file against stdin — no function
-// wrapper, no test harness, no structural comparison. The run command for each language
-// is intentionally the SAME command the wrapper-based flow already uses (languages.go),
-// so the sandbox images don't need to change; only the source is written straight into
-// the file that command already expects, instead of being merged into a wrapper.
+// wrapper, no test harness, no structural comparison.
 //
-// Java is the one case that constrains the student's code: RunCmd always invokes class
-// "Main", so raw Java submissions must declare `public class Main`. C# raw execution
-// compiles the student's Program.cs as the project's sole entry point — unlike the
-// wrapper flow, which forces StartupObject=Harness to make the fixed test-harness class
-// win over the (also present) Solution class, raw mode has no Harness in the mix, so no
-// override is needed.
+// This is exactly what adapters.StdinAdapterRegistry describes, so it delegates there
+// rather than keeping a second copy. The two used to be separate switch statements and
+// had silently drifted: /raw-run supported twelve languages while the stdin registry
+// supported five, and the two disagreed on optimisation flags and on Go's offline build
+// hardening (see the registry's comment). One definition means the synchronous raw path
+// and the queue-backed stdin path cannot diverge again.
 func rawRunFilesAndCommands(lang *languages.Language, code string, tempDir string) ([]string, []string, []string, error) {
-	switch lang.ID {
-	case "python":
-		if err := workspace.WriteFile(tempDir, "wrapper.py", []byte(code), 0644); err != nil {
-			return nil, nil, nil, fmt.Errorf("failed to write submission file: %w", err)
-		}
-		return []string{"wrapper.py"}, nil, lang.RunCmd, nil
-	case "javascript":
-		if err := workspace.WriteFile(tempDir, "wrapper.js", []byte(code), 0644); err != nil {
-			return nil, nil, nil, fmt.Errorf("failed to write submission file: %w", err)
-		}
-		return []string{"wrapper.js"}, nil, lang.RunCmd, nil
-	case "typescript":
-		if err := workspace.WriteFile(tempDir, "wrapper.ts", []byte(code), 0644); err != nil {
-			return nil, nil, nil, fmt.Errorf("failed to write submission file: %w", err)
-		}
-		return []string{"wrapper.ts"}, nil, lang.RunCmd, nil
-	case "c":
-		if err := workspace.WriteFile(tempDir, "main.c", []byte(code), 0644); err != nil {
-			return nil, nil, nil, fmt.Errorf("failed to write submission file: %w", err)
-		}
-		return []string{"main.c"}, lang.CompileCmd, lang.RunCmd, nil
-	case "cpp":
-		if err := workspace.WriteFile(tempDir, "main.cpp", []byte(code), 0644); err != nil {
-			return nil, nil, nil, fmt.Errorf("failed to write submission file: %w", err)
-		}
-		return []string{"main.cpp"}, lang.CompileCmd, lang.RunCmd, nil
-	case "go":
-		if err := workspace.WriteFile(tempDir, "main.go", []byte(code), 0644); err != nil {
-			return nil, nil, nil, fmt.Errorf("failed to write submission file: %w", err)
-		}
-		// lang.CompileCmd is already offline-safe (see languages.go) — no need for a
-		// second copy of the compile command here.
-		return []string{"main.go"}, lang.CompileCmd, lang.RunCmd, nil
-	case "java":
-		if err := workspace.WriteFile(tempDir, "Main.java", []byte(code), 0644); err != nil {
-			return nil, nil, nil, fmt.Errorf("failed to write submission file: %w", err)
-		}
-		compileCmd := []string{"javac", "-cp", "/usr/share/java/gson.jar:.", "/app/Main.java"}
-		return []string{"Main.java"}, compileCmd, lang.RunCmd, nil
-	case "ruby":
-		if err := workspace.WriteFile(tempDir, "wrapper.rb", []byte(code), 0644); err != nil {
-			return nil, nil, nil, fmt.Errorf("failed to write submission file: %w", err)
-		}
-		return []string{"wrapper.rb"}, nil, lang.RunCmd, nil
-	case "php":
-		if err := workspace.WriteFile(tempDir, "wrapper.php", []byte(code), 0644); err != nil {
-			return nil, nil, nil, fmt.Errorf("failed to write submission file: %w", err)
-		}
-		return []string{"wrapper.php"}, nil, lang.RunCmd, nil
-	case "rust":
-		if err := workspace.WriteFile(tempDir, "main.rs", []byte(code), 0644); err != nil {
-			return nil, nil, nil, fmt.Errorf("failed to write submission file: %w", err)
-		}
-		return []string{"main.rs"}, lang.CompileCmd, lang.RunCmd, nil
-	case "kotlin":
-		// Unlike the wrapper-based flow (Solution.kt + Harness.kt), raw execution
-		// compiles a single self-contained file the student's own `fun main()` lives in.
-		if err := workspace.WriteFile(tempDir, "Main.kt", []byte(code), 0644); err != nil {
-			return nil, nil, nil, fmt.Errorf("failed to write submission file: %w", err)
-		}
-		compileCmd := []string{"kotlinc", "-cp", "/usr/share/java/gson.jar", "-d", "/app/out", "/app/Main.kt"}
-		runCmd := []string{"java", "-cp", "/app/out:/opt/kotlinc/lib/kotlin-stdlib.jar:/usr/share/java/gson.jar", "MainKt"}
-		return []string{"Main.kt"}, compileCmd, runCmd, nil
-	case "csharp":
-		if err := workspace.WriteFile(tempDir, "Program.cs", []byte(code), 0644); err != nil {
-			return nil, nil, nil, fmt.Errorf("failed to write submission file: %w", err)
-		}
-		// The image pre-warms a "dotnet new console" project at /home/judge/app so the
-		// first real build isn't paying SDK/restore cold-start cost; app.csproj is
-		// copied in fresh per run, same as the wrapper adapter does.
-		compileCmd := []string{"sh", "-c", "cp /home/judge/app/app.csproj . && dotnet build -c Release -o out"}
-		runCmd := []string{"dotnet", "out/app.dll"}
-		return []string{"Program.cs"}, compileCmd, runCmd, nil
-	default:
+	adapter, ok := adapters.GetStdinAdapter(lang.ID)
+	if !ok {
 		return nil, nil, nil, fmt.Errorf("raw execution is not supported for language %q yet", lang.ID)
 	}
+
+	filesToCopy, err := adapter.PrepareFiles(tempDir, code)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	return filesToCopy, adapters.StdinCompileCommand(adapter), adapter.RunCommand(), nil
 }
 
 type rawRunRequest struct {
@@ -1012,11 +961,21 @@ func processSubmission(d amqp.Delivery, ch *amqp.Channel, retryQueueName string,
 		return
 	}
 
-	problem, err := fetchProblemData(ctx, problemsCollection, submissionMsg.ProblemID)
-	if err != nil {
-		slog.Error("Failed to fetch problem data", "submissionId", submissionMsg.SubmissionID, "error", err)
-		d.Nack(false, true) // Transient failure (DB might be down)
-		return
+	// An ad-hoc submission carries its own tests and has no stored problem to
+	// fetch, so the Problem is built in memory. Everything downstream — strategy
+	// dispatch, the container pool, retries, persistence and metering — then
+	// treats it exactly like any other stdin submission, which is the entire
+	// point: the public Judge0 surface stops being a separate execution path.
+	var problem models.Problem
+	if submissionMsg.IsAdHoc() {
+		problem = adHocProblem(submissionMsg)
+	} else {
+		problem, err = fetchProblemData(ctx, problemsCollection, submissionMsg.ProblemID)
+		if err != nil {
+			slog.Error("Failed to fetch problem data", "submissionId", submissionMsg.SubmissionID, "error", err)
+			d.Nack(false, true) // Transient failure (DB might be down)
+			return
+		}
 	}
 
 	// Validate the problem data and parse/normalize test cases from the problem doc.
