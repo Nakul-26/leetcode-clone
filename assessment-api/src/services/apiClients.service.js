@@ -6,6 +6,7 @@ import ApiClient from "../../models/ApiClient.mjs";
 import User from "../../models/User.mjs";
 import { generateApiKey } from "../utils/apiKey.js";
 import { HttpError } from "../utils/HttpError.js";
+import { getApiClientUsage } from "./apiClientQuota.service.js";
 
 const VALID_SCOPES = ["integration", "arventiq", "codeassess"];
 
@@ -113,6 +114,62 @@ export async function revokeApiClient(id, requestingUser) {
   client.revokedAt = new Date();
   await client.save();
   return present(client);
+}
+
+// A negative or fractional limit is a typo that would silently disable or break enforcement.
+function validLimit(value, field) {
+  if (value === undefined) return undefined;
+  const n = Number(value);
+  if (!Number.isInteger(n) || n < 0) {
+    throw new HttpError(400, `${field} must be a non-negative integer (0 means no limit)`);
+  }
+  return n;
+}
+
+async function findScoped(id, requestingUser) {
+  if (!mongoose.Types.ObjectId.isValid(String(id))) throw new HttpError(404, "API client not found");
+  const filter = { _id: id };
+  const scope = collegeScopeFor(requestingUser);
+  if (scope) filter.collegeId = scope;
+  const client = await ApiClient.findOne(filter);
+  // 404, not 403, for another college's client: a 403 would confirm the id exists.
+  if (!client) throw new HttpError(404, "API client not found");
+  return client;
+}
+
+/**
+ * Changes a client's name, limits or scopes. The college and key are deliberately not
+ * editable: moving a client between tenants would re-attribute its history, and a key can
+ * only be replaced by issuing a new one.
+ */
+export async function updateApiClient(id, patch = {}, requestingUser) {
+  const client = await findScoped(id, requestingUser);
+
+  const rate = validLimit(patch.rateLimitPerMin, "rateLimitPerMin");
+  const monthly = validLimit(patch.monthlyQuota, "monthlyQuota");
+  if (rate !== undefined) client.rateLimitPerMin = rate;
+  if (monthly !== undefined) client.monthlyQuota = monthly;
+
+  if (patch.name !== undefined) {
+    if (typeof patch.name !== "string" || !patch.name.trim()) throw new HttpError(400, "name cannot be empty");
+    client.name = patch.name.trim();
+  }
+  if (patch.scopes !== undefined) {
+    const scopes = Array.isArray(patch.scopes) ? patch.scopes : [];
+    const invalid = scopes.filter((s) => !VALID_SCOPES.includes(s));
+    if (invalid.length > 0) throw new HttpError(400, `Invalid scope(s): ${invalid.join(", ")}. Valid: ${VALID_SCOPES.join(", ")}`);
+    if (scopes.length === 0) throw new HttpError(400, "At least one scope is required");
+    client.scopes = scopes;
+  }
+
+  await client.save();
+  return present(client);
+}
+
+/** Current limits and consumption for one client, read from the durable usage record. */
+export async function getApiClientUsageById(id, requestingUser) {
+  const client = await findScoped(id, requestingUser);
+  return { client: present(client), usage: await getApiClientUsage(client) };
 }
 
 // keyHash never leaves the server; keyPrefix is the safe handle for display.

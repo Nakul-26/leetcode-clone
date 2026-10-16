@@ -11,6 +11,7 @@ import * as authService from "../services/auth.service.js";
 import * as auditService from "../services/audit.service.js";
 import * as systemService from "../services/system.service.js";
 import * as apiClientsService from "../services/apiClients.service.js";
+import * as queueStatsService from "../services/queueStats.service.js";
 import { safeErrorMessage } from "../utils/safeErrorMessage.js";
 
 const router = express.Router();
@@ -37,6 +38,32 @@ router.post("/api-clients", verifyToken, authorizeRoles("admin", "superadmin"), 
 router.get("/api-clients", verifyToken, authorizeRoles("admin", "superadmin"), async (req, res) => {
   try {
     res.json(await apiClientsService.listApiClients(req.user));
+  } catch (error) {
+    res.status(error.status || 500).json({ error: safeErrorMessage(error) });
+  }
+});
+
+router.patch("/api-clients/:clientId", verifyToken, authorizeRoles("admin", "superadmin"), async (req, res) => {
+  try {
+    res.json(await apiClientsService.updateApiClient(req.params.clientId, req.body, req.user));
+  } catch (error) {
+    res.status(error.status || 500).json({ error: safeErrorMessage(error) });
+  }
+});
+
+router.get("/api-clients/:clientId/usage", verifyToken, authorizeRoles("admin", "superadmin"), async (req, res) => {
+  try {
+    res.json(await apiClientsService.getApiClientUsageById(req.params.clientId, req.user));
+  } catch (error) {
+    res.status(error.status || 500).json({ error: safeErrorMessage(error) });
+  }
+});
+
+// Platform-wide, so superadmin only: queue depth says nothing about one college, and the
+// per-client table spans every tenant.
+router.get("/queue-stats", verifyToken, authorizeRoles("superadmin"), async (req, res) => {
+  try {
+    res.json(await queueStatsService.getQueueStats());
   } catch (error) {
     res.status(error.status || 500).json({ error: safeErrorMessage(error) });
   }

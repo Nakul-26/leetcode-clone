@@ -35,6 +35,11 @@ export const env = {
   // confusing "college quota exceeded".
   STUDENT_SUBMISSION_QUOTA: Number(process.env.STUDENT_SUBMISSION_QUOTA) || 10,
   STUDENT_SUBMISSION_QUOTA_WINDOW_SECONDS: Number(process.env.STUDENT_SUBMISSION_QUOTA_WINDOW_SECONDS) || 60,
+  // Defaults for external API clients (plan Phase 4), applied when a client has no limit of its
+  // own set. 0 means unlimited, so nothing changes until a limit is deliberately configured.
+  // Counted in test cases, not requests: a batch of six is six.
+  API_CLIENT_DEFAULT_RATE_PER_MIN: Number(process.env.API_CLIENT_DEFAULT_RATE_PER_MIN) || 0,
+  API_CLIENT_DEFAULT_MONTHLY_QUOTA: Number(process.env.API_CLIENT_DEFAULT_MONTHLY_QUOTA) || 0,
   // Phase 2 billing (Stripe). Unlike the secrets above, these have no production
   // fail-fast guard on purpose: billing isn't live yet, so a missing key must not crash
   // the whole API. billing.service.js/stripe.js soft-fail (503) at call time instead.

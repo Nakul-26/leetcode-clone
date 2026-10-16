@@ -8,6 +8,7 @@ import { getCacheJSON, setCacheJSON } from "./cache.service.js";
 import { checkCollegeSubmissionQuota, checkStudentSubmissionQuota } from "./quota.service.js";
 import { checkPlanUsageLimit, collegeAllowsPremium } from "./billing.service.js";
 import { HttpError } from "../utils/httpError.js";
+import { admitApiClient } from "./apiClientQuota.service.js";
 
 function validateSubmissionMessage(msg) {
   if (!msg || typeof msg !== "object") return false;
@@ -373,6 +374,21 @@ export async function submitSolution({ problemId, code, language, selectedOption
     throw new HttpError(400, "code and language are required for this problem");
   }
 
+  // Per-API-client admission (plan Phase 4). Placed after every validation that can reject the
+  // request, and only on the path that actually reaches the judge, so a client is never charged
+  // for an MCQ answer or a request that failed validation. The units are handed back if the
+  // submission then fails to enqueue.
+  let admission = null;
+  if (apiClientId) {
+    admission = await admitApiClient(apiClientId, 1);
+    if (!admission.allowed) {
+      const status = admission.code === "exceeds_rate_limit" ? 422 : 429;
+      const err = new HttpError(status, "API client limit reached", { msg: admission.message, code: admission.code });
+      if (admission.retryAfter) err.retryAfter = admission.retryAfter;
+      throw err;
+    }
+  }
+
   const submissionData = {
     problemId,
     code,
@@ -388,31 +404,37 @@ export async function submitSolution({ problemId, code, language, selectedOption
   if (externalAssessmentId) submissionData.externalAssessmentId = externalAssessmentId;
   if (apiClientId) submissionData.apiClientId = apiClientId;
 
-  const submission = await submissionsRepo.create(submissionData);
+  let submission;
+  try {
+    submission = await submissionsRepo.create(submissionData);
 
-  await logSubmitProblemEvent(attemptId, problem, submission);
+    await logSubmitProblemEvent(attemptId, problem, submission);
 
-  const messageBody = buildJudgeMessageBody({
-    submissionId: submission._id.toString(),
-    problem,
-    language,
-    code,
-    requestId
-  });
+    const messageBody = buildJudgeMessageBody({
+      submissionId: submission._id.toString(),
+      problem,
+      language,
+      code,
+      requestId
+    });
 
-  // Carried through so judge-service-go can tag the usage_events record it writes
-  // per submission (H4 metering) without a round-trip lookup of userId -> collegeId.
-  if (collegeId) messageBody.collegeId = String(collegeId);
-  // Same reason, for per-customer attribution: the judge stamps apiClientId onto the
-  // usage event so a submission can be billed to the API key that produced it, with no
-  // lookup back into assessment-api (plan Phase 1).
-  if (apiClientId) messageBody.apiClientId = String(apiClientId);
+    // Carried through so judge-service-go can tag the usage_events record it writes
+    // per submission (H4 metering) without a round-trip lookup of userId -> collegeId.
+    if (collegeId) messageBody.collegeId = String(collegeId);
+    // Same reason, for per-customer attribution: the judge stamps apiClientId onto the
+    // usage event so a submission can be billed to the API key that produced it, with no
+    // lookup back into assessment-api (plan Phase 1).
+    if (apiClientId) messageBody.apiClientId = String(apiClientId);
 
-  if (!validateSubmissionMessage(messageBody)) {
-    throw new HttpError(500, "Invalid submission message", { msg: "Internal server error: invalid submission message" });
+    if (!validateSubmissionMessage(messageBody)) {
+      throw new HttpError(500, "Invalid submission message", { msg: "Internal server error: invalid submission message" });
+    }
+
+    await publishSubmissionMessage(messageBody);
+  } catch (err) {
+    await admission?.refund();
+    throw err;
   }
-
-  await publishSubmissionMessage(messageBody);
 
   return { submission };
 }

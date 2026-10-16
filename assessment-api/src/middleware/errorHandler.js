@@ -4,6 +4,8 @@ export function errorHandler(err, req, res, _next) {
   console.error(err);
 
   const status = err.status || 500;
+  // A 429 is only actionable if the client is told when to come back.
+  if (err.retryAfter) res.set("Retry-After", String(err.retryAfter));
   const message = safeErrorMessage(err);
 
   if (err.status && err.body) {

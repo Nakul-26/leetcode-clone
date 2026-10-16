@@ -2,10 +2,19 @@ import { runRawCodeAssess } from "../services/codeAssessShim.service.js";
 import {
   enqueueAdHoc, enqueueBatch, waitForCompletion, findOwned, findOwnedMany, toApiResponse, MAX_BATCH_SIZE
 } from "../services/adhocExecution.service.js";
+import { admitApiClient } from "../services/apiClientQuota.service.js";
 
 function b64decode(s) {
   if (!s) return "";
   return Buffer.from(s, "base64").toString("utf8");
+}
+
+// Answers a refused admission in this surface's own error shape, with Retry-After where
+// waiting can help. An over-large request is a 422 rather than a 429: retrying it never works.
+function sendQuotaDenied(res, admission) {
+  const status = admission.code === "exceeds_rate_limit" ? 422 : 429;
+  if (admission.retryAfter) res.set("Retry-After", String(admission.retryAfter));
+  return res.status(status).json({ error: admission.message, code: admission.code });
 }
 
 function b64encode(s) {
@@ -35,15 +44,25 @@ export async function submitRawExecution(req, res) {
   // exam portal behaves exactly as before (plan Phase 2).
   if (req.apiClient) {
     const wallLimit = Number(body.wall_time_limit) || Number(body.cpu_time_limit) || undefined;
-    const queued = await enqueueAdHoc({
-      apiClient: req.apiClient,
-      languageId: Number(body.language_id),
-      sourceCode,
-      stdin,
-      wallTimeLimitSec: wallLimit,
-      memoryLimitKb: Number(body.memory_limit) || undefined
-    });
+    const admission = await admitApiClient(req.apiClient, 1);
+    if (!admission.allowed) return sendQuotaDenied(res, admission);
+
+    let queued;
+    try {
+      queued = await enqueueAdHoc({
+        apiClient: req.apiClient,
+        languageId: Number(body.language_id),
+        sourceCode,
+        stdin,
+        wallTimeLimitSec: wallLimit,
+        memoryLimitKb: Number(body.memory_limit) || undefined
+      });
+    } catch (err) {
+      await admission.refund();
+      throw err;
+    }
     if (queued.unsupported) {
+      await admission.refund();
       return res.status(400).json({ error: `Unsupported language_id: ${body.language_id}` });
     }
     if (req.query.wait === "true") {
@@ -130,7 +149,22 @@ export async function submitBatch(req, res) {
   // Invalid items are answered in place and excluded from execution, so one bad item
   // doesn't reject the rest of the batch.
   const valid = prepared.filter((p) => !p.invalid);
-  const queued = valid.length ? await enqueueBatch({ apiClient: req.apiClient, items: valid }) : [];
+
+  // The whole batch is admitted or refused together, in test cases. Admitting part of it would
+  // leave the caller to work out which items ran.
+  const admission = await admitApiClient(req.apiClient, valid.length);
+  if (!admission.allowed) return sendQuotaDenied(res, admission);
+
+  let queued = [];
+  try {
+    queued = valid.length ? await enqueueBatch({ apiClient: req.apiClient, items: valid }) : [];
+  } catch (err) {
+    await admission.refund();
+    throw err;
+  }
+  // Items that were refused individually (unsupported language, queue error) did no work.
+  const rejected = queued.filter((q) => q.error).length;
+  if (rejected > 0) await admission.refund(rejected);
   let next = 0;
   const out = prepared.map((p) => (p.invalid ? { error: p.invalid } : queued[next++]));
   return res.status(201).json(out);

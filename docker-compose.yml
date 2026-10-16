@@ -7,7 +7,7 @@ services:
     container_name: codespace_redis
     command: redis-server --appendonly yes
     ports: 
-      - "6379:6379"
+      - "${REDIS_HOST_PORT:-6379}:6379"
     volumes:
       - redis_data:/data
     networks:
@@ -52,7 +52,7 @@ services:
     container_name: codespace_assessment_api
     command: npm run dev
     ports:
-      - "3000:3000"
+      - "${API_HOST_PORT:-3000}:3000"
     volumes:
       - ./assessment-api:/usr/src/app
       - ./contracts:/usr/src/contracts:ro
