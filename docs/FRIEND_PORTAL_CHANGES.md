@@ -138,15 +138,60 @@ To check the exam's own questions, add their reference solutions and expected ou
 
 ---
 
-## 7. A separate issue worth deciding on
+## 7. A separate issue worth deciding on: source "unescaping" (already on production)
 
-Stored-problem **stdin** submissions (the `/integration` and `/arventiq` routes, not the Judge API above)
-pass the source through an "unescape" step before compiling. It turns every `\n` inside a string
-literal into a real newline, so `cout << "x\n"` fails to compile and Python's `rstrip("\n")` becomes a
-syntax error. We found this while testing the new path and fixed it for ad-hoc submissions only,
-because the unescape exists for a reason we cannot see (code that arrives double-encoded from some
-client). **Decision needed:** does any client actually send escaped source? If not, the step should be
-removed for stored-problem stdin submissions too. We have not changed it.
+**This is not a local-only problem.** It is in the code on `origin/main` today, and a redeploy neither
+introduces nor fixes it for the paths below.
+
+`util.UnescapeCode` rewrites the two-character sequence backslash-`n` into a real newline (and backslash-`t`,
+backslash-`r` and a doubled backslash likewise) in the student's source before it is written to disk. It was
+added on 2026-06-08 (commit `fbb3e3a`) "to avoid syntax errors in runtime wrappers", in a commit that also
+touched `scripts/test_submission.js`, so it was most likely a workaround for test tooling that sent
+pre-escaped code. That is an inference from the commit, not something the code states.
+
+Where it runs on production:
+
+| Path | Languages affected |
+|---|---|
+| Function-mode problems (frontend, `/integration`, `/arventiq`) | Python, JavaScript, TypeScript, Ruby, PHP, C# |
+| Stored-problem stdin problems | every stdin language, including C and C++ |
+| **Not affected** | the GO Judge public API (`/api/codeAssess/*`) and `/raw-run`; C, C++, Java, Go, Rust and Kotlin in function mode |
+
+What it does to correct code (verified by running the real function):
+
+| Student wrote | Judge compiles |
+|---|---|
+| `print("a\nb")` | the string is split across two lines: a **SyntaxError** |
+| `s = input().rstrip("\n")` | an unterminated string: a **SyntaxError** |
+| `re.split("\\s+", x)` | `re.split("\s+", x)`: a **different regex** |
+| `cout << "x\n";` (stdin problems) | does not compile |
+
+**The exam portal's own submissions are not affected**, because it uses the GO Judge public API, which never
+unescapes. It matters for anything submitted through the stored-problem routes.
+
+We have fixed it only for ad-hoc submissions (the public API's queue path). We have **not** changed the
+stored-problem behaviour, because removing it would break any client that really does send escaped source,
+and that cannot be seen from the code.
+
+**To decide with data, run these read-only queries against the production database:**
+
+```js
+// Code that looks pre-escaped: it contains a literal backslash-n but no real newline.
+// If this is about 0, nothing sends escaped source and the unescape step can be removed.
+db.submissions.countDocuments({ $and: [ { code: /\\n/ }, { code: { $not: /\n/ } } ] })
+
+// Students probably already hit by the bug: multi-line code that also has a literal
+// backslash-n inside a string, in the languages that go through the unescape step.
+db.submissions.countDocuments({
+  language: { $in: ["python", "javascript", "typescript", "ruby", "php", "csharp"] },
+  $and: [ { code: /\\n/ }, { code: /\n/ } ]
+})
+```
+
+In a JavaScript regex literal, `/\\n/` matches a backslash followed by `n`, and `/\n/` matches a real newline.
+
+If the first count is zero, remove the unescape step from the adapters and the stdin runner. If it is not,
+find which client sends escaped code and fix it there.
 
 ---
 
