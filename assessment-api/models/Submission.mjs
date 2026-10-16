@@ -3,10 +3,21 @@ import mongoose from 'mongoose';
 const { Schema } = mongoose;
 
 const SubmissionSchema = new Schema({
+    // Absent only for ad-hoc submissions (kind: 'adhoc'): raw "run this program"
+    // requests from the Judge0-compatible API, which have no stored problem.
     problemId: {
         type: Schema.Types.ObjectId,
         ref: 'Problem',
-        required: true
+        required: function () { return this.kind !== 'adhoc'; }
+    },
+    kind: {
+        type: String,
+        enum: ['adhoc']
+    },
+    // Set only on ad-hoc rows so a TTL index can expire them. The durable billing
+    // record is usageevents, which the judge writes separately and which is kept.
+    expiresAt: {
+        type: Date
     },
     userId: {
         type: Schema.Types.ObjectId,
@@ -103,5 +114,7 @@ SubmissionSchema.index({ assessmentId: 1, userId: 1 });
 SubmissionSchema.index({ collegeId: 1 });
 // Per-client usage reporting and quota windows.
 SubmissionSchema.index({ apiClientId: 1, createdAt: -1 });
+// Ad-hoc executions are transient; keeps them from bloating the collection.
+SubmissionSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
 
 export default mongoose.model('Submission', SubmissionSchema);

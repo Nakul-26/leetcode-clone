@@ -2,12 +2,15 @@ import amqp from "amqplib";
 import { getChannel, getRabbitConnectionTarget } from "../config/rabbit.js";
 
 const QUEUE_NAME = "submission_queue";
+// Latency-sensitive work (a caller waiting synchronously) goes here; the judge
+// drains it ahead of the bulk queue. See judge-service-go main.go.
+export const INTERACTIVE_QUEUE_NAME = "submission_queue_fast";
 const DLX_NAME = "submission_dlx";
 const DLQ_NAME = "submission_dead_letters";
 
 const MAX_QUEUE_DEPTH = 5000;
 
-export async function publishSubmissionMessage(messageBody) {
+export async function publishSubmissionMessage(messageBody, { queue = QUEUE_NAME } = {}) {
   let connection;
   let channel;
   let existingChannel = getChannel();
@@ -21,7 +24,7 @@ export async function publishSubmissionMessage(messageBody) {
     await channel.assertQueue(DLQ_NAME, { durable: true });
     await channel.bindQueue(DLQ_NAME, DLX_NAME, "");
 
-    const q = await channel.assertQueue(QUEUE_NAME, { 
+    const q = await channel.assertQueue(queue, { 
       durable: true,
       arguments: {
         "x-dead-letter-exchange": DLX_NAME
@@ -40,7 +43,7 @@ export async function publishSubmissionMessage(messageBody) {
       throw error;
     }
 
-    channel.sendToQueue(QUEUE_NAME, Buffer.from(JSON.stringify(messageBody)), { persistent: true });
+    channel.sendToQueue(queue, Buffer.from(JSON.stringify(messageBody)), { persistent: true });
 
     if (!existingChannel) {
       await channel.close();

@@ -1,4 +1,5 @@
 import { runRawCodeAssess } from "../services/codeAssessShim.service.js";
+import { enqueueAdHoc, waitForCompletion, findOwned, toJudge0Response } from "../services/adhocExecution.service.js";
 
 function b64decode(s) {
   if (!s) return "";
@@ -25,6 +26,30 @@ export async function submitRawExecution(req, res) {
 
   if (body.language_id == null || !sourceCode) {
     return res.status(400).json({ error: "language_id and source_code are required" });
+  }
+
+  // A caller with a real ApiClient key goes through the queue; a legacy shared-secret
+  // caller keeps the synchronous path until it has been issued a key, so the existing
+  // exam portal behaves exactly as before (plan Phase 2).
+  if (req.apiClient) {
+    const wallLimit = Number(body.wall_time_limit) || Number(body.cpu_time_limit) || undefined;
+    const queued = await enqueueAdHoc({
+      apiClient: req.apiClient,
+      languageId: Number(body.language_id),
+      sourceCode,
+      stdin,
+      wallTimeLimitSec: wallLimit,
+      memoryLimitKb: Number(body.memory_limit) || undefined
+    });
+    if (queued.unsupported) {
+      return res.status(400).json({ error: `Unsupported language_id: ${body.language_id}` });
+    }
+    if (req.query.wait === "true") {
+      const done = await waitForCompletion(queued.token, req.apiClient._id);
+      return res.status(200).json(toJudge0Response(done));
+    }
+    // Judge0 answers an async create with just the token.
+    return res.status(201).json({ token: queued.token });
   }
 
   const result = await runRawCodeAssess({
@@ -54,5 +79,10 @@ export async function submitRawExecution(req, res) {
 // (wait=true), so judge.js's defensive poll loop never has anything to poll for.
 // Implemented only so a stray poll doesn't 404 into confusing error handling.
 export async function getRawExecution(req, res) {
+  if (req.apiClient) {
+    const doc = await findOwned(req.params.token, req.apiClient._id);
+    if (!doc) return res.status(404).json({ error: "Submission not found" });
+    return res.status(200).json(toJudge0Response(doc));
+  }
   return res.status(404).json({ error: "Synchronous-only judge: nothing to poll for token " + req.params.token });
 }
