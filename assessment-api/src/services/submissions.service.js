@@ -433,6 +433,11 @@ export async function submitSolution({ problemId, code, language, selectedOption
     await publishSubmissionMessage(messageBody);
   } catch (err) {
     await admission?.refund();
+    // The row was created before the publish. If the message never reached the queue nothing
+    // will ever process it, so leaving it Pending shows the user a spinner that never ends.
+    if (submission) {
+      await submissionsRepo.updateById(submission._id, { status: "Error", output: "Queue unavailable" }).catch(() => {});
+    }
     throw err;
   }
 

@@ -248,6 +248,9 @@ describe("Per-API-client admission control (plan Phase 4)", () => {
       await ApiClient.updateOne({ _id: id }, { rateLimitPerMin: 1 });
       publishSubmissionMessage.mockRejectedValueOnce(Object.assign(new Error("down"), { status: 503 }));
       await expect(submit(id)).rejects.toMatchObject({ status: 503 });
+      // The row created before the failed publish must not be left Pending forever.
+      expect(await Submission.countDocuments({ status: "Pending" })).toBe(0);
+      expect(await Submission.countDocuments({ status: "Error" })).toBe(1);
       await expect(submit(id)).resolves.toHaveProperty("submission"); // the failed attempt was not charged
     });
 
