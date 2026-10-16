@@ -123,6 +123,35 @@ On a 6-core box, 24 concurrent compile-heavy submissions contend for 6 cores.
 8-12 req/min compile-heavy) were taken on a smaller VPS and are stale for the current
 6-core / 16GB server.
 
+#### Measured saturation curve (2026-10-16, local 8-core / 8GB Docker)
+
+Taken with `scripts/judge_contract_check.mjs --filter accepted --repeat 24`, which
+exercises one accepted C++, Java and Python submission per cycle through the public shim.
+
+| concurrency | throughput | p50 | p95 |
+|---|---|---|---|
+| 1 | 0.51 req/s | 2045 ms | 3834 ms |
+| 4 | 0.84 req/s | 4770 ms | 8190 ms |
+| 8 | 0.89 req/s | 7245 ms | 14879 ms |
+| 16 | 0.83 req/s | 12103 ms | 27358 ms |
+
+Throughput plateaus around concurrency 4 and is *lower* at 16 than at 8, while latency
+grows roughly linearly throughout. Past the knee you buy nothing and pay for it in
+latency — the saturation signature of a CPU-bound workload, consistent with the earlier
+VPS finding that more pooled containers stop helping once CPU is the ceiling.
+
+**Caveat on what this does and does not measure.** These requests go through the shim to
+`/raw-run`, which is *not* queue-backed, so `JUDGE_WORKER_CONCURRENCY` had no effect on
+them — what saturated here is host CPU and the container pool. The transferable
+conclusion is that this host tops out near 4 concurrent compile-heavy executions, which
+is why a queue-path setting of 24 on a 6-core box is well past the knee. Re-measure on
+the real server, and separately for the queue path, before fixing a value.
+
+These are a mixed C++/Java/Python workload, so not comparable to the older
+interpreted-only ~7 req/s figure. Against the old VPS number for compile-heavy languages
+(8-12 req/min, i.e. 0.13-0.20 req/s) this host is several times faster. They are also the
+pre-optimisation baseline for the -O2 / precompiled-header / JVM-startup work in section 6.
+
 ### Phase 1 — `ApiClient` identity and real metering
 
 Prerequisite for everything commercial.
