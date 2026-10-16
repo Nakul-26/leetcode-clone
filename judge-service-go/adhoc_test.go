@@ -291,3 +291,23 @@ func TestAdHocSourceIsNotUnescaped(t *testing.T) {
 		t.Errorf("stored-problem stdin source should still be unescaped")
 	}
 }
+
+func TestAdHocLimitsAreClampedToTheSameCeilingsAsRawRun(t *testing.T) {
+	huge := models.SubmissionMessage{
+		Kind: models.SubmissionKindAdHoc, ProblemType: models.StdinProblem,
+		TimeLimitMs: 3_600_000, MemoryLimitMb: 100_000,
+	}
+	p := adHocProblem(huge)
+	if p.TimeLimitMs != 60000 || p.MemoryLimitMb != 2048 {
+		t.Errorf("limits not clamped: time=%d memory=%d", p.TimeLimitMs, p.MemoryLimitMb)
+	}
+
+	small := models.SubmissionMessage{
+		Kind: models.SubmissionKindAdHoc, ProblemType: models.StdinProblem,
+		TimeLimitMs: 2000, MemoryLimitMb: 128,
+	}
+	p = adHocProblem(small)
+	if p.TimeLimitMs != 2000 || p.MemoryLimitMb != 128 {
+		t.Errorf("a reasonable limit was altered: time=%d memory=%d", p.TimeLimitMs, p.MemoryLimitMb)
+	}
+}

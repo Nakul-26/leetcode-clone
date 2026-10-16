@@ -309,6 +309,12 @@ func fetchProblemData(ctx context.Context, problemsCollection *mongo.Collection,
 	return problem, nil
 }
 
+// Ceilings for caller-supplied limits on ad-hoc submissions, matching /raw-run.
+const (
+	maxAdHocTimeLimitMs   = 60000
+	maxAdHocMemoryLimitMb = 2048
+)
+
 // adHocProblem builds the in-memory Problem for a submission that carries its own
 // test cases instead of referencing a stored one (SubmissionMessage.Kind ==
 // SubmissionKindAdHoc). Always stdin-mode — Validate enforces that — so there is no
@@ -317,13 +323,24 @@ func fetchProblemData(ctx context.Context, problemsCollection *mongo.Collection,
 // Title and Description exist only to satisfy Problem.ValidateBasic; nothing renders
 // them, because an ad-hoc submission has no problem page to render them on.
 func adHocProblem(submissionMsg models.SubmissionMessage) models.Problem {
+	// The limits come from an external caller, so they are clamped here rather than trusted.
+	// /raw-run has always done the same; without it a caller could ask for an hour and hold a
+	// container for the whole of the submission budget.
+	timeLimitMs := submissionMsg.TimeLimitMs
+	if timeLimitMs > maxAdHocTimeLimitMs {
+		timeLimitMs = maxAdHocTimeLimitMs
+	}
+	memoryLimitMb := submissionMsg.MemoryLimitMb
+	if memoryLimitMb > maxAdHocMemoryLimitMb {
+		memoryLimitMb = maxAdHocMemoryLimitMb
+	}
 	return models.Problem{
 		Title:         "Ad-hoc execution",
 		Description:   "Submitted through the public execution API; no stored problem.",
 		Type:          models.StdinProblem,
 		TestCases:     submissionMsg.Tests,
-		TimeLimitMs:   submissionMsg.TimeLimitMs,
-		MemoryLimitMb: submissionMsg.MemoryLimitMb,
+		TimeLimitMs:   timeLimitMs,
+		MemoryLimitMb: memoryLimitMb,
 	}
 }
 

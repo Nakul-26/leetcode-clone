@@ -112,4 +112,21 @@ describe("GO Judge shim: queue-backed path for keyed clients", () => {
     expect(res.body.token).toMatch(/^sync-/);
     expect(publishSubmissionMessage).not.toHaveBeenCalled();
   });
+
+  it("clamps caller-supplied limits to the same ceilings the legacy path enforces", async () => {
+    await post(key, "?base64_encoded=true", { wall_time_limit: 3600, memory_limit: 999999999 });
+    const [msg] = publishSubmissionMessage.mock.calls[0];
+    expect(msg.timeLimitMs).toBe(60000);
+    expect(msg.memoryLimitMb).toBe(2048);
+  });
+
+  it("refuses oversized source up front, because the judge would dead-letter it silently", async () => {
+    const big = "x".repeat(200 * 1024 + 1);
+    const res = await request(app).post("/api/codeAssess/submissions?base64_encoded=true").set("x-rapidapi-key", key)
+      .send({ language_id: 71, source_code: b64(big), stdin: b64("") });
+    expect(res.status).toBe(413);
+    expect(res.body.code).toBe("source_too_large");
+    expect(publishSubmissionMessage).not.toHaveBeenCalled();
+    expect(await Submission.countDocuments({})).toBe(0);
+  });
 });

@@ -20,6 +20,14 @@ const POLL_MS = 100;
 const ADHOC_TTL_MS = 24 * 60 * 60 * 1000;
 
 export const MAX_BATCH_SIZE = 20;
+// The judge refuses source over this size for good (it dead-letters the message), so a larger
+// submission would sit "In Queue" forever with no error for the caller. Refused up front instead.
+// Matches MaxCodeBytes in judge-service-go/pkg/models/submission_message.go.
+export const MAX_SOURCE_BYTES = 200 * 1024;
+// Ceilings for caller-supplied limits, the same as the judge enforces (and /raw-run always did).
+// Clamped here as well so the group-size arithmetic below uses the limit that will really apply.
+export const MAX_WALL_TIME_SEC = 60;
+export const MAX_MEMORY_KB = 2048 * 1024;
 // The judge gives one submission a fixed 120s budget that includes compiling, so a group
 // has to be capped by its worst case: this many seconds of per-case limit summed across the
 // group. Ten cases that each time out at 10s would otherwise run into the budget and fail the
@@ -96,8 +104,8 @@ async function enqueueGroup({ apiClient, language, sourceCode, stdins, wallTimeL
     collegeId: String(apiClient.collegeId),
     apiClientId: String(apiClient._id)
   };
-  if (wallTimeLimitSec) message.timeLimitMs = Math.round(wallTimeLimitSec * 1000);
-  if (memoryLimitKb) message.memoryLimitMb = Math.max(1, Math.round(memoryLimitKb / 1024));
+  if (wallTimeLimitSec) message.timeLimitMs = Math.round(Math.min(wallTimeLimitSec, MAX_WALL_TIME_SEC) * 1000);
+  if (memoryLimitKb) message.memoryLimitMb = Math.max(1, Math.round(Math.min(memoryLimitKb, MAX_MEMORY_KB) / 1024));
 
   try {
     await publishSubmissionMessage(message, { queue: INTERACTIVE_QUEUE_NAME });
@@ -138,7 +146,7 @@ export async function enqueueBatch({ apiClient, items }) {
 
   const chunks = [];
   for (const group of groups.values()) {
-    const limitSec = group.item.wallTimeLimitSec || DEFAULT_CASE_LIMIT_SEC;
+    const limitSec = Math.min(group.item.wallTimeLimitSec || DEFAULT_CASE_LIMIT_SEC, MAX_WALL_TIME_SEC);
     const perChunk = Math.max(1, Math.floor(MAX_GROUP_WORST_CASE_SEC / limitSec));
     for (let i = 0; i < group.members.length; i += perChunk) {
       chunks.push({ ...group, members: group.members.slice(i, i + perChunk) });

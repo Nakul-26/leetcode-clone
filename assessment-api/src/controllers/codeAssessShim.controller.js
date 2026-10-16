@@ -1,6 +1,6 @@
 import { runRawCodeAssess } from "../services/codeAssessShim.service.js";
 import {
-  enqueueAdHoc, enqueueBatch, waitForCompletion, findOwned, findOwnedMany, toApiResponse, MAX_BATCH_SIZE
+  enqueueAdHoc, enqueueBatch, waitForCompletion, findOwned, findOwnedMany, toApiResponse, MAX_BATCH_SIZE, MAX_SOURCE_BYTES
 } from "../services/adhocExecution.service.js";
 import { admitApiClient } from "../services/apiClientQuota.service.js";
 
@@ -43,6 +43,9 @@ export async function submitRawExecution(req, res) {
   // caller keeps the synchronous path until it has been issued a key, so the existing
   // exam portal behaves exactly as before (plan Phase 2).
   if (req.apiClient) {
+    if (Buffer.byteLength(sourceCode, "utf8") > MAX_SOURCE_BYTES) {
+      return res.status(413).json({ error: `source_code exceeds the ${MAX_SOURCE_BYTES}-byte limit`, code: "source_too_large" });
+    }
     const wallLimit = Number(body.wall_time_limit) || Number(body.cpu_time_limit) || undefined;
     const admission = await admitApiClient(req.apiClient, 1);
     if (!admission.allowed) return sendQuotaDenied(res, admission);
@@ -137,6 +140,9 @@ export async function submitBatch(req, res) {
     const item = raw || {};
     const sourceCode = base64 ? b64decode(item.source_code) : (item.source_code || "");
     if (item.language_id == null || !sourceCode) return { invalid: "language_id and source_code are required" };
+    if (Buffer.byteLength(sourceCode, "utf8") > MAX_SOURCE_BYTES) {
+      return { invalid: `source_code exceeds the ${MAX_SOURCE_BYTES}-byte limit` };
+    }
     return {
       languageId: Number(item.language_id),
       sourceCode,

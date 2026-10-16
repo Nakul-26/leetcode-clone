@@ -100,6 +100,14 @@ describe("Batch endpoint: same-source coalescing", () => {
     expect(publishSubmissionMessage.mock.calls[0][0].tests).toHaveLength(2);
   });
 
+  it("refuses an oversized item in place without rejecting the rest", async () => {
+    const big = { language_id: 71, source_code: b64("x".repeat(200 * 1024 + 1)), stdin: b64("") };
+    const res = await post(key, [item("1"), big]);
+    expect(res.status).toBe(201);
+    expect(res.body[0].token).toBeTruthy();
+    expect(res.body[1].error).toMatch(/exceeds/);
+  });
+
   it("rejects an empty or oversized batch", async () => {
     expect((await post(key, [])).status).toBe(422);
     const big = await post(key, Array.from({ length: 21 }, (_, i) => item(String(i))));
