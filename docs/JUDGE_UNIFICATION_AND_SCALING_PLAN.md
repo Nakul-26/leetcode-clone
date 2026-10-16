@@ -1,6 +1,6 @@
 # Judge Unification and Scaling Plan
 
-**Status:** Phases 0-2 built and verified locally, nothing deployed. Written 2026-10-16.
+**Status:** Phases 0-3 built and verified locally, nothing deployed. Written 2026-10-16.
 **Goal:** one execution pipeline behind every API surface, with per-client identity,
 metering and burst handling, supporting both LeetCode-style (`function`) and
 stdin/stdout (`stdin`) problems — so the judge can be sold as a service.
@@ -62,11 +62,13 @@ GO Judge shim, the *caller* loops the test cases. A 6-test Java problem therefor
 | Path | Compiles | JVM starts |
 |---|---|---|
 | Shim, 6 test cases | 6 | 6 |
-| Queue path, batching enabled | 1 | 1 |
+| Coalesced batch, 6 test cases | 1 | 6 (only `javac` is shared) |
 
-That is a ~5-6x CPU difference on the two languages students actually use (C++ and
-Java). No pool or concurrency tuning recovers it, because the work genuinely is being
-done six times. This dwarfs every other tuning knob.
+Compiling six times instead of once is the dominant cost for C++ and Java. **Measured at
+3.4-3.6x wall-clock** (see the Phase 3 result below), not the 5-6x first estimated here: that
+figure counted compiles alone, and the program still has to run six times. No pool or
+concurrency tuning recovers the saving, because the work genuinely is being done six times.
+This dwarfs every other tuning knob.
 
 ---
 
@@ -230,7 +232,7 @@ What the exam portal may need to change is in `docs/FRIEND_PORTAL_CHANGES.md`.
 
 ### Phase 3 — GO Judge batch endpoint with same-source coalescing
 
-This is where the 5-6x C++/Java win is actually captured.
+This is where the C++/Java win is captured (measured 3.4-3.6x; see the result below).
 
 1. Implement `POST /submissions/batch`, a standard batch shape — so this
    is wire-compatible and callers like `judge.js` can adopt it without inventing
@@ -243,6 +245,31 @@ This is where the 5-6x C++/Java win is actually captured.
    slow path, and that batch is strongly preferred.
 
 This is the single highest-value change for the languages your students use.
+
+### Phase 3 result (built and measured locally, 2026-10-16)
+
+`POST /submissions/batch` and `GET /submissions/batch?tokens=...` are implemented for keyed
+clients. Items sharing a language, source and limits become one submission with one test case
+each; tokens are `<id>.<index>` (a group of one keeps the plain id). Measured on the local stack,
+6 test cases, median of 3, identical outputs checked on every run:
+
+| Language | 6 single requests | 1 batch | Speedup |
+|---|---|---|---|
+| C++ | 15.6s | 4.4s | **3.6x** |
+| Java | 11.0s | 3.2s | **3.4x** |
+| Python | 2.9s | 2.4s | 1.2x (nothing to compile) |
+
+Decisions worth knowing:
+
+- **Groups are capped by worst-case run time** (60s of per-case limit summed), because the judge
+  gives a whole submission a fixed 120s budget that includes compiling. Ten cases that each hit a
+  10s timeout would otherwise starve the cases at the back of the group.
+- **Metering counts test cases, not documents.** The usage event now carries `testCount`. In the
+  run above, 70 events represented 115 executions; counting documents would have undercounted by
+  about 40%. Phase 4 quotas must read `testCount`.
+- **Shared-secret callers get 403 on batch.** A coalesced result can only be read back through
+  the queue-backed path, which needs a key.
+- **`expected_output` is ignored**, exactly as on the single endpoint today: the caller compares.
 
 ### Phase 4 — quotas and backpressure per client
 

@@ -1,5 +1,7 @@
 import { runRawCodeAssess } from "../services/codeAssessShim.service.js";
-import { enqueueAdHoc, waitForCompletion, findOwned, toApiResponse } from "../services/adhocExecution.service.js";
+import {
+  enqueueAdHoc, enqueueBatch, waitForCompletion, findOwned, findOwnedMany, toApiResponse, MAX_BATCH_SIZE
+} from "../services/adhocExecution.service.js";
 
 function b64decode(s) {
   if (!s) return "";
@@ -46,7 +48,7 @@ export async function submitRawExecution(req, res) {
     }
     if (req.query.wait === "true") {
       const done = await waitForCompletion(queued.token, req.apiClient._id);
-      return res.status(200).json(toApiResponse(done));
+      return res.status(200).json(toApiResponse(done, queued.token));
     }
     // GO Judge answers an async create with just the token.
     return res.status(201).json({ token: queued.token });
@@ -82,7 +84,74 @@ export async function getRawExecution(req, res) {
   if (req.apiClient) {
     const doc = await findOwned(req.params.token, req.apiClient._id);
     if (!doc) return res.status(404).json({ error: "Submission not found" });
-    return res.status(200).json(toApiResponse(doc));
+    return res.status(200).json(toApiResponse(doc, req.params.token));
   }
   return res.status(404).json({ error: "Synchronous-only judge: nothing to poll for token " + req.params.token });
+}
+
+// POST /codeAssess/submissions/batch?base64_encoded=true
+// Body: { submissions: [{ language_id, source_code, stdin, cpu_time_limit, ... }, ...] }
+// Answers 201 with one { token } or { error } per item, in request order.
+//
+// Items that share a language, source and limits are coalesced into a single execution that
+// compiles once, so sending a student's test cases as one batch is much cheaper than one
+// request per case. The caller cannot tell the difference: every item still gets its own
+// token and its own result. Requires an API key, because a coalesced result can only be read
+// back through the queue-backed path; a shared-secret caller has no such path.
+export async function submitBatch(req, res) {
+  if (!req.apiClient) {
+    return res.status(403).json({ error: "Batch submissions require an API key" });
+  }
+
+  const submissions = req.body && req.body.submissions;
+  if (!Array.isArray(submissions) || submissions.length === 0) {
+    return res.status(422).json({ error: "submissions must be a non-empty array" });
+  }
+  if (submissions.length > MAX_BATCH_SIZE) {
+    return res.status(422).json({
+      error: `number of submissions in a batch should be less than or equal to ${MAX_BATCH_SIZE}`
+    });
+  }
+
+  const base64 = req.query.base64_encoded !== "false";
+  const prepared = submissions.map((raw) => {
+    const item = raw || {};
+    const sourceCode = base64 ? b64decode(item.source_code) : (item.source_code || "");
+    if (item.language_id == null || !sourceCode) return { invalid: "language_id and source_code are required" };
+    return {
+      languageId: Number(item.language_id),
+      sourceCode,
+      stdin: base64 ? b64decode(item.stdin) : (item.stdin || ""),
+      wallTimeLimitSec: Number(item.wall_time_limit) || Number(item.cpu_time_limit) || undefined,
+      memoryLimitKb: Number(item.memory_limit) || undefined
+    };
+  });
+
+  // Invalid items are answered in place and excluded from execution, so one bad item
+  // doesn't reject the rest of the batch.
+  const valid = prepared.filter((p) => !p.invalid);
+  const queued = valid.length ? await enqueueBatch({ apiClient: req.apiClient, items: valid }) : [];
+  let next = 0;
+  const out = prepared.map((p) => (p.invalid ? { error: p.invalid } : queued[next++]));
+  return res.status(201).json(out);
+}
+
+// GET /codeAssess/submissions/batch?tokens=a,b,c
+// Answers { submissions: [...] } in the order the tokens were given; a token that is unknown,
+// malformed or belongs to another client is null.
+export async function getBatch(req, res) {
+  if (!req.apiClient) {
+    return res.status(403).json({ error: "Batch submissions require an API key" });
+  }
+  const tokens = String(req.query.tokens || "").split(",").map((t) => t.trim()).filter(Boolean);
+  if (tokens.length === 0) return res.status(422).json({ error: "tokens is required" });
+  if (tokens.length > MAX_BATCH_SIZE) {
+    return res.status(422).json({
+      error: `number of tokens should be less than or equal to ${MAX_BATCH_SIZE}`
+    });
+  }
+  const docs = await findOwnedMany(tokens, req.apiClient._id);
+  return res.status(200).json({
+    submissions: docs.map((doc, i) => (doc ? toApiResponse(doc, tokens[i]) : null))
+  });
 }

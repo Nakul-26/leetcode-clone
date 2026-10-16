@@ -16,6 +16,9 @@ const UsageEventSchema = new Schema(
     language: { type: String },
     status: { type: String },
     elapsedMs: { type: Number },
+    // Test cases executed. A coalesced batch is one submission with many, so billing and
+    // quotas count this, not documents. Absent on events written before it existed (treat as 1).
+    testCount: { type: Number },
     createdAt: { type: Date, default: Date.now }
   },
   { timestamps: false }

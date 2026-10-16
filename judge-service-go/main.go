@@ -602,6 +602,19 @@ func handleRawRun(containerPool *pool.ContainerPool, ex *executor.Executor) http
 	}
 }
 
+// testCountFromResult is how many test cases a submission actually executed, falling back
+// to the number it carried when no result was produced (e.g. a compile failure) so a
+// failed run is still metered as the work that was requested.
+func testCountFromResult(result *models.SubmissionResult, requested int) int {
+	if result != nil && result.Total > 0 {
+		return result.Total
+	}
+	if requested > 0 {
+		return requested
+	}
+	return 1
+}
+
 // elapsedMsFromResult extracts the total execution time already computed onto the result
 // (by the central runner, or by the wrapper's own JSON output) for reuse as the usage
 // metering signal, without timing the submission a second time.
@@ -894,6 +907,10 @@ func processAndStoreResults(ctx context.Context, executionPath string, stdout, s
 		"language":     submissionMsg.Language,
 		"status":       submissionStatus,
 		"elapsedMs":    elapsedMsFromResult(submissionTestResult),
+		// A coalesced batch is one submission with many test cases, so usage is also
+		// recorded in tests. Without it a client sending six cases in one request would meter
+		// as one, undercounting exactly the traffic the batch endpoint is meant to attract.
+		"testCount":    testCountFromResult(submissionTestResult, len(submissionMsg.Tests)),
 		"createdAt":    time.Now(),
 	}
 	if submissionMsg.CollegeID != "" {

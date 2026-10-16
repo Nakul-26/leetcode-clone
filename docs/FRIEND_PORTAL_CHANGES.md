@@ -89,11 +89,37 @@ the standard API shape.
 
 ---
 
-## 5. Things we plan to add that the portal should be ready for
+## 5. Batch endpoint (new, optional, keyed clients only)
+
+`POST /api/codeAssess/submissions/batch?base64_encoded=true` with
+`{ "submissions": [{ "language_id", "source_code", "stdin", "cpu_time_limit", ... }, ...] }`
+(up to 20 items) answers `201` with one `{ "token" }` or `{ "error" }` per item, **in request order**.
+Poll with `GET /api/codeAssess/submissions/batch?tokens=a,b,c`, which answers `{ "submissions": [...] }`
+in the same order (an unknown token is `null`). It uses the same `x-rapidapi-key` header.
+
+**Why adopt it:** a problem with six test cases currently costs six requests and, for C/C++ and
+Java, six compiles. Sent as one batch with the same source, it compiles once. Measured locally:
+**3.6x faster for C++, 3.4x for Java**, outputs identical; Python gains little (1.2x) because it has
+no compile step. This is the largest single capacity gain available to the portal.
+
+Things to check on the portal side:
+
+- **5.1** Match results to inputs **by position**, not by token contents. Tokens of a coalesced group
+  look like `<id>.0`, `<id>.1`; treat them as opaque strings.
+- **5.2** A batch does not wait. There is no `wait=true` for it; poll until every item's
+  `status.id` is neither `1` nor `2`.
+- **5.3** A bad item gets `{ "error": "..." }` in its own position and does not reject the batch.
+  An empty batch or more than 20 items is `422`.
+- **5.4** A shared-secret caller gets `403` on batch. This is the reason to move to a key first.
+- **5.5** For a group, a compile error is reported on **every** item in it (status `6` with the
+  same `compile_output`), since they share one source. A timeout or crash is reported only on the
+  case that caused it.
+- **5.6** Usage is billed per test case, not per request.
+
+## 5b. Planned, not yet built
 
 | Planned | What the portal should do |
 |---|---|
-| `POST /submissions/batch` (plan Phase 3) | Optional. Sending all of a student's test cases in one batch, rather than one request per case, lets us compile once instead of once per case, which is the largest single speed-up for C++ and Java. `judge.js` can adopt it whenever convenient. |
 | Per-client quotas (plan Phase 4) | Handle `429` with a `Retry-After` header by waiting and retrying, not by failing the student's submission. |
 
 ---

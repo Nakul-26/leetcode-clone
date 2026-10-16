@@ -1,7 +1,7 @@
 import express from "express";
 import { env } from "../config/env.js";
 import { apiClientAuth } from "../middleware/apiClient.mjs";
-import { submitRawExecution, getRawExecution } from "../controllers/codeAssessShim.controller.js";
+import { submitRawExecution, getRawExecution, submitBatch, getBatch } from "../controllers/codeAssessShim.controller.js";
 
 const router = express.Router();
 
@@ -24,6 +24,9 @@ const verifyCodeAssessKey = apiClientAuth({
 router.use(verifyCodeAssessKey);
 
 router.post("/submissions", submitRawExecution);
+// Registered before /:token, which would otherwise capture "batch" as a token.
+router.post("/submissions/batch", submitBatch);
+router.get("/submissions/batch", getBatch);
 router.get("/submissions/:token", getRawExecution);
 
 export default router;
