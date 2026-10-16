@@ -102,11 +102,20 @@ services:
     build:
       context: ./judge-service-go
       dockerfile: Dockerfile
+      # Dev stage keeps the Go toolchain and declares no ENTRYPOINT, so the image CMD
+      # rebuilds from the bind-mounted source on each start. Without this target the
+      # runtime stage is built, whose exec-form ENTRYPOINT swallowed the `command:`
+      # that used to live here as mere arguments - the container then served the
+      # image-baked binary and silently ignored every local edit. See the dev stage
+      # comment in judge-service-go/Dockerfile and docs/LOCAL_TESTING_NOTES.md 5b.
+      target: dev
     container_name: codespace_judge_service_go
     working_dir: /src
-    command: sh -c "go build -o ./tmp/go-judge-service . && ./tmp/go-judge-service"
     volumes:
       - ./judge-service-go:/src
+      # Persist the Go build cache so a restart recompiles incrementally instead of
+      # rebuilding every package from scratch.
+      - judge_go_build_cache:/root/.cache/go-build
       - /tmp:/tmp
     environment:
       - MONGO_URI=${DB_CONNECTION_STRING:-mongodb://mongo:27017/assessment_db}
@@ -280,6 +289,7 @@ volumes:
   redis_data:
   rabbitmq_data:
   mongo_data:
+  judge_go_build_cache:
 
 networks:
   assessment-net:
