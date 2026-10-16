@@ -1,6 +1,6 @@
 # Judge Unification and Scaling Plan
 
-**Status:** Phases 0-3 built and verified locally, nothing deployed. Written 2026-10-16.
+**Status:** Phases 0-4 built and verified locally, nothing deployed. Phase 5 (scale-out) remains. Written 2026-10-16.
 **Goal:** one execution pipeline behind every API surface, with per-client identity,
 metering and burst handling, supporting both LeetCode-style (`function`) and
 stdin/stdout (`stdin`) problems — so the judge can be sold as a service.
@@ -279,6 +279,41 @@ Decisions worth knowing:
    than letting the queue absorb unbounded load.
 3. Expose queue depth and per-client usage on `/stats` so overload is visible before it
    becomes a timeout.
+
+### Phase 4 result (built and verified locally, 2026-10-16)
+
+Per-client admission control, enforced before anything is enqueued.
+
+- **Two opt-in limits per key**, `rateLimitPerMin` and `monthlyQuota`, in **test cases**. `0` means none, so
+  nothing changes for an existing client until a limit is set. Defaults can be set platform-wide with
+  `API_CLIENT_DEFAULT_RATE_PER_MIN` / `API_CLIENT_DEFAULT_MONTHLY_QUOTA`.
+- **Enforced on every keyed surface:** the public judge API (single and batch) and `submitSolution`, which
+  `/integration`, `/arventiq` and the frontend share.
+- **`429` + `Retry-After`** for the two limits; **`422`** when one request is larger than the whole per-minute
+  limit (retrying can never help). Fails open if Redis errors.
+- **Reserve, then refund.** Units are taken before the work and returned if the request is refused or the enqueue
+  fails (partially, for items rejected individually in a batch). Verified live: a client limited to 6/min got six
+  `201`s then `429` with `Retry-After` counting down (38, 37); the documented retry loop waited exactly the
+  requested time and then succeeded.
+- **The monthly counter is seeded from `usageevents`** when its Redis key is missing, so a Redis restart is not a
+  free month. Billing reads the durable record, never Redis.
+- **Admin:** `PATCH /api/admin/api-clients/:id` (limits, name, scopes; not college or key),
+  `GET .../:id/usage`, and superadmin-only `GET /api/admin/queue-stats` (queue depths, dead letters, per-client
+  monthly usage ranked).
+- **Tests:** 22 for quotas and admin, 4 for queue depth, with three deliberate mutations (rate limit never denies,
+  no refund on failed enqueue, counter not seeded) each caught by a test.
+
+Found on the way:
+
+1. **Queue depth returned `null` for every queue** against the real broker. `channel.connection` in amqplib has no
+   `createChannel`. The first test passed only because the test broker is also unreadable; it now uses a fake that can
+   be read.
+2. **Ad-hoc limits were not clamped** (a keyed client could ask for an hour) and **oversized source was dead-lettered
+   silently**, leaving the request "In Queue" forever. Both closed.
+3. **A stored-problem submission was left `Pending` forever** if publishing failed. Now marked `Error`.
+
+**Not done, deliberately:** fairness *inside* a queue (each queue is one FIFO; a client's rate limit is what bounds
+it), and the IP-limiter proxy question, which is recorded as a known risk in the runbook.
 
 ### Phase 5 — horizontal scale-out (existing H12)
 

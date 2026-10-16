@@ -116,11 +116,24 @@ Things to check on the portal side:
   case that caused it.
 - **5.6** Usage is billed per test case, not per request.
 
-## 5b. Planned, not yet built
+## 5b. Per-client quotas and `429` (built)
 
-| Planned | What the portal should do |
-|---|---|
-| Per-client quotas (plan Phase 4) | Handle `429` with a `Retry-After` header by waiting and retrying, not by failing the student's submission. |
+Each key can have a per-minute limit and a monthly quota, both counted in **test cases** (a batch of six is
+six). They are set when the key is issued (or later with `PATCH /api/admin/api-clients/:id`) and are off (`0`)
+until someone sets them, so nothing changes for the portal unless we choose to limit it.
+
+When a limit is hit, the request is refused **before anything runs**, is not charged, and the portal gets:
+
+| Response | Meaning | What the portal should do |
+|---|---|---|
+| `429` with `Retry-After: <seconds>` and `{ "code": "rate_limited" }` | Per-minute limit | Wait the full `Retry-After`, then retry. **Do not fail the student's submission** |
+| `429` with `{ "code": "monthly_quota_exceeded" }` | Monthly allowance used up | Do not retry in a loop. Ask us for more quota |
+| `422` with `{ "code": "exceeds_rate_limit" }` | One request holds more test cases than the whole per-minute limit | Send fewer cases per request; waiting cannot help |
+| `413` with `{ "code": "source_too_large" }` | Source over 200 KB | Reject it on your side |
+
+Also new: `wall_time_limit` / `cpu_time_limit` are capped at 60 s and `memory_limit` at 2 GB (as `/raw-run` always did).
+
+Full detail and examples: [`GO_JUDGE_API.md`](./GO_JUDGE_API.md).
 
 ---
 
