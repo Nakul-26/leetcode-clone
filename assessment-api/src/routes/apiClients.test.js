@@ -138,7 +138,7 @@ describe("Admin API client management", () => {
 
     const after = await request(app).post("/api/codeAssess/submissions").set("x-rapidapi-key", key).send({});
     expect(after.status).toBe(401);
-    expect(after.body).toEqual({ error: "Unauthorized" }); // Judge0-shaped body preserved
+    expect(after.body).toEqual({ error: "Unauthorized" }); // GO Judge-style body preserved
   });
 
   it("refuses a key scoped to a different surface", async () => {

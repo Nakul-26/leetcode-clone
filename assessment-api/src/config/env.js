@@ -11,10 +11,10 @@ export const env = {
   JWT_SECRET: process.env.JWT_SECRET || (process.env.NODE_ENV === "production" ? null : "dev_secret_change_me"),
   TESTING_PLATFORM_KEY: process.env.TESTING_PLATFORM_KEY || (process.env.NODE_ENV === "production" ? null : "testing_platform_secret"),
   ARVENTIQ_SECRET: process.env.ARVENTIQ_SECRET || (process.env.NODE_ENV === "production" ? null : "arventiq_dev_secret"),
-  // Shared secret for the Judge0-wire-compatible /codeAssess/submissions shim. Kept
+  // Shared secret for the GO Judge public API /codeAssess/submissions shim. Kept
   // separate from TESTING_PLATFORM_KEY so it can be rotated independently of the main
   // integration key, and because the caller sends it as `x-rapidapi-key` (it's
-  // built to talk to a Judge0-shaped instance), not `x-service-key`.
+  // built to talk to a GO Judge-style instance), not `x-service-key`.
   CODEASSESS_SHIM_KEY: process.env.CODEASSESS_SHIM_KEY || (process.env.NODE_ENV === "production" ? null : "codeassess_shim_secret"),
   JUDGE_SERVICE_URL: process.env.JUDGE_SERVICE_URL || "http://judge-service-go:8081",
   // H5 fair-scheduling quota: submissions per college allowed within the rolling

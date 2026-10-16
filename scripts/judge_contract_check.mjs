@@ -3,7 +3,7 @@
  * judge_contract_check.mjs — contract/regression harness for the judge's external API.
  *
  * Why this exists: the plan in docs/JUDGE_UNIFICATION_AND_SCALING_PLAN.md routes the
- * Judge0 shim through the queue and adds real tokens + a batch endpoint. The whole point
+ * GO Judge shim through the queue and adds real tokens + a batch endpoint. The whole point
  * is that an external platform pointing JUDGE_URL at us should need little or no change.
  * The only way to be sure of that is to pin the *observable* behaviour now, before the
  * refactor, and diff against it after.
@@ -12,7 +12,7 @@
  * intended improvement you accept into the baseline, or a break in the public contract.
  *
  * Two targets, because they are two different contracts:
- *   --target shim  the PUBLIC Judge0-compatible surface an external platform calls
+ *   --target shim  the PUBLIC GO Judge public API surface an external platform calls
  *                  (assessment-api  POST /api/codeAssess/submissions). This is the one
  *                  that must not break.
  *   --target raw   judge-service-go's internal POST /raw-run. Useful for isolating
@@ -33,14 +33,14 @@ const DEFAULTS = {
   shim: "http://localhost:5000",
 };
 
-// Judge0 status ids, mirroring CODEASSESS_STATUS in
-// assessment-api/src/services/codeAssessShim.service.js. 1/2 are Judge0's own
+// GO Judge status ids, mirroring CODEASSESS_STATUS in
+// assessment-api/src/services/codeAssessShim.service.js. 1/2 are GO Judge's own
 // In Queue / Processing — not produced today (the shim is synchronous), but the poll
 // loop below handles them so this script keeps working unchanged once the shim is
 // queue-backed (plan Phase 2).
 const STATUS = { IN_QUEUE: 1, PROCESSING: 2, ACCEPTED: 3, TLE: 5, COMPILE_ERROR: 6, RUNTIME_ERROR: 11, INTERNAL_ERROR: 13 };
 
-// Judge0 language ids -> our language slugs. Mirrors LANGUAGE_ID_MAP in the shim service.
+// GO Judge language ids -> our language slugs. Mirrors LANGUAGE_ID_MAP in the shim service.
 const LANG = {
   cpp: { id: 54, slug: "cpp" },
   java: { id: 62, slug: "java" },
@@ -186,7 +186,7 @@ async function callShim(base, key, fx, httpTimeoutMs) {
 
   // Forward-compatibility with plan Phase 2: once the shim is queue-backed it may answer
   // In Queue/Processing instead of a finished result. Poll the token exactly as a real
-  // Judge0 client would, so this script needs no edit when that lands.
+  // GO Judge client would, so this script needs no edit when that lands.
   let statusId = j?.status?.id;
   if ((statusId === STATUS.IN_QUEUE || statusId === STATUS.PROCESSING) && j.token) {
     for (let i = 0; i < 40; i++) {

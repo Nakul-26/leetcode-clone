@@ -16,7 +16,7 @@ import Submission from "../../models/Submission.mjs";
 
 const b64 = (s) => Buffer.from(s).toString("base64");
 
-describe("Judge0 shim: queue-backed path for keyed clients", () => {
+describe("GO Judge shim: queue-backed path for keyed clients", () => {
   let key, otherKey;
 
   const issue = async (token, name) =>
@@ -91,7 +91,7 @@ describe("Judge0 shim: queue-backed path for keyed clients", () => {
     const created = await post(key, "?base64_encoded=true");
     const mine = await request(app).get(`/api/codeAssess/submissions/${created.body.token}`).set("x-rapidapi-key", key);
     expect(mine.status).toBe(200);
-    expect(mine.body.status.id).toBe(1); // still queued, in Judge0's own terms
+    expect(mine.body.status.id).toBe(1); // still queued, in GO Judge's own terms
 
     const theirs = await request(app).get(`/api/codeAssess/submissions/${created.body.token}`).set("x-rapidapi-key", otherKey);
     expect(theirs.status).toBe(404);

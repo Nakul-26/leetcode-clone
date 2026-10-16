@@ -8,7 +8,7 @@ const { Schema } = mongoose;
 // shared secret read from env (TESTING_PLATFORM_KEY / ARVENTIQ_SECRET /
 // CODEASSESS_SHIM_KEY). That made it impossible to tell which customer made a
 // call, so there was no way to meter, invoice, rate-limit or revoke one of them
-// without rotating the key for everyone. It is also why the Judge0 shim wrote no
+// without rotating the key for everyone. It is also why the GO Judge shim wrote no
 // usage events at all: UsageEvent needs collegeId/userId/submissionId and the
 // shim had none of the three.
 //

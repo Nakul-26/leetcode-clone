@@ -224,7 +224,7 @@ func (p *Problem) ValidateBasic() error {
 			}
 			// A nil Expected is allowed and means "no expected output": the
 			// program is run and its stdout reported rather than judged. That is
-			// what a Judge0-style caller needs — Judge0's expected_output is
+			// what a GO Judge-style caller needs — GO Judge's expected_output is
 			// optional and the caller usually compares results itself — so an
 			// ad-hoc API submission has stdin but nothing to compare against.
 			if tc.Expected != nil {

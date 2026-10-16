@@ -3,20 +3,20 @@ import Submission from "../../models/Submission.mjs";
 import { publishSubmissionMessage, INTERACTIVE_QUEUE_NAME } from "./evaluation.service.js";
 import { mapLanguageId } from "./codeAssessShim.service.js";
 
-// Queue-backed execution for the Judge0-compatible surface (plan Phase 2). A keyed
+// Queue-backed execution for the GO Judge public API surface (plan Phase 2). A keyed
 // caller's request becomes an ordinary stdin submission with one test case and no
 // expected output, so it gets the queue, retries, dead-lettering, pooling,
 // persistence and metering that every other submission already has.
 
-// How long a Judge0 wait=true call blocks before returning the token with a
-// Processing status, which is Judge0's own documented behaviour for a slow run.
+// How long a GO Judge wait=true call blocks before returning the token with a
+// Processing status, which is GO Judge's own documented behaviour for a slow run.
 const DEFAULT_WAIT_MS = 25_000;
 const POLL_MS = 100;
 // Ad-hoc rows are transient; the judge's usageevents record is the durable one.
 const ADHOC_TTL_MS = 24 * 60 * 60 * 1000;
 
-// Judge0 CE status ids.
-export const JUDGE0 = {
+// Status ids of the GO Judge public API.
+export const API_STATUS = {
   IN_QUEUE: { id: 1, description: "In Queue" },
   PROCESSING: { id: 2, description: "Processing" },
   ACCEPTED: { id: 3, description: "Accepted" },
@@ -26,14 +26,14 @@ export const JUDGE0 = {
   INTERNAL_ERROR: { id: 13, description: "Internal Error" }
 };
 
-const JUDGE_STATUS_TO_JUDGE0 = {
-  Accepted: JUDGE0.ACCEPTED,
-  "Time Limit Exceeded": JUDGE0.TLE,
-  "Compilation Error": JUDGE0.COMPILE_ERROR,
-  "Runtime Error": JUDGE0.RUNTIME_ERROR,
+const JUDGE_STATUS_TO_API = {
+  Accepted: API_STATUS.ACCEPTED,
+  "Time Limit Exceeded": API_STATUS.TLE,
+  "Compilation Error": API_STATUS.COMPILE_ERROR,
+  "Runtime Error": API_STATUS.RUNTIME_ERROR,
   // The legacy shim reports an OOM kill as a runtime error and lets the caller
   // reclassify on memory >= limit; keep that so callers see the same thing.
-  "Memory Limit Exceeded": JUDGE0.RUNTIME_ERROR
+  "Memory Limit Exceeded": API_STATUS.RUNTIME_ERROR
 };
 
 export async function enqueueAdHoc({ apiClient, languageId, sourceCode, stdin, wallTimeLimitSec, memoryLimitKb }) {
@@ -58,7 +58,7 @@ export async function enqueueAdHoc({ apiClient, languageId, sourceCode, stdin, w
     problemType: "stdin",
     language,
     code: sourceCode,
-    // expected is null on purpose: Judge0 callers compare results themselves, so
+    // expected is null on purpose: GO Judge callers compare results themselves, so
     // the judge runs and reports instead of judging.
     tests: [{ inputs: [stdin || ""], expected: null, isHidden: true }],
     collegeId: String(apiClient.collegeId),
@@ -93,22 +93,22 @@ export async function findOwned(token, apiClientId) {
   return Submission.findOne({ _id: token, kind: "adhoc", apiClientId }).lean();
 }
 
-export function toJudge0Response(doc) {
+export function toApiResponse(doc) {
   const b64 = (s) => Buffer.from(s == null ? "" : String(s), "utf8").toString("base64");
   const base = { token: String(doc._id), stdout: null, stderr: null, compile_output: null, time: null, memory: null, exit_code: null, exit_signal: null };
 
-  if (doc.status === "Pending") return { ...base, status: JUDGE0.IN_QUEUE };
-  if (doc.status === "Running") return { ...base, status: JUDGE0.PROCESSING };
+  if (doc.status === "Pending") return { ...base, status: API_STATUS.IN_QUEUE };
+  if (doc.status === "Running") return { ...base, status: API_STATUS.PROCESSING };
 
   const result = doc.testResult;
   if (!result) {
     // Terminal but no judge result: retries exhausted or the judge failed.
-    return { ...base, stderr: b64(doc.output || "Judge failed to produce a result"), status: JUDGE0.INTERNAL_ERROR };
+    return { ...base, stderr: b64(doc.output || "Judge failed to produce a result"), status: API_STATUS.INTERNAL_ERROR };
   }
 
-  const status = JUDGE_STATUS_TO_JUDGE0[result.status] || JUDGE0.INTERNAL_ERROR;
+  const status = JUDGE_STATUS_TO_API[result.status] || API_STATUS.INTERNAL_ERROR;
   const t = (result.details || [])[0] || {};
-  const compileFailed = status.id === JUDGE0.COMPILE_ERROR.id;
+  const compileFailed = status.id === API_STATUS.COMPILE_ERROR.id;
   return {
     ...base,
     stdout: b64(t.stdout ?? t.output ?? ""),
@@ -116,7 +116,8 @@ export function toJudge0Response(doc) {
     compile_output: b64(compileFailed ? result.stderr || "" : ""),
     status,
     time: (Number(t.timeMs ?? result.elapsedMs) || 0) / 1000,
-    memory: status.id === JUDGE0.RUNTIME_ERROR.id && result.status === "Memory Limit Exceeded" ? 262144 : 0,
-    exit_code: t.exitCode ?? 0
+    memory: status.id === API_STATUS.RUNTIME_ERROR.id && result.status === "Memory Limit Exceeded" ? 262144 : 0,
+    // -1 where the program never ran to an exit, matching what the synchronous path reports.
+    exit_code: compileFailed ? -1 : (t.exitCode ?? 0)
   };
 }

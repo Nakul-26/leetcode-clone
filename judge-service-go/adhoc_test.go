@@ -11,7 +11,7 @@ import (
 	"judge-service-go/pkg/models"
 )
 
-// The stdin path is what the public Judge0-compatible surface runs on once
+// The stdin path is what the public GO Judge public API surface runs on once
 // submissions go through the queue, so any language /raw-run accepted today but
 // the stdin registry lacks would be a silent regression for that caller. These
 // seven had no stdin adapter at all, Java included — the second most used
@@ -185,7 +185,7 @@ func TestAdHocProblemIsStdinModeAndCarriesItsOwnTests(t *testing.T) {
 }
 
 func TestAdHocProblemWithNoExpectedOutputIsValid(t *testing.T) {
-	// The Judge0 surface has no expected output: the caller compares results
+	// The GO Judge surface has no expected output: the caller compares results
 	// itself. Such a test case must validate, and be reported rather than judged.
 	msg := models.SubmissionMessage{
 		Kind:        models.SubmissionKindAdHoc,
@@ -276,4 +276,18 @@ func TestSubmissionMessageValidateAdHocRules(t *testing.T) {
 			t.Error("a submission with no kind and no problemId must be rejected")
 		}
 	})
+}
+
+func TestAdHocSourceIsNotUnescaped(t *testing.T) {
+	bs := string(rune(92))
+	src := "std::cout << \"x" + bs + "n\";"
+	adhoc := models.SubmissionMessage{Kind: models.SubmissionKindAdHoc, Code: src}
+	if got := stdinSourceFor(adhoc); got != src {
+		t.Errorf("ad-hoc source was rewritten: %q", got)
+	}
+	// Stored-problem behaviour is deliberately unchanged.
+	stored := models.SubmissionMessage{Code: src}
+	if got := stdinSourceFor(stored); got == src {
+		t.Errorf("stored-problem stdin source should still be unescaped")
+	}
 }

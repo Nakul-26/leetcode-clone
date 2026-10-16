@@ -6,7 +6,7 @@ import { safeCompare } from "../utils/safeCompare.js";
 //
 // Each external surface presents its key in a different header, and those header
 // names are part of a contract we do not control — exam-platform's judge.js sends
-// `x-rapidapi-key` because it was written against a Judge0/RapidAPI-shaped
+// `x-rapidapi-key` because it was written against a GO Judge/RapidAPI-shaped
 // service — so the extraction is passed in rather than assumed here.
 //
 // Legacy fallback: until every caller has been issued a real key, the original
@@ -36,8 +36,8 @@ function touchLastUsed(clientId) {
 // env var is read per request rather than captured at import time, which keeps tests
 // that set env before exercising a route working.
 // `unauthorizedBody` exists because the 401 body is part of a public contract on at
-// least one surface: the Judge0 shim answers {error:"Unauthorized"}, and reshaping
-// that would break callers written against a Judge0-shaped service.
+// least one surface: the GO Judge shim answers {error:"Unauthorized"}, and reshaping
+// that would break callers written against a GO Judge-style service.
 export function apiClientAuth({ scope, extractKey, legacySecret, legacyLabel, unauthorizedBody }) {
   if (!scope) throw new Error("apiClientAuth requires a scope");
   if (typeof extractKey !== "function") throw new Error("apiClientAuth requires extractKey");

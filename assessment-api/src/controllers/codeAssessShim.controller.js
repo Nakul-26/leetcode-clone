@@ -1,5 +1,5 @@
 import { runRawCodeAssess } from "../services/codeAssessShim.service.js";
-import { enqueueAdHoc, waitForCompletion, findOwned, toJudge0Response } from "../services/adhocExecution.service.js";
+import { enqueueAdHoc, waitForCompletion, findOwned, toApiResponse } from "../services/adhocExecution.service.js";
 
 function b64decode(s) {
   if (!s) return "";
@@ -11,9 +11,9 @@ function b64encode(s) {
 }
 
 // POST /codeAssess/submissions?base64_encoded=true&wait=true
-// Judge0 CE wire-format-compatible synchronous execution endpoint (same request/response
-// shape as the real Judge0 CE API — see codeAssessShim.service.js). Exists purely so
-// exam-platform's judge.js (which only knows how to speak to a Judge0-shaped instance,
+// GO Judge public API synchronous execution endpoint (same request/response
+// shape as the GO Judge public API — see codeAssessShim.service.js). Exists purely so
+// exam-platform's judge.js (which only knows how to speak to a GO Judge-style instance,
 // see runOnJudge()) can point JUDGE_URL at this service without any code changes
 // on that side. Always responds synchronously — there is no queue behind this route,
 // it calls straight into judge-service-go's internal /raw-run.
@@ -46,9 +46,9 @@ export async function submitRawExecution(req, res) {
     }
     if (req.query.wait === "true") {
       const done = await waitForCompletion(queued.token, req.apiClient._id);
-      return res.status(200).json(toJudge0Response(done));
+      return res.status(200).json(toApiResponse(done));
     }
-    // Judge0 answers an async create with just the token.
+    // GO Judge answers an async create with just the token.
     return res.status(201).json({ token: queued.token });
   }
 
@@ -82,7 +82,7 @@ export async function getRawExecution(req, res) {
   if (req.apiClient) {
     const doc = await findOwned(req.params.token, req.apiClient._id);
     if (!doc) return res.status(404).json({ error: "Submission not found" });
-    return res.status(200).json(toJudge0Response(doc));
+    return res.status(200).json(toApiResponse(doc));
   }
   return res.status(404).json({ error: "Synchronous-only judge: nothing to poll for token " + req.params.token });
 }

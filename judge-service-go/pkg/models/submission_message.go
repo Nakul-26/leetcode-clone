@@ -28,7 +28,7 @@ type SubmissionMessage struct {
 	ApiClientID   string      `json:"apiClientId,omitempty"`
 	// Kind marks a submission that has no stored Problem behind it — a raw
 	// "run this program against this input" request arriving through the public
-	// Judge0-compatible API. Left empty for every normal submission.
+	// GO Judge public API API. Left empty for every normal submission.
 	//
 	// Deliberately an explicit marker rather than inferring ad-hoc from an empty
 	// ProblemID: a bug that dropped problemId would otherwise turn a real
@@ -36,7 +36,7 @@ type SubmissionMessage struct {
 	// silent wrong answer an exam cannot tolerate.
 	Kind string `json:"kind,omitempty"`
 	// Per-submission limits, used only by ad-hoc submissions: a stored Problem
-	// carries its own, but a Judge0 caller sends cpu_time_limit/memory_limit with
+	// carries its own, but a GO Judge caller sends cpu_time_limit/memory_limit with
 	// each request and there is no Problem to read them from.
 	TimeLimitMs   int64 `json:"timeLimitMs,omitempty"`
 	MemoryLimitMb int64 `json:"memoryLimitMb,omitempty"`

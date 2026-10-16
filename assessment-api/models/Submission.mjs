@@ -4,7 +4,7 @@ const { Schema } = mongoose;
 
 const SubmissionSchema = new Schema({
     // Absent only for ad-hoc submissions (kind: 'adhoc'): raw "run this program"
-    // requests from the Judge0-compatible API, which have no stored problem.
+    // requests from the GO Judge public API API, which have no stored problem.
     problemId: {
         type: Schema.Types.ObjectId,
         ref: 'Problem',

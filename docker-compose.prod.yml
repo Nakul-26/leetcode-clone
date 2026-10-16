@@ -9,10 +9,10 @@
 #   JWT_SECRET        long random secret for JWT signing
 #
 # Required for the Arventiq/exam-platform integration:
-#   CODEASSESS_SHIM_KEY   shared secret for the Judge0-wire-compatible shim at
+#   CODEASSESS_SHIM_KEY   shared secret for the GO Judge public API shim at
 #                         /api/codeAssess/submissions. exam-platform sends this back as the
 #                         `x-rapidapi-key` header (its judge.js is built to talk to a
-#                         Judge0-shaped instance) — set the SAME value as that platform's
+#                         GO Judge-style instance) — set the SAME value as that platform's
 #                         JUDGE0_API_KEY Worker secret (that var name lives on their side,
 #                         unrelated to this rename).
 #   TESTING_PLATFORM_KEY  shared secret for /api/integration/* (checked as `x-service-key`).

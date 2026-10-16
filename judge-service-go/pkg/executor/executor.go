@@ -561,7 +561,7 @@ func (e *Executor) RunInContainer(ctx context.Context, containerID string, files
 // addition.
 //
 // The process's exit code is returned alongside its output because the public
-// Judge0-compatible surface reports it as exit_code, and a caller uses it to tell a
+// GO Judge public API surface reports it as exit_code, and a caller uses it to tell a
 // crashing program apart from a merely wrong one. It is 0 when the run never
 // happened at all (a file-copy or compile failure).
 func (e *Executor) RunInContainerWithStdin(ctx context.Context, containerID string, files []string, hostWorkDir string, containerWorkDir string, compileCmd []string, runCmd []string, stdinInput string, timeout time.Duration, memoryLimitMb int64) (string, string, int, error) {
@@ -834,7 +834,7 @@ func (e *Executor) runExecWithStdin(ctx context.Context, containerID string, use
 // RunRawWithStdin compiles (if needed) and runs raw, unwrapped source code against a
 // single stdin payload, returning stdout/stderr/exit code directly — no wrapper
 // generation, no test-case harness, no structural comparison. This is the primitive
-// behind the Judge0-compatible /raw-run endpoint: the caller (assessment-api) decides
+// behind the GO Judge public API /raw-run endpoint: the caller (assessment-api) decides
 // AC/WA itself by comparing stdout against an expected value it never sends here.
 func (e *Executor) RunRawWithStdin(ctx context.Context, containerID string, files []string, hostWorkDir string, containerWorkDir string, compileCmd []string, runCmd []string, timeout time.Duration, memoryLimitMb int64, stdinData []byte) (stdout string, stderr string, compileOutput string, exitCode int, execErr error) {
 	// Compilation gets its own generous, FIXED budget — matching central_runner.go's

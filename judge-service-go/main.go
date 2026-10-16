@@ -60,6 +60,7 @@ const (
 	// for the operator-facing summary.
 	defaultPoolGlobalCap          = 60
 	defaultWorkerConcurrency      = 24
+	defaultInteractiveWorkers     = 4
 	defaultAutoscaleInterval      = 15 * time.Second
 	defaultScaleUpThresholdMs     = 150.0
 	defaultScaleDownThresholdMs   = 20.0
@@ -193,6 +194,10 @@ func getDurationSecondsEnv(name string, def time.Duration) time.Duration {
 
 // MaxExecutionsPerContainer controls how many times a pooled container may be
 // used before being evicted. Can be changed at startup from env.
+// bulkContainerReserve is how many idle containers per language bulk work leaves untouched
+// for interactive callers. Set from JUDGE_INTERACTIVE_RESERVE at startup.
+var bulkContainerReserve = 1
+
 var MaxExecutionsPerContainer int32 = 100
 
 func failOnError(err error, msg string) {
@@ -457,7 +462,7 @@ type rawRunResponse struct {
 
 // handleRawRun serves POST /raw-run: compile (if needed) and execute a single raw source
 // file against a single stdin payload, with no problem/test-case/wrapper concept at all.
-// This is the primitive the public Judge0-compatible shim in assessment-api calls into —
+// This is the primitive the public GO Judge public API shim in assessment-api calls into —
 // judge-service-go itself is never exposed publicly (see docker-compose.prod.yml), so this
 // endpoint intentionally has no auth of its own; the network boundary is the control.
 func handleRawRun(containerPool *pool.ContainerPool, ex *executor.Executor) http.HandlerFunc {
@@ -574,7 +579,7 @@ func handleRawRun(containerPool *pool.ContainerPool, ex *executor.Executor) http
 					// A non-zero exit from the submitted program is an ordinary judging
 					// outcome, not a judge failure, so Error is deliberately left empty:
 					// ExitCode and Stderr above already carry everything the caller needs.
-					// This matters because the Judge0 shim checks raw.error before
+					// This matters because the GO Judge shim checks raw.error before
 					// exitCode, so setting it here reported every student crash as
 					// INTERNAL_ERROR (13, "the judge broke") instead of RUNTIME_ERROR
 					// (11, NZEC) — which left a consuming platform unable to tell a
@@ -951,7 +956,7 @@ func markSubmissionExecutionFailed(ctx context.Context, submissionsCollection *m
 }
 
 // processSubmission is the main coordinator for handling a submission message.
-func processSubmission(d amqp.Delivery, ch *amqp.Channel, retryQueueName string, problemsCollection *mongo.Collection, submissionsCollection *mongo.Collection, usageEventsCollection *mongo.Collection, redisClient *redis.Client, executor *executor.Executor, containerPool *pool.ContainerPool) {
+func processSubmission(interactive bool, d amqp.Delivery, ch *amqp.Channel, retryQueueName string, problemsCollection *mongo.Collection, submissionsCollection *mongo.Collection, usageEventsCollection *mongo.Collection, redisClient *redis.Client, executor *executor.Executor, containerPool *pool.ContainerPool) {
 	ctx := context.Background()
 
 	submissionMsg, err := validateAndDecodeSubmission(d)
@@ -965,7 +970,7 @@ func processSubmission(d amqp.Delivery, ch *amqp.Channel, retryQueueName string,
 	// fetch, so the Problem is built in memory. Everything downstream — strategy
 	// dispatch, the container pool, retries, persistence and metering — then
 	// treats it exactly like any other stdin submission, which is the entire
-	// point: the public Judge0 surface stops being a separate execution path.
+	// point: the public GO Judge surface stops being a separate execution path.
 	var problem models.Problem
 	if submissionMsg.IsAdHoc() {
 		problem = adHocProblem(submissionMsg)
@@ -1007,7 +1012,15 @@ func processSubmission(d amqp.Delivery, ch *amqp.Channel, retryQueueName string,
 	acquireCtx, acquireCancel := context.WithTimeout(ctx, 30*time.Second)
 	defer acquireCancel()
 
-	pooledContainer := containerPool.Acquire(acquireCtx, lang.ID)
+	// Bulk work leaves a reserve of idle containers for interactive callers; without it
+	// a backlog of bulk submissions holds every container and the priority queue is
+	// priority in name only (see pool.AcquireBulk).
+	var pooledContainer *pool.PooledContainer
+	if interactive {
+		pooledContainer = containerPool.Acquire(acquireCtx, lang.ID)
+	} else {
+		pooledContainer = containerPool.AcquireBulk(acquireCtx, lang.ID, bulkContainerReserve)
+	}
 	if pooledContainer == nil {
 		if submissionMsg.RetryCount >= models.MaxSubmissionRetries {
 			slog.Error("Submission exceeded max retries waiting for a container; marking as failed",
@@ -1447,6 +1460,7 @@ func main() {
 	}
 
 	workerConcurrency := getIntEnv("JUDGE_WORKER_CONCURRENCY", defaultWorkerConcurrency)
+	bulkContainerReserve = getIntEnv("JUDGE_INTERACTIVE_RESERVE", bulkContainerReserve)
 
 	// Max executions per pooled container before eviction
 	maxExecs := 100
@@ -1623,7 +1637,7 @@ func main() {
 	failOnError(err, "Failed to declare retry queue")
 
 	// A second queue for latency-sensitive work: a caller waiting synchronously on a
-	// result (the Judge0-compatible surface with wait=true) should not queue behind a
+	// result (the GO Judge public API surface with wait=true) should not queue behind a
 	// bulk backlog it has nothing to do with.
 	//
 	// A separate queue rather than x-max-priority on the existing one, because adding
@@ -1699,44 +1713,27 @@ func main() {
 		go func(workerID int) {
 			defer workerWg.Done()
 			slog.Debug("Worker started", "workerId", workerID)
-			bulk, interactive := msgs, interactiveMsgs
-			for bulk != nil || interactive != nil {
-				// Check the interactive queue first and without blocking, so a caller
-				// waiting on a result is never served after bulk work that was already
-				// buffered here. This bounds the wait at roughly one in-flight
-				// submission rather than the whole backlog; it cannot preempt a
-				// submission that has already started, since nothing here interrupts a
-				// running container.
-				select {
-				case d, ok := <-interactive:
-					if !ok {
-						interactive = nil
-						continue
-					}
-					processSubmission(d, ch, interactiveRetryQueueName, problemsCollection, submissionsCollection, usageEventsCollection, redisClient, executor, containerPool)
-					continue
-				default:
-				}
-
-				// Nothing interactive waiting: block on whichever queue delivers next.
-				// A nil channel blocks forever, which is what retires a closed queue
-				// without spinning.
-				select {
-				case d, ok := <-interactive:
-					if !ok {
-						interactive = nil
-						continue
-					}
-					processSubmission(d, ch, interactiveRetryQueueName, problemsCollection, submissionsCollection, usageEventsCollection, redisClient, executor, containerPool)
-				case d, ok := <-bulk:
-					if !ok {
-						bulk = nil
-						continue
-					}
-					processSubmission(d, ch, retryQueueName, problemsCollection, submissionsCollection, usageEventsCollection, redisClient, executor, containerPool)
-				}
+			for d := range msgs {
+				processSubmission(false, d, ch, retryQueueName, problemsCollection, submissionsCollection, usageEventsCollection, redisClient, executor, containerPool)
 			}
 			slog.Debug("Worker stopped", "workerId", workerID)
+		}(i)
+	}
+
+	// Interactive work gets its own workers rather than sharing the bulk ones: when every
+	// shared worker is busy or blocked waiting for a container on bulk work, a priority
+	// queue is never even read. These are in addition to numWorkers, not carved out of
+	// it, so bulk throughput is unchanged; they spend nearly all their time blocked on
+	// the sandbox, not on CPU.
+	interactiveWorkers := getIntEnv("JUDGE_INTERACTIVE_WORKERS", defaultInteractiveWorkers)
+	slog.Info("Starting interactive workers", "count", interactiveWorkers, "bulkContainerReserve", bulkContainerReserve)
+	for i := 0; i < interactiveWorkers; i++ {
+		workerWg.Add(1)
+		go func(workerID int) {
+			defer workerWg.Done()
+			for d := range interactiveMsgs {
+				processSubmission(true, d, ch, interactiveRetryQueueName, problemsCollection, submissionsCollection, usageEventsCollection, redisClient, executor, containerPool)
+			}
 		}(i)
 	}
 
