@@ -621,6 +621,15 @@ func handleRawRun(containerPool *pool.ContainerPool, ex *executor.Executor) http
 					// Echo back the requested limit so the caller's own
 					// "memory >= limit => reclassify as MLE" heuristic fires
 					// even though we don't meter actual peak usage here.
+				case executor.ErrRuntimeError:
+					// A non-zero exit from the submitted program is an ordinary judging
+					// outcome, not a judge failure, so Error is deliberately left empty:
+					// ExitCode and Stderr above already carry everything the caller needs.
+					// This matters because the Judge0 shim checks raw.error before
+					// exitCode, so setting it here reported every student crash as
+					// INTERNAL_ERROR (13, "the judge broke") instead of RUNTIME_ERROR
+					// (11, NZEC) — which left a consuming platform unable to tell a
+					// crashing submission apart from our own infrastructure failing.
 				default:
 					resp.Error = execErr.Error()
 				}

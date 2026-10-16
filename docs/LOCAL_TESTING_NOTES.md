@@ -173,6 +173,49 @@ exactly two `{{FUNCTION_NAME}}` markers and no other `{{...}}` markers, which is
 string-replacement path is correct for it and why the removed `text/template` branch could never
 have parsed it. The removal was right.
 
+## 5b. The dev stack does NOT rebuild judge-service-go from your source (2026-10-16)
+
+**Editing `judge-service-go/` and running `docker compose up` silently runs the old code.**
+Cost real debugging time: a fix was applied, the container restarted, the source was
+confirmed present inside the container — and the behaviour did not change.
+
+Cause: `docker-compose.yml` sets
+
+```yaml
+command: sh -c "go build -o ./tmp/go-judge-service . && ./tmp/go-judge-service"
+```
+
+but `judge-service-go/Dockerfile` ends with an exec-form entrypoint:
+
+```dockerfile
+ENTRYPOINT ["/usr/local/bin/go-judge-service"]
+```
+
+With an exec-form ENTRYPOINT, `command:` is passed as **arguments to the entrypoint**, not
+as a replacement. The container therefore runs
+`/usr/local/bin/go-judge-service sh -c "go build ..."`; the Go binary ignores the extra
+args and starts normally, serving the **image-baked binary** and never touching the mounted
+source. The `go build` never runs — `/src/tmp` does not even exist in the container.
+It could not work anyway: the runtime stage is `alpine:3.19`, which has no Go toolchain
+(the compile happens in an earlier build stage).
+
+**Until this is fixed, to test a judge-service-go change locally:**
+
+```bash
+docker compose build judge-service-go
+docker compose up -d --force-recreate judge-service-go
+```
+
+`docker compose restart` is NOT enough — it restarts the container from the same image.
+
+**How to tell which binary is running**: `docker compose exec judge-service-go ls /src/tmp`.
+If it says "No such file or directory", the compose `command` never ran and you are on the
+image-baked binary.
+
+A proper fix needs a dev stage in the Dockerfile (a `golang:` base with the toolchain) plus
+`entrypoint: []` in the dev compose override. Adding only `entrypoint: []` is not enough —
+the command would then run and immediately fail with `go: not found`.
+
 ## 6. Backend lint cleanup — `problemDifficultyStats` fix has no test coverage
 
 While clearing the backend's ~27 pre-existing ESLint violations (to flip the CI lint gate from

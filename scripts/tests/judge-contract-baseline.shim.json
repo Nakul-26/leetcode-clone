@@ -40,7 +40,7 @@
     "tokenPresent": true
   },
   "cpp/runtime-error": {
-    "statusId": 13,
+    "statusId": 11,
     "stdout": "",
     "stderrEmpty": false,
     "compileOutputEmpty": true,
@@ -96,7 +96,7 @@
     "tokenPresent": true
   },
   "java/runtime-error": {
-    "statusId": 13,
+    "statusId": 11,
     "stdout": "",
     "stderrEmpty": false,
     "compileOutputEmpty": true,
@@ -144,7 +144,7 @@
     "tokenPresent": true
   },
   "python/compile-error": {
-    "statusId": 13,
+    "statusId": 11,
     "stdout": "",
     "stderrEmpty": false,
     "compileOutputEmpty": true,
@@ -152,7 +152,7 @@
     "tokenPresent": true
   },
   "python/runtime-error": {
-    "statusId": 13,
+    "statusId": 11,
     "stdout": "",
     "stderrEmpty": false,
     "compileOutputEmpty": true,
