@@ -19,6 +19,10 @@ const UsageEventSchema = new Schema(
     // Test cases executed. A coalesced batch is one submission with many, so billing and
     // quotas count this, not documents. Absent on events written before it existed (treat as 1).
     testCount: { type: Number },
+    // Which judge path ran it: "queue" (submissions, including the keyed public API), "run"
+    // (synchronous sample runs) or "raw-run" (the legacy public-API path). Absent on events
+    // written before it existed, which all came from the queue. Statistics only.
+    source: { type: String },
     createdAt: { type: Date, default: Date.now }
   },
   { timestamps: false }
@@ -28,5 +32,7 @@ UsageEventSchema.index({ collegeId: 1, createdAt: -1 });
 UsageEventSchema.index({ collegeId: 1, language: 1 });
 // Per-client metering: "how much did this customer use this period".
 UsageEventSchema.index({ apiClientId: 1, createdAt: -1 });
+// Per-language statistics over a time window (GET /api/admin/language-stats).
+UsageEventSchema.index({ language: 1, createdAt: -1 });
 
 export default mongoose.model("UsageEvent", UsageEventSchema);

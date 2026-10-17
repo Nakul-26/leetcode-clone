@@ -13,6 +13,7 @@ import * as auditService from "../services/audit.service.js";
 import * as systemService from "../services/system.service.js";
 import * as apiClientsService from "../services/apiClients.service.js";
 import * as queueStatsService from "../services/queueStats.service.js";
+import * as languageStatsService from "../services/languageStats.service.js";
 import { safeErrorMessage } from "../utils/safeErrorMessage.js";
 
 const router = express.Router();
@@ -65,6 +66,16 @@ router.get("/api-clients/:clientId/usage", verifyToken, authorizeRoles("admin", 
 router.get("/queue-stats", verifyToken, authorizeRoles("superadmin"), async (req, res) => {
   try {
     res.json(await queueStatsService.getQueueStats());
+  } catch (error) {
+    res.status(error.status || 500).json({ error: safeErrorMessage(error) });
+  }
+});
+
+// Per-language volume and run time across every judge path (queue, /run, /raw-run), to decide
+// where judge optimisation pays off. Platform-wide, so superadmin only. ?days=1..365 (default 30).
+router.get("/language-stats", verifyToken, authorizeRoles("superadmin"), async (req, res) => {
+  try {
+    res.json(await languageStatsService.getLanguageStats({ days: req.query.days }));
   } catch (error) {
     res.status(error.status || 500).json({ error: safeErrorMessage(error) });
   }

@@ -477,12 +477,53 @@ type rawRunResponse struct {
 	Error         string `json:"error,omitempty"`
 }
 
+// recordUsageAsync writes one usageevents document for the synchronous /run and /raw-run
+// paths, which otherwise leave no trace: the queue path already writes its own event. It is
+// for statistics (per-language volume and run time), not billing: these events carry no
+// apiClientId, so quotas and invoices never count them. Fire-and-forget, so a slow or
+// unavailable database can never delay or fail the caller's run.
+func recordUsageAsync(coll *mongo.Collection, event bson.M) {
+	if coll == nil {
+		return
+	}
+	if _, ok := event["createdAt"]; !ok {
+		event["createdAt"] = time.Now()
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if _, err := coll.InsertOne(ctx, event); err != nil {
+			slog.Warn("Failed to record usage event", "source", event["source"], "error", err)
+		}
+	}()
+}
+
+// rawRunUsageStatus maps a /raw-run outcome onto the same status names the queue path
+// records, so statistics can be grouped across both. A raw run has no expected output, so a
+// program that finished cleanly counts as Accepted.
+func rawRunUsageStatus(resp rawRunResponse) string {
+	switch {
+	case resp.Error != "":
+		return models.StatusError
+	case resp.CompileError:
+		return models.SubmissionStatusCompilationError
+	case resp.TimedOut:
+		return models.SubmissionStatusTimeLimitExceeded
+	case resp.OomKilled:
+		return models.SubmissionStatusMemoryLimitExceeded
+	case resp.ExitCode != 0:
+		return models.SubmissionStatusRuntimeError
+	default:
+		return models.SubmissionStatusAccepted
+	}
+}
+
 // handleRawRun serves POST /raw-run: compile (if needed) and execute a single raw source
 // file against a single stdin payload, with no problem/test-case/wrapper concept at all.
 // This is the primitive the public GO Judge public API shim in assessment-api calls into —
 // judge-service-go itself is never exposed publicly (see docker-compose.prod.yml), so this
 // endpoint intentionally has no auth of its own; the network boundary is the control.
-func handleRawRun(containerPool *pool.ContainerPool, ex *executor.Executor) http.HandlerFunc {
+func handleRawRun(containerPool *pool.ContainerPool, ex *executor.Executor, usageEvents *mongo.Collection) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -613,6 +654,14 @@ func handleRawRun(containerPool *pool.ContainerPool, ex *executor.Executor) http
 				discardReason = reason
 			}
 		}
+
+		recordUsageAsync(usageEvents, bson.M{
+			"language":  lang.ID,
+			"status":    rawRunUsageStatus(resp),
+			"elapsedMs": elapsedMs,
+			"testCount": 1,
+			"source":    "raw-run",
+		})
 
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(resp)
@@ -929,6 +978,8 @@ func processAndStoreResults(ctx context.Context, executionPath string, stdout, s
 		// as one, undercounting exactly the traffic the batch endpoint is meant to attract.
 		"testCount":    testCountFromResult(submissionTestResult, len(submissionMsg.Tests)),
 		"createdAt":    time.Now(),
+		// Which execution path ran it, so per-language statistics can be split by surface.
+		"source": "queue",
 	}
 	if submissionMsg.CollegeID != "" {
 		if collegeObjID, err := primitive.ObjectIDFromHex(submissionMsg.CollegeID); err == nil {
@@ -1215,7 +1266,7 @@ func isCentralCompareEnabled(language string) bool {
 	}
 }
 
-func startHealthServer(ctx context.Context, containerPool *pool.ContainerPool, port string, problemsCollection *mongo.Collection, executor *executor.Executor) {
+func startHealthServer(ctx context.Context, containerPool *pool.ContainerPool, port string, problemsCollection *mongo.Collection, usageEventsCollection *mongo.Collection, executor *executor.Executor) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -1364,11 +1415,21 @@ func startHealthServer(ctx context.Context, containerPool *pool.ContainerPool, p
 			return
 		}
 
+		if result != nil {
+			recordUsageAsync(usageEventsCollection, bson.M{
+				"language":  lang.ID,
+				"status":    result.Status,
+				"elapsedMs": elapsedMsFromResult(result),
+				"testCount": testCountFromResult(result, len(msg.Tests)),
+				"source":    "run",
+			})
+		}
+
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(result)
 	})
 
-	mux.HandleFunc("/raw-run", handleRawRun(containerPool, executor))
+	mux.HandleFunc("/raw-run", handleRawRun(containerPool, executor, usageEventsCollection))
 
 	server := &http.Server{
 		Addr:    ":" + port,
@@ -1588,7 +1649,7 @@ func main() {
 	if healthPort == "" {
 		healthPort = "8081"
 	}
-	startHealthServer(ctx, containerPool, healthPort, problemsCollection, executor)
+	startHealthServer(ctx, containerPool, healthPort, problemsCollection, usageEventsCollection, executor)
 
 	// Initialize Redis Client
 	redisPass := os.Getenv("REDIS_PASS")

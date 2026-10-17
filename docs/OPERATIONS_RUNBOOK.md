@@ -155,6 +155,29 @@ judge has not started and has not declared that queue yet.
 
 ---
 
+### Which languages to optimise (language statistics)
+
+`GET /api/admin/language-stats?days=30` (superadmin; `days` from 1 to 365) and the **Submissions by language**
+card on the System page show, per language: submissions, per-day average, share of traffic, median and p95 run
+time, compile errors and **judge time** (volume x run time).
+
+Read it by judge time, not by count: the top rows are where the judge actually spends its CPU, so that is where
+work pays off (C/C++ precompiled headers, warmer or larger pools for that language, JVM flags for Java/Kotlin,
+compile caching). A language with many submissions but tiny run times needs nothing.
+
+Where the numbers come from: `usageevents`, which the judge writes for every execution, tagged with `source`:
+
+| `source` | Path |
+|---|---|
+| `queue` | Platform submissions and the keyed public API (also every event written before the field existed) |
+| `run` | Synchronous sample runs (the "Run" button, Arventiq runs) |
+| `raw-run` | The legacy shared-key public API (`/raw-run`), e.g. the exam portal |
+
+Events from `run` and `raw-run` have no `apiClientId` or `collegeId`, so they never count towards billing or
+quotas; they exist only for these statistics. Ad-hoc submission rows expire after a day, but their usage events do
+not, so the history is complete. Load tests also show up here; note when you ran one.
+
+
 ## Capacity and tuning
 
 ### The model

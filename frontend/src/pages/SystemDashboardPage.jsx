@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Activity, Server, Database, Users, Code2, RefreshCw, AlertCircle, BookOpen, History, Target, TrendingUp, Trophy, AlertTriangle, CheckCircle2 } from 'lucide-react';
 import { admin, submissions, system } from '../api';
+import LanguageStatsCard from '../components/LanguageStatsCard';
 
 function formatTimestamp(ts) {
   if (!ts) return 'N/A';
@@ -355,6 +356,8 @@ const SystemDashboardPage = ({ user }) => {
               );
             })() : <p className="text-muted text-center py-4">Judge stats unavailable</p>}
           </div>
+
+          <LanguageStatsCard />
 
           {/* System Settings & Utilities */}
           <div className="grid grid-cols-2 gap-6 mb-8" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(400px, 1fr))', gap: '24px' }}>

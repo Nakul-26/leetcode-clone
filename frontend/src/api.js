@@ -89,7 +89,8 @@ export const admin = {
   resetPassword: (userId, newPassword) => api.post(`/api/v1/admin/users/${userId}/reset-password`, { newPassword }),
   updateBanner: (data) => api.post("/api/v1/admin/banner", data),
   downloadBackup: () => api.get("/api/v1/admin/backup", { responseType: 'blob' }),
-  restoreDatabase: (data) => api.post("/api/v1/admin/restore", data)
+  restoreDatabase: (data) => api.post("/api/v1/admin/restore", data),
+  getLanguageStats: (days) => api.get("/api/v1/admin/language-stats", { params: { days } })
 };
 
 export const system = {
