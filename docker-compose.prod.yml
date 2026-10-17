@@ -219,6 +219,12 @@ services:
       CODEASSESS_SHIM_KEY: ${CODEASSESS_SHIM_KEY:?CODEASSESS_SHIM_KEY is required}
       ARVENTIQ_SECRET: ${ARVENTIQ_SECRET:?ARVENTIQ_SECRET is required}
       JUDGE_SERVICE_URL: http://go-judge-engine:8081
+      # Browser origins allowed to call the API with cookies (comma-separated). The web frontend at
+      # assess.fortifyhub.net MUST be listed: browsers send an Origin header even on same-site POSTs,
+      # and the API rejects any origin not listed here (shows up as a generic 500 on login).
+      # Add more origins (custom college domains, other frontends) by setting CORS_ALLOWED_ORIGINS
+      # in the Dokploy environment; set it to the FULL list, it replaces this default.
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-https://assess.fortifyhub.net}
       # H5 per-college submission quota — optional, falls back to 30 per 60s (see env.js) if
       # unset. That default is a fairness guard sized for small/incidental multi-college
       # traffic, not a real exam cohort — measured too strict for ~500 students sharing one
