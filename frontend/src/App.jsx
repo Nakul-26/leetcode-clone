@@ -2,6 +2,7 @@ import React, { useEffect, useState, Suspense, lazy } from 'react';
 import { BrowserRouter as Router, Route, Routes, Link, useNavigate, useLocation, Navigate } from 'react-router-dom';
 import { Code2, BookOpen, Settings, PlusCircle, LogIn, Database, LogOut, LayoutDashboard, Users, AlertTriangle, CreditCard, Briefcase, CalendarClock } from 'lucide-react';
 import ProblemListPage from './pages/ProblemListPage';
+import HomePage from './pages/HomePage';
 import AssessmentListPage from './pages/AssessmentListPage';
 import AssessmentManagementPage from './pages/AssessmentManagementPage';
 import AddAssessmentPage from './pages/AddAssessmentPage';
@@ -189,7 +190,7 @@ function AppContent() {
                 {!isAssessmentRoute && (
                 <nav>
                     <div className="nav-links">
-                        <NavLink to="/" icon={BookOpen}>Problems</NavLink>
+                        <NavLink to="/problems" icon={BookOpen}>Problems</NavLink>
                         {user && <NavLink to="/assessments" icon={LayoutDashboard}>Assessments</NavLink>}
                         {user && <NavLink to="/drives" icon={Briefcase}>Drives</NavLink>}
                         {user && <NavLink to="/my-interviews" icon={CalendarClock}>My Interviews</NavLink>}
@@ -228,7 +229,8 @@ function AppContent() {
                 )}
             </div>
             <Routes>
-                <Route path="/" element={<ProblemListPage user={user} />} />
+                <Route path="/" element={<HomePage />} />
+                <Route path="/problems" element={<ProblemListPage user={user} />} />
                 <Route path="/assessments" element={user ? <AssessmentListPage user={user} /> : <Navigate to="/login" replace />} />
                 <Route path="/drives" element={<RequireAuth><DrivesPage /></RequireAuth>} />
                 <Route path="/drives/:id" element={<RequireAuth><DriveDetailPage /></RequireAuth>} />

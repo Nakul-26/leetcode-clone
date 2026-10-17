@@ -194,7 +194,7 @@ const ProblemPage = ({ user }) => {
           {isCollegeAdmin ? (
             <Link to="/admin/billing" className="button">View Plans</Link>
           ) : (
-            <Link to="/" className="button button-outline">Back to Problems</Link>
+            <Link to="/problems" className="button button-outline">Back to Problems</Link>
           )}
         </div>
       </div>
@@ -232,7 +232,7 @@ const ProblemPage = ({ user }) => {
           {activeTab === 'description' ? (
             <div>
               <div className="flex-between mb-4">
-                <Link to="/" className="text-muted flex-center gap-2" style={{ width: 'fit-content', fontSize: '0.85rem' }}>
+                <Link to="/problems" className="text-muted flex-center gap-2" style={{ width: 'fit-content', fontSize: '0.85rem' }}>
                   <ChevronLeft size={16} /> Back to Problems
                 </Link>
                 {canManage && (

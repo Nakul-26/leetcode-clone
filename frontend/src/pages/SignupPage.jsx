@@ -26,7 +26,7 @@ const SignupPage = () => {
       const { user } = res.data;
       localStorage.setItem("user", JSON.stringify(user));
       window.dispatchEvent(new Event("auth-change"));
-      navigate("/");
+      navigate("/assessments");
     } catch (err) {
       const msg =
         err.response?.data?.message ||
