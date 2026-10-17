@@ -128,6 +128,27 @@ count (max 6) times the per-submission cost (~0.23 s including Docker calls and 
 `JUDGE_POOL_MAX_PY` is the next lever if the CPU has room. One request in the first step took 18 s (the morning run
 also had one early outlier); worth watching, not reproduced.
 
+## 6c. Results with pools sized for 12 threads (2026-10-17, third run)
+
+Settings live (confirmed in the judge's startup log): 12 interactive workers; Python, C++ and Java pools 4 to 10
+with autoscaling; other languages unchanged. Load was held for 150 s per language so the autoscaler could grow the
+pools; throughput is measured at the judge from queue depth, per 30 s window.
+
+| Language (trivial program) | First 30 s | Plateau | Max 6 run | Morning |
+|---|---|---|---|---|
+| C++ (-O2, compile included) | 9.5/s | **12.4/s (~745/min)** | 10.4/s | ~8.5/s |
+| Java (compile + JVM) | 5.3/s | **7.4/s (~445/min)** | 6.3/s | not tested |
+| Python | 25/s | **33/s or more (~2,000/min)** | 25.7/s | ~28/s |
+
+- All sampled results were correct. Python was limited by how fast one browser could submit through the API
+  (~33/s accepted); the judge's queue was shrinking at the end, so its Python capacity is higher. 110 requests
+  failed inside the browser with ~1,300 in flight; that is the load generator, not the judge.
+- **The autoscaler is slow for exam bursts.** It adds one container per language at most every 20 s
+  (`JUDGE_POOL_SCALE_UP_COOLDOWN`), so going from 4 to 10 takes about 2 minutes; the first 30 s ran at ~75% of the
+  plateau. An exam that starts with everyone submitting at once outruns it. **Before an exam, raise the minimum for
+  the exam's languages** (for example `JUDGE_POOL_MIN_CPP=8`, `JUDGE_POOL_MIN_JAVA=8`) and redeploy, so the
+  containers are already warm; lower them again afterwards. Shortening the cooldown is the alternative.
+
 ## 7. How to measure each change
 
 Re-run the same ramp (Python and C++, 1 to 40 concurrent, 60 s per step), plus a realistic mix: `bits/stdc++.h`
