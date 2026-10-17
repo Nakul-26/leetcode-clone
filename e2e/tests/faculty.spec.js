@@ -7,7 +7,7 @@ test.describe('Faculty Management', () => {
     await page.fill('input[type="email"]', 'faculty@test.com');
     await page.fill('input[type="password"]', 'password123');
     await page.click('button[type="submit"]');
-    await expect(page).toHaveURL('/');
+    await expect(page).toHaveURL('/assessments');
   });
 
   test('faculty can create and validate a problem', async ({ page }) => {

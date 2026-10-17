@@ -8,7 +8,7 @@ test.describe('Assessment Lifecycle', () => {
     await page.fill('input[type="email"]', 'student@test.com');
     await page.fill('input[type="password"]', 'password123');
     await page.click('button[type="submit"]');
-    await expect(page).toHaveURL('/');
+    await expect(page).toHaveURL('/assessments');
   });
 
   test('student can take an assessment and view results', async ({ page }) => {

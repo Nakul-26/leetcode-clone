@@ -8,7 +8,9 @@ test.describe('Student Submissions', () => {
     await page.fill('input[type="email"]', 'student@test.com');
     await page.fill('input[type="password"]', 'password123');
     await page.click('button[type="submit"]');
-    await expect(page).toHaveURL('/');
+    await expect(page).toHaveURL('/assessments');
+    // The problem list lives at /problems (the base URL is now a landing page).
+    await page.goto('/problems');
   });
 
   test('student can solve Two Sum problem', async ({ page }) => {

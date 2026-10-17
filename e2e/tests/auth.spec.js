@@ -12,8 +12,8 @@ test.describe('Authentication', () => {
     // Click sign in button
     await page.click('button[type="submit"]');
 
-    // Should redirect to home page
-    await expect(page).toHaveURL('/');
+    // Login lands on the assessments page
+    await expect(page).toHaveURL('/assessments');
 
     // Logout button should be visible
     const logoutButton = page.locator('button:has-text("Logout")');
@@ -31,7 +31,7 @@ test.describe('Authentication', () => {
     await page.fill('input[type="password"]', 'password123');
     await page.click('button[type="submit"]');
 
-    await expect(page).toHaveURL('/');
+    await expect(page).toHaveURL('/assessments');
     
     // Faculty should see "Add Problem" link in nav
     const addProblemLink = page.locator('nav >> text=Add Problem');

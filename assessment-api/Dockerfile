@@ -14,7 +14,7 @@ USER node
 # by default, which made `npm install` (running as node) fail with EACCES on
 # package-lock.json on a build with no prior cached layers to mask it.
 # devDependencies are kept in (no --omit=dev) because docker-compose.yml's dev
-# service runs `npm run dev` (nodemon), which is a devDependency.
+# service runs `npm run dev` (`node --watch`, no extra package) and the tests need vitest.
 COPY --chown=node:node assessment-api/package*.json ./
 RUN npm ci
 

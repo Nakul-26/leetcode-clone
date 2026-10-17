@@ -79,7 +79,7 @@ When reporting a bug, include:
 - Output of `docker ps`.
 
 ## 10) Dev environment hot-reload behavior
-- **Assessment API (Node.js):** Uses `nodemon`. Auto-reloads on file changes.
+- **Assessment API (Node.js):** Uses `node --watch` (`npm run dev`). Auto-reloads on file changes.
 - **Judge Service (Go):** Uses `air` for hot reload. Auto-reloads on file changes.
 - **Frontend (React):** Automatically reloads via Vite dev server.
 
