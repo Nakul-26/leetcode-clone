@@ -88,7 +88,7 @@
 #   judge-service-go → GET /health              (returns {"status":"healthy"})
 #
 # Phase D live interview rooms (all optional):
-#   coturn (below) is a self-hosted TURN relay for the WebRTC mesh in
+#   coturn (now in docker-compose.turn.yml, NOT deployed by this file) is a self-hosted TURN relay for the WebRTC mesh in
 #   frontend/src/components/InterviewRoom.jsx. It's optional in the sense that the room
 #   still works without it via STUN alone on most networks — TURN only matters for
 #   participants behind restrictive corporate/campus NATs. If you deploy it, the frontend
@@ -345,26 +345,6 @@ services:
           memory: 2G    # Judge compiles/runs code — cap memory to protect the host
     networks:
       - assessment-net
-
-  # ── 7. coturn (optional TURN relay for Phase D interview rooms) ──────────────
-  # network_mode: host, not the assessment-net bridge - coturn's relay has to advertise
-  # and bind the VPS's actual public IP for NAT traversal to work at all; Docker's bridge
-  # NAT would just add another layer of NAT in front of the NAT-traversal server itself.
-  # Comment out this whole service if you don't want a TURN server yet (STUN-only still
-  # works for most connections - see the header comment above).
-  coturn:
-    image: coturn/coturn:latest
-    restart: unless-stopped
-    network_mode: host
-    command:
-      - "-n"
-      - "--realm=${TURN_REALM:?TURN_REALM is required, e.g. turn.yourdomain.com}"
-      - "--fingerprint"
-      - "--lt-cred-mech"
-      - "--user=${TURN_USERNAME:?TURN_USERNAME is required}:${TURN_CREDENTIAL:?TURN_CREDENTIAL is required}"
-      - "--no-cli"
-      - "--min-port=49160"
-      - "--max-port=49200"
 
   # ── 8. Judge Sandbox Language Environment Images ─────────────────────────────
   judge-java:

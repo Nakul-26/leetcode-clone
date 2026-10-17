@@ -1,0 +1,34 @@
+# Optional TURN relay for Phase D live interview rooms. NOT part of the default deploy.
+#
+# This used to live in docker-compose.prod.yml, where its three required TURN_* variables made
+# every deploy fail at variable interpolation (before any build) for anyone who had not set them,
+# even though TURN is optional: STUN alone works on most networks. Compose interpolates every
+# service's variables even for services behind an inactive profile, so a profile did not fix it;
+# a separate file does.
+#
+# Use it only once TURN_REALM, TURN_USERNAME and TURN_CREDENTIAL are set, e.g.
+#   docker compose -f docker-compose.turn.yml --env-file .env up -d
+# The frontend needs VITE_TURN_URL/VITE_TURN_USERNAME/VITE_TURN_CREDENTIAL set to the same
+# values at BUILD time (Vite inlines VITE_* at build). It uses network_mode: host, so check that
+# ports 3478 and 49160-49200 are free on the host first.
+services:
+  # ── 7. coturn (optional TURN relay for Phase D interview rooms) ──────────────
+  # network_mode: host, not the assessment-net bridge - coturn's relay has to advertise
+  # and bind the VPS's actual public IP for NAT traversal to work at all; Docker's bridge
+  # NAT would just add another layer of NAT in front of the NAT-traversal server itself.
+  # STUN-only still
+  # works for most connections.
+  coturn:
+    image: coturn/coturn:latest
+    restart: unless-stopped
+    network_mode: host
+    command:
+      - "-n"
+      - "--realm=${TURN_REALM:?TURN_REALM is required, e.g. turn.yourdomain.com}"
+      - "--fingerprint"
+      - "--lt-cred-mech"
+      - "--user=${TURN_USERNAME:?TURN_USERNAME is required}:${TURN_CREDENTIAL:?TURN_CREDENTIAL is required}"
+      - "--no-cli"
+      - "--min-port=49160"
+      - "--max-port=49200"
+
