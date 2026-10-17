@@ -95,6 +95,37 @@ deploy to another machine from the same dashboard (**Remote Servers**), which ke
 
 This touches production data and the exam portal's hostname, so its owner should run (or approve) each step.
 
+## 6b. Results after the fixes and settings (2026-10-17, second run)
+
+Settings live: 8 interactive workers, Python/C++/Java pools 4 to 6 with autoscaling on (confirmed in the judge's
+startup log). Zero errors in every step; queues drained to 0.
+
+**Measured directly at the judge** (submissions sent at a fixed rate without waiting; throughput = what the judge
+completed while backlogged). This is the number to plan with, because it excludes network round trips:
+
+| Language (trivial program) | Judge throughput |
+|---|---|
+| Python | ~25.7/s (~1,540/min) |
+| C++ (-O2, compile included) | ~10.4/s (~625/min) |
+| Java (compile + JVM) | ~6.3/s (~380/min) |
+
+**Through the public API, one request at a time per client** (closed loop, includes ~400 ms of network per
+request from the test machine; this was ~230 ms higher than the morning run, so low-concurrency numbers dropped
+for network reasons alone):
+
+| Step | Morning (before) | After |
+|---|---|---|
+| C++ x10 | 499/min, p95 1.47 s | 534/min, p95 1.30 s |
+| C++ x20 | 510/min, p50 2.43 s | 555/min, p50 2.22 s |
+| C++ x40 | 525/min, p50 4.86 s | **618/min (+18%)**, p50 4.06 s |
+| Python x40 | 1,691/min | 1,548/min (network-limited; judge capacity above) |
+| Java x10 / x20 | not tested | 302 / 337 per min |
+
+Reading it: C++ gained capacity and latency at saturation. Python's limit now looks like the Python container
+count (max 6) times the per-submission cost (~0.23 s including Docker calls and the reset), so raising
+`JUDGE_POOL_MAX_PY` is the next lever if the CPU has room. One request in the first step took 18 s (the morning run
+also had one early outlier); worth watching, not reproduced.
+
 ## 7. How to measure each change
 
 Re-run the same ramp (Python and C++, 1 to 40 concurrent, 60 s per step), plus a realistic mix: `bits/stdc++.h`
