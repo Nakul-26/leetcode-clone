@@ -18,8 +18,11 @@ test.describe('Student Submissions', () => {
     // default first page, so filter for it like a real student would. Wait for
     // the filtered response so the initial unfiltered fetch can't race back in
     // and detach the card mid-click.
+    // Register the wait BEFORE typing: the filtered response can arrive before a wait that is
+    // registered afterwards, which then times out.
+    const filtered = page.waitForResponse((res) => res.url().includes('/api/v1/problems') && res.url().includes('search=Two'));
     await page.fill('input[name="search"]', 'Two Sum');
-    await page.waitForResponse((res) => res.url().includes('/api/v1/problems') && res.url().includes('search=Two'));
+    await filtered;
     await page.click('h3:text("Two Sum (Certification)")');
     await expect(page).toHaveURL(/\/problems\/[a-f0-9]+/);
 

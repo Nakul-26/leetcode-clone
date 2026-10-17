@@ -21,6 +21,9 @@ function ProblemListPage({ user }) {
 
   useEffect(() => {
     setApiError(null);
+    // Ignore a response that arrives after the filters have changed again: requests can finish
+    // out of order, and the stale one used to overwrite the newer results.
+    let cancelled = false;
     
     // Clean up empty filters to avoid sending 'search='
     const activeFilters = {};
@@ -30,12 +33,17 @@ function ProblemListPage({ user }) {
 
     api.get('/api/v1/problems', { params: activeFilters })
       .then(response => {
-        setProblems(response.data);
+        if (!cancelled) setProblems(response.data);
       })
       .catch(error => {
+        if (cancelled) return;
         console.error('Error fetching problems:', error);
         setApiError(error.message || 'Unknown error');
       });
+
+    return () => {
+      cancelled = true;
+    };
   }, [filters]);
 
   const handleFilterChange = (e) => {

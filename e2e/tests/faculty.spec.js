@@ -18,12 +18,12 @@ test.describe('Faculty Management', () => {
     await page.fill('input[name="title"]', problemTitle);
     await page.fill('textarea[name="description"]', 'This is a test problem created by E2E suite.');
 
-    // Select a template (it's the first select on the page)
+    // Select a template (the only <select> without a name; the first select is now the problem type)
     page.once('dialog', async dialog => {
       console.log('Dialog appeared:', dialog.message());
       await dialog.accept();
     });
-    await page.locator('select').first().selectOption('string');
+    await page.locator('select:not([name])').first().selectOption('string');
 
     // Wait for fields to be filled (state update)
     await expect(page.locator('input[name="functionName"]')).toHaveValue('reverseString', { timeout: 10000 });
