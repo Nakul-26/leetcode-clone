@@ -91,3 +91,6 @@ backups/
 # Misc / Unused
 image.png
 secrets/
+
+# Local working copy of the placement question sheet
+placement-coordinator-coding-questions.xlsx
