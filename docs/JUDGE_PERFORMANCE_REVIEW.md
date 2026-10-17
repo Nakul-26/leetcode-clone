@@ -49,8 +49,8 @@ Contract suite after all changes: 21/21 identical on both public API paths.
 
 ## 4. Settings to use the cores (testing stack first)
 
-Set these in the **testing** stack's Dokploy environment, redeploy, and re-run the load test. Check the server's
-core count first; the numbers below assume about 6 cores.
+Set these in the **testing** stack's Dokploy environment, redeploy, and re-run the load test. The server is an AMD Ryzen 5 8500G: 6 physical cores (2 Zen 4 + 4 smaller Zen 4c), 12 threads, 14.2 GiB RAM.
+Each sandbox container is capped at 1 CPU, so a language can never use more threads than its pool maximum.
 
 ```
 JUDGE_POOL_AUTOSCALE_ENABLED=true
@@ -79,6 +79,8 @@ JUDGE_INTERACTIVE_WORKERS=8
 | Second judge server on the same queues (plan Phase 5) | Linear capacity | Once one server's CPU is full |
 
 ## 6. Moving the production exam portal to its own server
+
+**Decision (2026-10-17): not now.** The testing stack has no live users, so sharing the server is acceptable. Rule: do not load-test the testing stack while the production portal is running an exam. The steps below stay for when production needs its own machine.
 
 Both stacks on one machine compete for CPU: a busy testing stack (or a load test) slows production exams. Dokploy can
 deploy to another machine from the same dashboard (**Remote Servers**), which keeps the workflow the same.
