@@ -5,7 +5,7 @@ import mongoose from "mongoose";
 import ApiClient from "../../models/ApiClient.mjs";
 import User from "../../models/User.mjs";
 import { generateApiKey } from "../utils/apiKey.js";
-import { HttpError } from "../utils/HttpError.js";
+import { HttpError } from "../utils/httpError.js";
 import { getApiClientUsage } from "./apiClientQuota.service.js";
 
 const VALID_SCOPES = ["integration", "arventiq", "codeassess"];
