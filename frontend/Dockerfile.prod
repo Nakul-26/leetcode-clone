@@ -11,7 +11,8 @@ COPY . .
 
 # Vite inlines VITE_* values at BUILD time, so they must be build args, not runtime env.
 # VITE_API_URL stays empty on purpose: the bundle then calls /api on its own origin and
-# nginx (nginx.conf.template) proxies it to assessment-api, so there is no CORS to configure.
+# nginx (nginx.conf.template) proxies it to assessment-api. The API still checks the browser Origin header,
+# so the frontend hostname must be in CORS_ALLOWED_ORIGINS (defaulted in docker-compose.prod.yml).
 ARG VITE_API_URL=
 ARG VITE_TURN_URL=
 ARG VITE_TURN_USERNAME=

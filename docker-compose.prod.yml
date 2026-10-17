@@ -380,7 +380,7 @@ services:
 
   # ── 7. frontend (static SPA + nginx reverse proxy) ───────────────────────────
   # Serves the built React app and proxies /api and /ws/interview to assessment-api, so the
-  # browser uses a single origin (no CORS). Attach the public domain to THIS service on
+  # browser uses a single origin. Attach the public domain to THIS service on
   # container port 80 in Dokploy (Domains tab). It publishes no host port.
   # VITE_* values are baked in at build time; set them in the Dokploy environment BEFORE
   # building if you use TURN (see docker-compose.turn.yml). Leave unset otherwise.

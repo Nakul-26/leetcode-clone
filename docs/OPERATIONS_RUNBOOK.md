@@ -52,7 +52,7 @@ or API running against newer data keeps working, so rolling back is safe. Leftov
 
 `docker-compose.prod.yml` includes a `frontend` service: the React app built by `frontend/Dockerfile.prod` and
 served by nginx (`frontend/nginx.conf.template`). nginx proxies `/api/` and the `/ws/interview` WebSocket to
-`assessment-api:5000`, so the browser uses a single origin and there is no CORS to configure. `VITE_API_URL`
+`assessment-api:5000`, so the browser makes no cross-site calls. The API still checks the browser `Origin` header on every POST, so the frontend hostname **must** be in `CORS_ALLOWED_ORIGINS` (the compose file defaults it to `https://assess.fortifyhub.net`; a missing entry shows up as a generic 500 on login). `VITE_API_URL`
 stays empty for that reason.
 
 To put it on a hostname (for example `assess.fortifyhub.net`):
@@ -98,7 +98,7 @@ Things to know:
 | `API_CLIENT_DEFAULT_RATE_PER_MIN` | 0 (none) | Per-minute limit, in test cases, for keys with none of their own |
 | `API_CLIENT_DEFAULT_MONTHLY_QUOTA` | 0 (none) | Monthly limit, in test cases, for keys with none of their own |
 | `STRIPE_*`, `BILLING_*_URL` | | Optional card billing scaffolding |
-| `CORS_ALLOWED_ORIGINS` | | Allowed browser origins |
+| `CORS_ALLOWED_ORIGINS` | `https://assess.fortifyhub.net` (prod compose) | Allowed browser origins, comma-separated. Setting it **replaces** the default, so list every origin |
 | `SMTP_*`, `APP_BASE_URL` | | Email and links in email |
 
 Per-key limits are set on the key itself (`PATCH /api/admin/api-clients/:id`) and override these defaults.
