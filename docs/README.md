@@ -30,6 +30,7 @@ Start with the row that matches what you are doing.
 | Document | What it is |
 |---|---|
 | [Judge Unification and Scaling Plan](./JUDGE_UNIFICATION_AND_SCALING_PLAN.md) | The six-phase plan to put every surface on one queue-backed pipeline, with the measurements taken at each step. Phases 0-4 are built; Phase 5 (scale-out) remains |
+| [Judge Performance Review](./JUDGE_PERFORMANCE_REVIEW.md) | How a submission flows through the judge, what limits throughput (measured), and the prioritised fixes |
 | [Platform Audit and SaaS Roadmap](./PLATFORM_AUDIT_AND_SAAS_ROADMAP.md) | Findings from the platform audit and the path to a sellable service |
 | [Arventiq integration](./arventiq-integration/README.md) | The living plan for one partner's stdin/stdout integration, plus its decision history |
 | [Local Testing Notes](./LOCAL_TESTING_NOTES.md) | Notes from running the stack locally |
