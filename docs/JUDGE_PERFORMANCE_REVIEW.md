@@ -19,13 +19,20 @@ Deployments: `coding2` / `assess.fortifyhub.net` is the **testing** stack; the e
    500 submissions it is replaced.
 6. The API answers `wait=true` callers by checking the database every 100 ms.
 
-## 2. What limits throughput (verified)
+## 2. What limits throughput
 
-The 2026-10-17 load test reached **~1,700 Python/min** and **~510 C++/min**, then flattened. The testing stack runs
-**2 containers per language with autoscaling off**, and those ceilings work out to ~70 ms (Python) and ~235 ms
-(C++) per run per container. The limit was **two containers' worth of work, not the server's CPU**: at most two
-submissions of one language execute at once, however many cores are idle. See section 4 for the settings that change
-this.
+The 2026-10-17 load test reached **~1,700 Python/min** and **~510 C++/min**, then flattened. The likely cap is
+concurrency settings, not hardware:
+
+- The public API sends single submissions to the **interactive** queue, whose worker count
+  (`JUDGE_INTERACTIVE_WORKERS`) defaulted to **4**: at most four public-API runs execute at once, across all
+  languages.
+- The testing stack keeps `JUDGE_POOL_SIZE=4` containers per language (the code default is 2), with autoscaling
+  off at the time.
+
+An earlier version of this section said 2 containers per language; the testing stack's environment sets 4.
+Section 4 raises the worker count and enables autoscaling; re-running the load test will confirm which limit
+applied and where the CPU ceiling is.
 
 ## 3. Fixes made (2026-10-17)
 
@@ -53,7 +60,7 @@ JUDGE_POOL_MAX_JAVA=6
 JUDGE_INTERACTIVE_WORKERS=8
 ```
 
-- `JUDGE_POOL_SIZE` stays 2: the warm minimum per language.
+- `JUDGE_POOL_SIZE`: the warm minimum per language (the testing stack uses 4). Write env lines without spaces around `=`.
 - Leave `JUDGE_POOL_GLOBAL_CAP` at 60. It must stay above the sum of the minimums (2 x 12 languages = 24) or the
   judge refuses to start; the CPU limit comes from the per-language maximums and the worker counts.
 - Use the **Submissions by language** card to pick which languages get a higher maximum.
