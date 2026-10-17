@@ -277,6 +277,11 @@ Each of these cost real time. They are listed so you do not repeat them.
 | **Counting requests instead of test cases** | A batch of 20 would dodge both limits and billing | Always `testCount` |
 | **Charging for work that did not run** | A failed enqueue left quota consumed | Every reservation needs a refund path |
 | **Orphan `Pending` rows** | A failed publish left a submission spinning forever | Mark it `Error` in the failure path |
+| **Import path casing** | `HttpError.js` imported a file named `httpError.js`. Windows ignores case, so every test passed; the Linux image crashed on startup | `src/importCase.test.js` now fails on it. Still, after adding a file, check the name you import matches exactly |
+| **Lockfiles regenerated on Windows** | `npm uninstall` / `npm audit fix` dropped an optional dependency, so `npm ci` on Linux failed with `Missing: yaml@2.9.1 from lock file` and broke CI, the Docker build and E2E | After touching `package-lock.json`, regenerate it in Linux: `docker run --rm -v <dir>:/w node:20-alpine sh -c "cd /w && npm install --package-lock-only --ignore-scripts"`, then confirm `npm ci` works there |
+| **Bare service names on Dokploy** | A service with a domain also sits on a network shared by all projects, so `redis` reached another project's Redis and the API never started | Reach dependencies through the `go-judge-*` aliases (see the Operations Runbook) |
+| **Same-site POSTs still send `Origin`** | The API rejected the web frontend with `Not allowed by CORS` (shown as a generic 500) because its allow-list was empty | List every frontend hostname in `CORS_ALLOWED_ORIGINS` |
+| **CI audits dev dependencies too** | `braces` (via `nodemon`) has no patched release, so the audit stayed red | Prefer built-ins (`node --watch`) over dev tools that pull in unpatched chains |
 
 ---
 
