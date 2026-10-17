@@ -248,7 +248,12 @@ services:
         limits:
           memory: 1G
     networks:
-      - assessment-net
+      assessment-net:
+        # Name that exists ONLY on this stack's own network. The frontend proxies to this, not to
+        # "assessment-api": on Dokploy that service name also exists on the network shared with every
+        # other project, so it can resolve to another stack's container (or a dead address).
+        aliases:
+          - go-judge-api
 
   # ── 5. Docker Socket Proxy ────────────────────────────────────────────────────
   # The ONLY thing in this stack that touches the host's real docker.sock. Scopes
@@ -361,6 +366,9 @@ services:
         VITE_TURN_URL: ${VITE_TURN_URL:-}
         VITE_TURN_USERNAME: ${VITE_TURN_USERNAME:-}
         VITE_TURN_CREDENTIAL: ${VITE_TURN_CREDENTIAL:-}
+    environment:
+      # host:port nginx proxies /api and /ws/interview to. Must be the alias above.
+      API_UPSTREAM: ${API_UPSTREAM:-go-judge-api:5000}
     restart: unless-stopped
     depends_on:
       - assessment-api

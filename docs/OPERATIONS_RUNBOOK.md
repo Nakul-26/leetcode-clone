@@ -51,7 +51,7 @@ or API running against newer data keeps working, so rolling back is safe. Leftov
 ### The web frontend (`frontend` service)
 
 `docker-compose.prod.yml` includes a `frontend` service: the React app built by `frontend/Dockerfile.prod` and
-served by nginx (`frontend/nginx.conf`). nginx proxies `/api/` and the `/ws/interview` WebSocket to
+served by nginx (`frontend/nginx.conf.template`). nginx proxies `/api/` and the `/ws/interview` WebSocket to
 `assessment-api:5000`, so the browser uses a single origin and there is no CORS to configure. `VITE_API_URL`
 stays empty for that reason.
 
@@ -69,6 +69,11 @@ Things to know:
 - `VITE_*` values are baked in at **build** time. Changing one needs a rebuild, not just a restart.
 - The `coturn` TURN relay is **not** part of this file. It lives in `docker-compose.turn.yml` so deploys do not
   need the `TURN_*` variables.
+- nginx reaches the API through the alias `go-judge-api` (defined on the API service in the compose file), not
+  `assessment-api`: on Dokploy the plain service name also exists on the network shared with other projects and can
+  resolve to someone else's container. nginx also re-resolves the name every few seconds, so a redeployed API is
+  found without restarting the frontend. If `/api` returns 502 while the API itself is healthy, read the frontend
+  container log: `connect() failed (111: Connection refused)` points at this hop.
 - Client IPs: nginx forwards `X-Forwarded-For`, but the API does not trust proxies yet (see Known risks).
 
 ---
