@@ -179,7 +179,11 @@ func (p *ContainerPool) Release(container *PooledContainer) {
 	}
 }
 
-// Discard removes a suspect container from the pool and creates a replacement.
+// Discard removes a suspect container from the pool and creates a replacement in the
+// background. Creating the replacement used to block the calling worker (for a container
+// create + start, a second or more for big images) before it could take more work; the result
+// was already saved, so only throughput suffered. The reconciler still tops the pool up if a
+// background replacement fails.
 func (p *ContainerPool) Discard(ctx context.Context, container *PooledContainer, reason string) {
 	if container == nil {
 		return
@@ -207,9 +211,17 @@ func (p *ContainerPool) Discard(ctx context.Context, container *PooledContainer,
 		return
 	}
 
-	replacement, err := p.newPooledContainer(ctx, image, container.Language)
+	go p.replaceDiscarded(image, container, ch)
+}
+
+// replaceDiscarded creates and pools a replacement for a discarded container. It runs on its
+// own context because the discarding caller's context ends as soon as Discard returns.
+func (p *ContainerPool) replaceDiscarded(image string, old *PooledContainer, ch chan *PooledContainer) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	replacement, err := p.newPooledContainer(ctx, image, old.Language)
 	if err != nil {
-		slog.Error("Failed to replace discarded container", "language", container.Language, "error", err)
+		slog.Error("Failed to replace discarded container", "language", old.Language, "error", err)
 		return
 	}
 	metrics.AddContainerReplacement(1)
@@ -217,9 +229,9 @@ func (p *ContainerPool) Discard(ctx context.Context, container *PooledContainer,
 	if ch != nil {
 		select {
 		case ch <- replacement:
-			slog.Info("Replaced discarded container", "oldId", container.ID, "newId", replacement.ID, "language", container.Language)
+			slog.Info("Replaced discarded container", "oldId", old.ID, "newId", replacement.ID, "language", old.Language)
 		default:
-			slog.Warn("Container pool channel full during discard/replacement", "language", container.Language)
+			slog.Warn("Container pool channel full during discard/replacement", "language", old.Language)
 			p.removeContainer(replacement)
 		}
 	}
@@ -771,7 +783,39 @@ func (p *ContainerPool) createContainer(ctx context.Context, image string, lang 
 
 	slog.Info("Started container", "containerId", container.ID, "language", lang, "workdir", filepath.Clean(hostWorkDir))
 
+	p.runWarmupHook(ctx, container.ID, lang)
+
 	return container.ID, hostWorkDir, nil
+}
+
+// warmupHookPath is an optional script a language image can ship to prepare a new container,
+// for example the Go image seeding its build cache (environments/go/judge-warmup).
+const warmupHookPath = "/usr/local/bin/judge-warmup"
+
+// runWarmupHook runs the image's warm-up script, if it has one, as the judge user right after
+// the container starts, and waits for it so the container is warm before it is pooled. Best
+// effort: a failure is logged and the container is still used, just slower on its first run.
+func (p *ContainerPool) runWarmupHook(ctx context.Context, containerID string, lang string) {
+	exec, err := p.cli.CreateExec(docker.CreateExecOptions{
+		Context:      ctx,
+		Container:    containerID,
+		User:         "judge",
+		Cmd:          []string{"sh", "-c", "[ -x " + warmupHookPath + " ] && " + warmupHookPath + "; exit 0"},
+		AttachStdout: true,
+		AttachStderr: true,
+	})
+	if err != nil {
+		slog.Warn("Container warm-up skipped: could not create exec", "containerId", containerID, "language", lang, "error", err)
+		return
+	}
+	start := time.Now()
+	if err := p.cli.StartExec(exec.ID, docker.StartExecOptions{Context: ctx, OutputStream: io.Discard, ErrorStream: io.Discard}); err != nil {
+		slog.Warn("Container warm-up failed", "containerId", containerID, "language", lang, "error", err)
+		return
+	}
+	if elapsed := time.Since(start); elapsed > 50*time.Millisecond {
+		slog.Info("Container warmed up", "containerId", containerID, "language", lang, "elapsedMs", elapsed.Milliseconds())
+	}
 }
 
 // pullImage pulls a Docker image if it's not available locally

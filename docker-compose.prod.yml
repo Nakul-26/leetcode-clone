@@ -26,7 +26,7 @@
 #   JUDGE_LOG_LEVEL        (default: info)
 #   JUDGE_POOL_SIZE        (default: 2) — used as the Min (and, unless overridden below, Max)
 #                          pool size for every language that has no per-language override.
-#   JUDGE_MAX_EXECS        (default: 100)
+#   JUDGE_MAX_EXECS        (default: 500; containers are also reset after every submission)
 #
 # Per-language pool sizing / autoscaling (all optional — see judge-service-go/main.go for the
 # full per-language default table and pkg/pool/pool.go for the autoscaling algorithm):
@@ -335,7 +335,7 @@ services:
       HEALTH_PORT: "8081"
       LOG_LEVEL: ${JUDGE_LOG_LEVEL:-info}
       DEFAULT_POOL_SIZE: ${JUDGE_POOL_SIZE:-2}
-      MAX_EXECUTIONS_PER_CONTAINER: ${JUDGE_MAX_EXECS:-100}
+      MAX_EXECUTIONS_PER_CONTAINER: ${JUDGE_MAX_EXECS:-500}
       # Per-language pool sizing / autoscaling — see the header comment above for the full
       # list of additional per-language and threshold/cooldown vars available but not wired
       # here by default (their Go-side defaults apply unless set directly in Dokploy env).

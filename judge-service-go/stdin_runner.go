@@ -62,6 +62,21 @@ func runSubmissionStdinDetailed(ctx context.Context, exec *executor.Executor, po
 	testTimeout := perTestTimeout(problem)
 	runCmd := stdinAdapter.RunCommand()
 
+	// Once per submission rather than once per test case: the run-phase memory limit (each
+	// per-test set + reset was two docker updates) and, for interpreted languages, the source
+	// upload. finishWithContainer restores the default limit when the container is released.
+	if problem.MemoryLimitMb > 0 {
+		if err := exec.UpdateContainerResources(ctx, pooledContainer.ID, problem.MemoryLimitMb); err != nil {
+			slog.Warn("failed to apply execution memory limit", "containerId", pooledContainer.ID, "error", err)
+		}
+	}
+	if !compiled {
+		if err := exec.CopyFiles(ctx, pooledContainer.ID, submissionWorkspace.HostPath, submissionWorkspace.ContainerPath, baseFiles); err != nil {
+			return finalizeExecutionFailure(result, err), cleanupFailed, nil
+		}
+	}
+
+
 	for i, tc := range problem.TestCases {
 		testStart := time.Now()
 		tr := models.TestResult{
@@ -84,28 +99,19 @@ func runSubmissionStdinDetailed(ctx context.Context, exec *executor.Executor, po
 			continue
 		}
 
-		// Interpreted languages re-copy source into the workspace on every
-		// call (matching runSubmissionCentralPerTest's non-compiling path);
-		// compiled languages copy nothing here since compileStdinSubmission
-		// already uploaded the source and the compiled binary persists on
-		// the container across execs.
-		var filesToCopy []string
-		if !compiled {
-			filesToCopy = baseFiles
-		}
 
 		testCtx, cancel := context.WithTimeout(ctx, testTimeout)
 		stdout, stderr, exitCode, runErr := exec.RunInContainerWithStdin(
 			testCtx,
 			pooledContainer.ID,
-			filesToCopy,
+			nil, // uploaded once above
 			submissionWorkspace.HostPath,
 			submissionWorkspace.ContainerPath,
 			nil,
 			runCmd,
 			stdinText,
 			testTimeout,
-			problem.MemoryLimitMb,
+			0, // limit applied once above
 		)
 		cancel()
 

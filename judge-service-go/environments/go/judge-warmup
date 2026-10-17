@@ -1,0 +1,10 @@
+#!/bin/sh
+# Seeds this container's Go build cache from the copy baked into the image (see Dockerfile).
+# The judge runs this once, right after it starts a pooled container. A fresh GOCACHE lives in
+# memory-backed /tmp and starts empty, so without this the first submission in every new
+# container compiled the standard library from scratch (~16 s measured, against ~0.8 s warm).
+# Best effort: it must never fail, a cold container is only slower.
+if [ -d /opt/gocache ] && [ -n "$GOCACHE" ]; then
+  mkdir -p "$GOCACHE" && cp -R /opt/gocache/. "$GOCACHE"/ 2>/dev/null
+fi
+exit 0

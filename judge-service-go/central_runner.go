@@ -127,6 +127,21 @@ func runSubmissionCentralPerTest(ctx context.Context, exec *executor.Executor, p
 		return finalizeExecutionFailure(result, err), nil
 	}
 
+	_, compiling := adapter.(adapters.CompilingLanguageAdapter)
+	// Once per submission rather than once per test case: the run-phase memory limit (each
+	// per-test set + reset was two docker updates) and, for interpreted languages, the source
+	// upload. finishWithContainer restores the default limit when the container is released.
+	if problem.MemoryLimitMb > 0 {
+		if err := exec.UpdateContainerResources(ctx, pooledContainer.ID, problem.MemoryLimitMb); err != nil {
+			slog.Warn("failed to apply execution memory limit", "containerId", pooledContainer.ID, "error", err)
+		}
+	}
+	if !compiling {
+		if err := exec.CopyFiles(ctx, pooledContainer.ID, submissionWorkspace.HostPath, submissionWorkspace.ContainerPath, baseFiles); err != nil {
+			return finalizeExecutionFailure(result, err), nil
+		}
+	}
+
 	for i, tc := range problem.TestCases {
 		testStart := time.Now()
 		tr := models.TestResult{
@@ -145,22 +160,18 @@ func runSubmissionCentralPerTest(ctx context.Context, exec *executor.Executor, p
 			continue
 		}
 
-		filesToCopy := append([]string{}, baseFiles...)
-		if _, ok := adapter.(adapters.CompilingLanguageAdapter); ok {
-			filesToCopy = nil
-		}
 		inputB64 := base64.StdEncoding.EncodeToString(inputJSON)
 		testCtx, cancel := context.WithTimeout(ctx, testTimeout)
 		stdout, stderr, runErr := exec.RunInContainer(
 			testCtx,
 			pooledContainer.ID,
-			filesToCopy,
+			nil, // uploaded once above
 			submissionWorkspace.HostPath,
 			submissionWorkspace.ContainerPath,
 			nil,
 			adapter.RunCommand(inputB64),
 			testTimeout,
-			problem.MemoryLimitMb,
+			0, // limit applied once above
 		)
 		cancel()
 

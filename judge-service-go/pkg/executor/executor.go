@@ -128,6 +128,33 @@ func (s *ExecStream) Wait() (int, error) {
 	return s.result.exitCode, s.result.err
 }
 
+// CopyFiles uploads files from a submission's host workspace into its container workspace.
+// Runners use it to upload once per submission rather than once per test case.
+func (e *Executor) CopyFiles(ctx context.Context, containerID string, hostWorkDir string, containerWorkDir string, files []string) error {
+	return e.copyFilesToContainer(ctx, containerID, hostWorkDir, containerWorkDir, files)
+}
+
+// containerResetScript returns a pooled container to a clean state between submissions:
+//   - every submission directory under /app (they are world-readable, so leaving them let a later
+//     submission in the same container read earlier students' source code, and /app is
+//     memory-backed, so they also ate into the container's memory limit);
+//   - everything in /tmp including hidden entries (a plain /tmp/* glob skips dot-files), except
+//     .cache, which holds the Go build cache that makes repeat Go compiles fast;
+//   - any process the submission left running.
+// It always exits 0: a missing path or no process to kill is not a failure.
+const containerResetScript = `rm -rf /app/sub-* 2>/dev/null; find /tmp -mindepth 1 -maxdepth 1 ! -name .cache -exec rm -rf {} \; 2>/dev/null; (pkill -9 -u judge || true); exit 0`
+
+// ResetContainer cleans a container after a submission and restores its default memory limit,
+// before it goes back to the pool. Once per submission, so per-test steps can skip both.
+// An error means the container could not be trusted clean; the caller should discard it.
+func (e *Executor) ResetContainer(ctx context.Context, containerID string) error {
+	stdout, stderr, exitCode, err := e.runExecWithTimeout(ctx, containerID, "root", "/", []string{"sh", "-c", containerResetScript}, 10*time.Second)
+	if err != nil && exitCode != 137 {
+		return fmt.Errorf("container reset failed: %w (exit=%d stdout=%s stderr=%s)", err, exitCode, stdout, stderr)
+	}
+	return e.UpdateContainerResources(ctx, containerID, 1024)
+}
+
 // runExecWithTimeout handles the full lifecycle of creating, running, and waiting for an exec instance.
 func (e *Executor) runExecWithTimeout(ctx context.Context, containerID string, user string, workDir string, cmd []string, timeout time.Duration) (string, string, int, error) {
 	stdoutBuf := &boundedWriter{limit: maxCapturedOutputBytes}

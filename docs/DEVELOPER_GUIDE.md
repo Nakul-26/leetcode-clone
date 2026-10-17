@@ -282,6 +282,8 @@ Each of these cost real time. They are listed so you do not repeat them.
 | **Bare service names on Dokploy** | A service with a domain also sits on a network shared by all projects, so `redis` reached another project's Redis and the API never started | Reach dependencies through the `go-judge-*` aliases (see the Operations Runbook) |
 | **Same-site POSTs still send `Origin`** | The API rejected the web frontend with `Not allowed by CORS` (shown as a generic 500) because its allow-list was empty | List every frontend hostname in `CORS_ALLOWED_ORIGINS` |
 | **CI audits dev dependencies too** | `braces` (via `nodemon`) has no patched release, so the audit stayed red | Prefer built-ins (`node --watch`) over dev tools that pull in unpatched chains |
+| **`rm -rf /tmp/*` skips hidden files** | The per-run cleanup left dot-files (and the Go cache) behind, so a later submission could read what an earlier one planted | Clean with `find /tmp -mindepth 1 -maxdepth 1 ...` (see `containerResetScript`) |
+| **Pooled containers are shared between students** | Submission folders in `/app` were never removed inside the container and were world-readable, so a later student's program could read earlier solutions | Every container is reset before reuse (`ResetContainer` in `finishWithContainer`); the privacy check in the Performance Review shows how to test it |
 
 ---
 

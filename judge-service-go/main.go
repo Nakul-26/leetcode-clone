@@ -194,11 +194,13 @@ func getDurationSecondsEnv(name string, def time.Duration) time.Duration {
 
 // MaxExecutionsPerContainer controls how many times a pooled container may be
 // used before being evicted. Can be changed at startup from env.
+// It is a safety net now, not cleanup: containers are reset after every submission
+// (finishWithContainer). Recycling also replaces anything a reset cannot undo.
 // bulkContainerReserve is how many idle containers per language bulk work leaves untouched
 // for interactive callers. Set from JUDGE_INTERACTIVE_RESERVE at startup.
 var bulkContainerReserve = 1
 
-var MaxExecutionsPerContainer int32 = 100
+var MaxExecutionsPerContainer int32 = 500
 
 func failOnError(err error, msg string) {
 	if err != nil {
@@ -572,8 +574,13 @@ func handleRawRun(containerPool *pool.ContainerPool, ex *executor.Executor, usag
 		}
 		discardContainer := false
 		discardReason := ""
+		// Recycle after MaxExecutionsPerContainer runs, same as the queue path.
+		if cnt := atomic.AddInt32(&pooledContainer.ExecutionCount, 1); cnt >= atomic.LoadInt32(&MaxExecutionsPerContainer) {
+			discardContainer = true
+			discardReason = fmt.Sprintf("max executions reached: %d", cnt)
+		}
 		defer func() {
-			finishWithContainer(containerPool, pooledContainer, discardContainer, discardReason)
+			finishWithContainer(containerPool, ex, pooledContainer, discardContainer, discardReason)
 		}()
 
 		reqID := fmt.Sprintf("raw-%d", time.Now().UnixNano())
@@ -868,10 +875,21 @@ func StartPeriodicOrphanGC(ctx context.Context, cli *docker.Client, interval tim
 	}()
 }
 
-func finishWithContainer(containerPool *pool.ContainerPool, container *pool.PooledContainer, discard bool, reason string) {
+// finishWithContainer returns a container to the pool after a submission, or discards it.
+// A container that will be reused is reset first (submission files, /tmp, leftover processes,
+// memory limit), so nothing from one submission is visible to the next. If the reset fails
+// the container cannot be trusted clean and is discarded instead.
+func finishWithContainer(containerPool *pool.ContainerPool, ex *executor.Executor, container *pool.PooledContainer, discard bool, reason string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if !discard && ex != nil {
+		if err := ex.ResetContainer(ctx, container.ID); err != nil {
+			slog.Warn("Container reset failed; discarding it", "containerId", container.ID, "error", err)
+			discard = true
+			reason = "reset failed: " + err.Error()
+		}
+	}
 	if discard {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
 		containerPool.Discard(ctx, container, reason)
 		return
 	}
@@ -1151,7 +1169,7 @@ func processSubmission(interactive bool, d amqp.Delivery, ch *amqp.Channel, retr
 		discardReason = fmt.Sprintf("max executions reached: %d", cnt)
 	}
 	defer func() {
-		finishWithContainer(containerPool, pooledContainer, discardContainer, discardReason)
+		finishWithContainer(containerPool, executor, pooledContainer, discardContainer, discardReason)
 	}()
 
 	if adapter, ok := adapters.GetAdapter(lang.ID); ok && isCentralCompareEnabled(lang.ID) && hasStrategy {
@@ -1387,8 +1405,13 @@ func startHealthServer(ctx context.Context, containerPool *pool.ContainerPool, p
 		}
 		discardContainer := false
 		discardReason := ""
+		// Recycle after MaxExecutionsPerContainer runs, same as the queue path.
+		if cnt := atomic.AddInt32(&pooledContainer.ExecutionCount, 1); cnt >= atomic.LoadInt32(&MaxExecutionsPerContainer) {
+			discardContainer = true
+			discardReason = fmt.Sprintf("max executions reached: %d", cnt)
+		}
 		defer func() {
-			finishWithContainer(containerPool, pooledContainer, discardContainer, discardReason)
+			finishWithContainer(containerPool, executor, pooledContainer, discardContainer, discardReason)
 		}()
 
 		var result *models.SubmissionResult
