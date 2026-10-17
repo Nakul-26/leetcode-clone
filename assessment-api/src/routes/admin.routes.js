@@ -1,5 +1,6 @@
 import express from "express";
 import mongoose from "mongoose";
+import { env } from "../config/env.js";
 import Problem from "../../models/Problem.mjs";
 import Submission from "../../models/Submission.mjs";
 import Assessment from "../../models/Assessment.mjs";
@@ -237,7 +238,7 @@ router.get("/system-stats", verifyToken, authorizeRoles("admin", "superadmin"), 
     let judgeHealth = "offline";
     try {
       // Use internal service name
-      const response = await fetch("http://judge-service-go:8081/stats");
+      const response = await fetch(`${env.JUDGE_SERVICE_URL}/stats`);
       if (response.ok) {
         judgeStats = await response.json();
         judgeHealth = "healthy";

@@ -122,7 +122,12 @@ services:
       start_period: 30s
     # Internal only — no ports exposed
     networks:
-      - assessment-net
+      assessment-net:
+        # Unique on this stack's own network. Services that also sit on Dokploy's shared network
+        # (the API, because it has a domain) must use this, not the bare service name, which other
+        # projects can answer instead. See docs/OPERATIONS_RUNBOOK.md (shared-network names).
+        aliases:
+          - go-judge-mongo
 
   # ── 2. Redis ─────────────────────────────────────────────────────────────────
   redis:
@@ -142,7 +147,12 @@ services:
       start_period: 10s
     # Internal only — no ports exposed
     networks:
-      - assessment-net
+      assessment-net:
+        # Unique on this stack's own network. Services that also sit on Dokploy's shared network
+        # (the API, because it has a domain) must use this, not the bare service name, which other
+        # projects can answer instead. See docs/OPERATIONS_RUNBOOK.md (shared-network names).
+        aliases:
+          - go-judge-redis
 
   # ── 3. RabbitMQ ──────────────────────────────────────────────────────────────
   rabbitmq:
@@ -163,7 +173,12 @@ services:
     # ports:
     #   - "15672:15672"
     networks:
-      - assessment-net
+      assessment-net:
+        # Unique on this stack's own network. Services that also sit on Dokploy's shared network
+        # (the API, because it has a domain) must use this, not the bare service name, which other
+        # projects can answer instead. See docs/OPERATIONS_RUNBOOK.md (shared-network names).
+        aliases:
+          - go-judge-rabbitmq
 
   # ── 4. Assessment API (Node.js) ───────────────────────────────────────────────
   # Health: GET /api/health (deep check) or GET /api/health/ready (lightweight)
@@ -188,21 +203,22 @@ services:
     environment:
       NODE_ENV: production
       PORT: "5000"
-      MONGO_URI: mongodb://admin:${MONGO_ROOT_PASS}@mongo:27017/${MONGO_DB_NAME:-assessment_db}?authSource=admin
+      MONGO_URI: mongodb://admin:${MONGO_ROOT_PASS}@go-judge-mongo:27017/${MONGO_DB_NAME:-assessment_db}?authSource=admin
       MONGO_DB_NAME: ${MONGO_DB_NAME:-assessment_db}
-      REDIS_URI: redis://:${REDIS_PASS}@redis:6379
+      REDIS_URI: redis://:${REDIS_PASS}@go-judge-redis:6379
       REDIS_PASS: ${REDIS_PASS:?REDIS_PASS is required}
+      REDIS_HOST: go-judge-redis
       # Passed as separate fields (not a pre-built amqp:// URI) so passwords
       # with reserved URL characters (%, $, ^, @, ...) don't break URL parsing.
       RABBITMQ_USER: user
       RABBITMQ_PASS: ${RABBITMQ_PASS:?RABBITMQ_PASS is required}
-      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_HOST: go-judge-rabbitmq
       RABBITMQ_PORT: "5672"
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
       TESTING_PLATFORM_KEY: ${TESTING_PLATFORM_KEY:?TESTING_PLATFORM_KEY is required}
       CODEASSESS_SHIM_KEY: ${CODEASSESS_SHIM_KEY:?CODEASSESS_SHIM_KEY is required}
       ARVENTIQ_SECRET: ${ARVENTIQ_SECRET:?ARVENTIQ_SECRET is required}
-      JUDGE_SERVICE_URL: http://judge-service-go:8081
+      JUDGE_SERVICE_URL: http://go-judge-engine:8081
       # H5 per-college submission quota — optional, falls back to 30 per 60s (see env.js) if
       # unset. That default is a fairness guard sized for small/incidental multi-college
       # traffic, not a real exam cohort — measured too strict for ~500 students sharing one
@@ -349,7 +365,12 @@ services:
         limits:
           memory: 2G    # Judge compiles/runs code — cap memory to protect the host
     networks:
-      - assessment-net
+      assessment-net:
+        # Unique on this stack's own network. Services that also sit on Dokploy's shared network
+        # (the API, because it has a domain) must use this, not the bare service name, which other
+        # projects can answer instead. See docs/OPERATIONS_RUNBOOK.md (shared-network names).
+        aliases:
+          - go-judge-engine
 
   # ── 7. frontend (static SPA + nginx reverse proxy) ───────────────────────────
   # Serves the built React app and proxies /api and /ws/interview to assessment-api, so the

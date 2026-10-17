@@ -301,6 +301,23 @@ then the judge.
 
 ## Known risks
 
+### Shared-network names on Dokploy (found in production, 2026-10-17)
+
+Dokploy attaches every service that has a **domain** to one network shared by all projects on the server
+(`dokploy-network`), in addition to the stack's own network. Docker answers a bare service name such as `redis`
+from the shared network first, so another project's `redis` (or `mongo`, `rabbitmq`, `assessment-api`,
+`judge-service-go`) can answer instead of ours.
+
+What it looked like: the API container stayed "unhealthy" and never opened its port, its log repeated
+`ERR AUTH <password> called without any password configured for the default user` (it had reached someone else's
+Redis, which has no password), and the frontend's nginx logged `connect() failed (111: Connection refused)`.
+
+The rule: **a service that has a domain must reach its dependencies through aliases that exist only on this stack's own
+network.** `docker-compose.prod.yml` defines them: `go-judge-api`, `go-judge-mongo`, `go-judge-redis`,
+`go-judge-rabbitmq` and `go-judge-engine`. Services with no domain (the judge, the databases) only sit on the private
+network and keep using the plain names. If you add a domain to another service, give its dependencies aliases the same
+way. If a service starts failing right after a domain is attached or added, suspect this first.
+
 Things that are true today and that an operator should keep in mind. None are emergencies; each is a decision or a
 fix waiting for its turn.
 

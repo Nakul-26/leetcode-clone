@@ -4,6 +4,7 @@ import { getRedis } from "../config/redis.js";
 import { getChannel } from "../config/rabbit.js";
 import { getIncidentBanner } from "../services/system.service.js";
 import { safeErrorMessage } from "../utils/safeErrorMessage.js";
+import { env } from "../config/env.js";
 
 const router = express.Router();
 
@@ -66,7 +67,7 @@ router.get("/", async (req, res) => {
 
     // Check Judge Service
     try {
-      const judgeRes = await fetch("http://judge-service-go:8081/health", { signal: AbortSignal.timeout(2000) });
+      const judgeRes = await fetch(`${env.JUDGE_SERVICE_URL}/health`, { signal: AbortSignal.timeout(2000) });
       if (judgeRes.ok) {
         health.services.judge = "connected";
       } else {
