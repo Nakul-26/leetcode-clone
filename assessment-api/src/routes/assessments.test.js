@@ -316,4 +316,52 @@ describe('Assessments API', () => {
     expect(resolveRes.body.challenge.status).toBe('Accepted');
     expect(resolveRes.body.challenge.facultyComment).toBe('Agreed. Full marks awarded.');
   });
+
+  it('GET /api/assessments/attempts/:attemptId/submissions should include problemType and options for mcq submissions', async () => {
+    const mcqProblem = await Problem.create({
+      title: 'Capital of France',
+      description: 'Pick the capital of France',
+      difficulty: 'Easy',
+      problemType: 'mcq',
+      options: [
+        { text: 'Paris', isCorrect: true },
+        { text: 'London', isCorrect: false }
+      ]
+    });
+
+    const mcqAssessment = await Assessment.create({
+      title: 'MCQ Assessment',
+      description: 'Description',
+      problems: [{ problemId: mcqProblem._id, maxScore: 100 }],
+      durationMinutes: 60,
+      startTime: new Date(),
+      endTime: new Date(Date.now() + 86400000),
+      createdBy: adminId,
+      status: 'Published'
+    });
+
+    const startRes = await request(app)
+      .post(`/api/assessments/${mcqAssessment._id}/start`)
+      .set('Authorization', `Bearer ${studentToken}`);
+    expect(startRes.status).toBe(200);
+    const attemptId = startRes.body._id;
+
+    const submitRes = await request(app)
+      .post('/api/submissions')
+      .set('Authorization', `Bearer ${studentToken}`)
+      .send({ problemId: mcqProblem._id.toString(), selectedOptions: [0], assessmentId: mcqAssessment._id.toString(), attemptId });
+    expect(submitRes.status).toBe(202);
+
+    const listRes = await request(app)
+      .get(`/api/assessments/attempts/${attemptId}/submissions`)
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(listRes.status).toBe(200);
+    expect(listRes.body.length).toBe(1);
+    expect(listRes.body[0].problemId.problemType).toBe('mcq');
+    expect(listRes.body[0].problemId.options).toEqual([
+      { text: 'Paris', isCorrect: true },
+      { text: 'London', isCorrect: false }
+    ]);
+    expect(listRes.body[0].selectedOptions).toEqual([0]);
+  });
 });

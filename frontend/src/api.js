@@ -1,6 +1,6 @@
 import axios from "axios";
 
-function resolveBaseUrl() {
+export function resolveBaseUrl() {
   const raw = import.meta.env.VITE_API_URL;
   if (!raw) return "";
 
@@ -74,7 +74,9 @@ export const problems = {
 };
 
 export const submissions = {
-  getAnalytics: () => api.get('/api/v1/submissions/analytics/my')
+  getAnalytics: () => api.get('/api/v1/submissions/analytics/my'),
+  listUngraded: (assessmentId) => api.get(`/api/v1/submissions/assessment/${assessmentId}/ungraded`),
+  grade: (submissionId, data) => api.post(`/api/v1/submissions/${submissionId}/grade`, data)
 };
 
 export const admin = {
@@ -82,6 +84,8 @@ export const admin = {
   getAuditLogs: (params) => api.get("/api/v1/admin/audit-logs", { params }),
   bulkImportStudents: (data) => api.post("/api/v1/admin/bulk-import-students", data),
   listUsers: (params) => api.get("/api/v1/admin/users", { params }),
+  createUser: (data) => api.post("/api/v1/admin/users", data),
+  deleteUser: (userId) => api.delete(`/api/v1/admin/users/${userId}`),
   resetPassword: (userId, newPassword) => api.post(`/api/v1/admin/users/${userId}/reset-password`, { newPassword }),
   updateBanner: (data) => api.post("/api/v1/admin/banner", data),
   downloadBackup: () => api.get("/api/v1/admin/backup", { responseType: 'blob' }),
@@ -99,6 +103,37 @@ export const questions = {
   create: (data) => api.post("/api/v1/questions", data),
   update: (id, data) => api.put(`/api/v1/questions/${id}`, data),
   delete: (id) => api.delete(`/api/v1/questions/${id}`)
+};
+
+export const drives = {
+  list: (params) => api.get("/api/v1/drives", { params }),
+  get: (id) => api.get(`/api/v1/drives/${id}`),
+  create: (data) => api.post("/api/v1/drives", data),
+  update: (id, data) => api.put(`/api/v1/drives/${id}`, data),
+  delete: (id) => api.delete(`/api/v1/drives/${id}`),
+  enrollStudents: (id, studentIds) => api.post(`/api/v1/drives/${id}/candidates`, { studentIds }),
+  enrollEligible: (id) => api.post(`/api/v1/drives/${id}/candidates/auto-enroll`),
+  listCandidates: (id, params) => api.get(`/api/v1/drives/${id}/candidates`, { params }),
+  getMyCandidacy: (id) => api.get(`/api/v1/drives/${id}/my-candidacy`),
+  recordResult: (candidateId, result, notes, link) => api.post(`/api/v1/drives/candidates/${candidateId}/result`, { result, notes, link }),
+  advance: (candidateId) => api.post(`/api/v1/drives/candidates/${candidateId}/advance`),
+  reject: (candidateId, reason) => api.post(`/api/v1/drives/candidates/${candidateId}/reject`, { reason }),
+  withdraw: (candidateId) => api.post(`/api/v1/drives/candidates/${candidateId}/withdraw`)
+};
+
+export const interviewSlots = {
+  schedule: (candidateId, data) => api.post(`/api/v1/interview-slots/candidate/${candidateId}`, data),
+  listForCandidate: (candidateId) => api.get(`/api/v1/interview-slots/candidate/${candidateId}`),
+  listForDrive: (driveId) => api.get(`/api/v1/interview-slots/drive/${driveId}`),
+  my: () => api.get('/api/v1/interview-slots/my'),
+  get: (id) => api.get(`/api/v1/interview-slots/${id}`),
+  reschedule: (id, data) => api.put(`/api/v1/interview-slots/${id}`, data),
+  cancel: (id) => api.post(`/api/v1/interview-slots/${id}/cancel`),
+  complete: (id, notes) => api.post(`/api/v1/interview-slots/${id}/complete`, { notes }),
+  regenerateLink: (id) => api.post(`/api/v1/interview-slots/${id}/regenerate-link`),
+  getByToken: (token) => api.get(`/api/v1/interview-slots/external/${token}`),
+  submitScorecard: (id, data) => api.post(`/api/v1/interview-slots/${id}/scorecard`, data),
+  submitScorecardByToken: (token, data) => api.post(`/api/v1/interview-slots/external/${token}/scorecard`, data)
 };
 
 export const billing = {

@@ -22,6 +22,33 @@ type SubmissionMessage struct {
 	RequestID     string      `json:"requestId,omitempty"`
 	RetryCount    int         `json:"retryCount,omitempty"`
 	CollegeID     string      `json:"collegeId,omitempty"`
+	// Which external API key produced this submission, so usage can be attributed
+	// to a paying customer (plan Phase 1). Empty for frontend traffic and for
+	// callers still authenticating with a legacy global shared secret.
+	ApiClientID   string      `json:"apiClientId,omitempty"`
+	// Kind marks a submission that has no stored Problem behind it — a raw
+	// "run this program against this input" request arriving through the public
+	// GO Judge public API API. Left empty for every normal submission.
+	//
+	// Deliberately an explicit marker rather than inferring ad-hoc from an empty
+	// ProblemID: a bug that dropped problemId would otherwise turn a real
+	// submission into an unjudged "Accepted", which is exactly the kind of
+	// silent wrong answer an exam cannot tolerate.
+	Kind string `json:"kind,omitempty"`
+	// Per-submission limits, used only by ad-hoc submissions: a stored Problem
+	// carries its own, but a GO Judge caller sends cpu_time_limit/memory_limit with
+	// each request and there is no Problem to read them from.
+	TimeLimitMs   int64 `json:"timeLimitMs,omitempty"`
+	MemoryLimitMb int64 `json:"memoryLimitMb,omitempty"`
+}
+
+// SubmissionKindAdHoc is the Kind value for a submission with no stored problem.
+const SubmissionKindAdHoc = "adhoc"
+
+// IsAdHoc reports whether this submission carries its own tests instead of
+// referencing a stored Problem.
+func (sm SubmissionMessage) IsAdHoc() bool {
+	return sm.Kind == SubmissionKindAdHoc
 }
 
 // Limits — tweak as needed
@@ -50,7 +77,19 @@ func (sm *SubmissionMessage) Validate() error {
 	if sm.SubmissionID == "" {
 		return errors.New("submissionId is required")
 	}
-	if sm.ProblemID == "" {
+	// An ad-hoc submission is the one case with no problem behind it; the two are
+	// mutually exclusive so there is never any question which one supplied the tests.
+	if sm.IsAdHoc() {
+		if sm.ProblemID != "" {
+			return errors.New("ad-hoc submissions must not reference a problemId")
+		}
+		if sm.EffectiveType() != StdinProblem {
+			return errors.New("ad-hoc submissions must be stdin-mode")
+		}
+		if len(sm.Tests) == 0 {
+			return errors.New("ad-hoc submissions must carry at least one test")
+		}
+	} else if sm.ProblemID == "" {
 		return errors.New("problemId is required")
 	}
 	if sm.Language == "" {

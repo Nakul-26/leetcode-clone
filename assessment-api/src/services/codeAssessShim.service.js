@@ -3,9 +3,9 @@
 // package used by judge.service.js is not a listed dependency; don't repeat that.
 import { env } from "../config/env.js";
 
-// Judge0 CE numeric language IDs -> judge-service-go's internal language keys
-// (pkg/languages/languages.go). 51 matches Judge0 CE's own id for C# (Mono) so callers
-// that assume standard Judge0 ids don't need special-casing us.
+// Public-API numeric language IDs -> judge-service-go's internal language keys
+// (pkg/languages/languages.go). 51 matches the conventional id for C# (Mono) so callers
+// that assume standard ids don't need special-casing us.
 const LANGUAGE_ID_MAP = {
   71: "python",
   63: "javascript",
@@ -21,7 +21,7 @@ const LANGUAGE_ID_MAP = {
   51: "csharp",
 };
 
-// Judge0 status ids judge.js understands (see exam-platform/workers/student-workerjs/src/judge.js).
+// GO Judge status ids judge.js understands (see exam-platform/workers/student-workerjs/src/judge.js).
 const CODEASSESS_STATUS = {
   ACCEPTED: 3,
   RUNTIME_ERROR: 11,
@@ -37,10 +37,10 @@ export function mapLanguageId(languageId) {
 /**
  * Calls judge-service-go's internal /raw-run endpoint (compile + run one source file
  * against one stdin payload, no test cases/wrapper/comparison) and returns a result
- * already shaped like a Judge0 CE `/submissions` response — the exact shape
+ * already shaped like a GO Judge public API `/submissions` response — the exact shape
  * exam-platform's judge.js already knows how to parse.
  *
- * cpuTimeLimitSec / wallTimeLimitSec / memoryLimitKb come straight from the Judge0
+ * cpuTimeLimitSec / wallTimeLimitSec / memoryLimitKb come straight from the GO Judge
  * request body exam-platform sends; there is no per-problem or per-student state here.
  */
 export async function runRawCodeAssess({ languageId, sourceCode, stdin, wallTimeLimitSec, memoryLimitKb }) {

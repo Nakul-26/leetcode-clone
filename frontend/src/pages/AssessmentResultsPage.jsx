@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { Download, Users, CheckCircle, Clock, AlertCircle, Search, RefreshCw, BarChart3, ChevronRight, FileSpreadsheet, MonitorOff, Copy, ClipboardPaste, Maximize, AlertTriangle, Trophy, Megaphone, Lock, Unlock } from 'lucide-react';
+import { Download, Users, CheckCircle, Clock, AlertCircle, Search, RefreshCw, BarChart3, ChevronRight, FileSpreadsheet, MonitorOff, Copy, ClipboardPaste, Maximize, AlertTriangle, Trophy, Megaphone, Lock, Unlock, PenLine } from 'lucide-react';
 import { downloadRowsAsExcel } from '../utils/excel';
 import api, { assessments } from '../api';
 
@@ -266,6 +266,10 @@ const AssessmentResultsPage = () => {
             <RefreshCw size={16} className={refreshing ? 'spin' : ''} />
             Refresh
           </button>
+          <Link to={`/admin/assessments/${id}/grading`} className="button button-outline">
+            <PenLine size={16} />
+            Grade Subjective Answers
+          </Link>
           <button 
             className="button button-outline" 
             onClick={handleRejudgeAssessment} 

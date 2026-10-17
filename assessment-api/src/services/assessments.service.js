@@ -116,6 +116,7 @@ export async function startAssessment(assessmentId, user, auditInfo = {}) {
   await auditService.logEvent({
     event: "ASSESSMENT_STARTED",
     userId,
+    collegeId: attempt.collegeId || undefined,
     details: { assessmentId, attemptId: attempt._id },
     ...auditInfo
   });
@@ -215,19 +216,33 @@ export async function recalculateAttemptScore(attemptId) {
   const assessment = await assessmentsRepo.findById(attempt.assessmentId);
   if (!assessment) return;
 
-  // Find all successful submissions for this attempt
+  // Find every submission that actually earns points: 'Success' covers both coding
+  // and mcq (both resolve synchronously/asynchronously to a binary pass/fail);
+  // 'Graded' is a manually-scored subjective answer (see
+  // submissions.service.js's gradeSubjectiveSubmission) and carries real partial
+  // credit in its own score field instead of an all-or-nothing maxScore.
   const submissions = await Submission.find({
     attemptId: attempt._id,
-    status: 'Success'
+    status: { $in: ['Success', 'Graded'] }
   });
 
-  // Calculate score: for each problem in assessment, if there is a successful submission, add maxScore
-  let totalScore = 0;
-  const solvedProblemIds = new Set(submissions.map(s => String(s.problemId)));
+  // Last submission per problem wins (matches the pre-existing binary behavior,
+  // which only ever needed set-membership since Submission has no other status that
+  // implies "this is the graded answer" — Graded is now the only exception).
+  const byProblemId = new Map();
+  for (const s of submissions) {
+    byProblemId.set(String(s.problemId), s);
+  }
 
+  let totalScore = 0;
   for (const p of assessment.problems) {
-    const pId = p.problemId._id || p.problemId;
-    if (solvedProblemIds.has(String(pId))) {
+    const pId = String(p.problemId._id || p.problemId);
+    const submission = byProblemId.get(pId);
+    if (!submission) continue;
+
+    if (submission.status === 'Graded') {
+      totalScore += Math.min(submission.score || 0, p.maxScore);
+    } else {
       totalScore += p.maxScore;
     }
   }
@@ -338,6 +353,7 @@ export async function submitAssessment(attemptId, user, auditInfo = {}) {
     await auditService.logEvent({
       event: "ASSESSMENT_TIMEOUT",
       userId: user._id,
+      collegeId: attempt.collegeId || undefined,
       details: { attemptId, assessmentId: attempt.assessmentId },
       ...auditInfo
     });
@@ -361,6 +377,7 @@ export async function submitAssessment(attemptId, user, auditInfo = {}) {
   await auditService.logEvent({
     event: "ASSESSMENT_SUBMITTED",
     userId: user._id,
+    collegeId: attempt.collegeId || undefined,
     details: { attemptId, assessmentId: attempt.assessmentId, score: result.score },
     ...auditInfo
   });
@@ -402,7 +419,7 @@ export async function getAttemptSubmissions(attemptId, user, query = {}) {
     .sort({ createdAt: -1 })
     .skip((page - 1) * limit)
     .limit(limit)
-    .populate('problemId', 'title');
+    .populate('problemId', 'title problemType options maxWords rubricNotes');
 }
 
 function validateAssessmentPayload(payload) {

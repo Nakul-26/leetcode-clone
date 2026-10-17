@@ -7,6 +7,7 @@ import Problem from '../../models/Problem.mjs';
 import Assessment from '../../models/Assessment.mjs';
 import Submission from '../../models/Submission.mjs';
 import AuditLog from '../../models/AuditLog.mjs';
+import College from '../../models/College.mjs';
 
 describe('Admin Routes, Bulk Import, and Rejudge API', () => {
   let superadminToken;
@@ -270,6 +271,289 @@ describe('Admin Routes, Bulk Import, and Rejudge API', () => {
       const restoredStudent = await User.findOne({ email: 'backup_student@test.com' });
       expect(restoredStudent).toBeDefined();
       expect(restoredStudent.name).toBe('Backup Student');
+    });
+  });
+
+  describe('Seat management — tenant-scoped user CRUD', () => {
+    let collegeA;
+    let collegeB;
+    let adminAToken;
+    let adminAUser;
+    let studentA;
+    let studentB;
+
+    beforeEach(async () => {
+      collegeA = await College.create({ name: 'College A', slug: `college-a-${Date.now()}` });
+      collegeB = await College.create({ name: 'College B', slug: `college-b-${Date.now()}` });
+
+      const adminA = await authService.register({
+        name: 'Admin A', email: `admin-a-${Date.now()}@test.com`, password: 'password123',
+        role: 'admin', collegeId: collegeA._id.toString()
+      });
+      adminAToken = adminA.token;
+      adminAUser = adminA.user;
+
+      const sA = await authService.register({
+        name: 'Student A', email: `student-a-${Date.now()}@test.com`, password: 'password123',
+        role: 'student', collegeId: collegeA._id.toString()
+      });
+      studentA = sA.user;
+
+      const sB = await authService.register({
+        name: 'Student B', email: `student-b-${Date.now()}@test.com`, password: 'password123',
+        role: 'student', collegeId: collegeB._id.toString()
+      });
+      studentB = sB.user;
+    });
+
+    it('GET /api/admin/users should only return the caller college for a non-superadmin, and all colleges for a superadmin', async () => {
+      const scopedRes = await request(app)
+        .get('/api/admin/users')
+        .set('Authorization', `Bearer ${adminAToken}`);
+      expect(scopedRes.status).toBe(200);
+      const scopedEmails = scopedRes.body.users.map(u => u.email);
+      expect(scopedEmails).toContain(studentA.email);
+      expect(scopedEmails).not.toContain(studentB.email);
+
+      const allRes = await request(app)
+        .get('/api/admin/users')
+        .set('Authorization', `Bearer ${superadminToken}`);
+      expect(allRes.status).toBe(200);
+      const allEmails = allRes.body.users.map(u => u.email);
+      expect(allEmails).toContain(studentA.email);
+      expect(allEmails).toContain(studentB.email);
+    });
+
+    it('POST /api/admin/users/:userId/reset-password should 404 for a user outside the caller college', async () => {
+      const res = await request(app)
+        .post(`/api/admin/users/${studentB.id}/reset-password`)
+        .set('Authorization', `Bearer ${adminAToken}`)
+        .send({ newPassword: 'NewPass123' });
+      expect(res.status).toBe(404);
+    });
+
+    it('POST /api/admin/users should create a user scoped to the caller college, ignoring a body-supplied collegeId', async () => {
+      const res = await request(app)
+        .post('/api/admin/users')
+        .set('Authorization', `Bearer ${adminAToken}`)
+        .send({ name: 'New Faculty', email: `new-faculty-${Date.now()}@test.com`, role: 'faculty', collegeId: collegeB._id.toString() });
+
+      expect(res.status).toBe(201);
+      expect(res.body.password).toBeDefined();
+      const stored = await User.findOne({ email: res.body.user.email });
+      expect(String(stored.collegeId)).toBe(String(collegeA._id));
+    });
+
+    it('POST /api/admin/users should reject a non-superadmin trying to create a superadmin', async () => {
+      const res = await request(app)
+        .post('/api/admin/users')
+        .set('Authorization', `Bearer ${adminAToken}`)
+        .send({ name: 'Sneaky', email: `sneaky-${Date.now()}@test.com`, role: 'superadmin' });
+      expect(res.status).toBe(403);
+    });
+
+    it('DELETE /api/admin/users/:userId should remove a same-college user and 404 for a cross-college user', async () => {
+      const crossRes = await request(app)
+        .delete(`/api/admin/users/${studentB.id}`)
+        .set('Authorization', `Bearer ${adminAToken}`);
+      expect(crossRes.status).toBe(404);
+      expect(await User.findById(studentB.id)).not.toBeNull();
+
+      const sameRes = await request(app)
+        .delete(`/api/admin/users/${studentA.id}`)
+        .set('Authorization', `Bearer ${adminAToken}`);
+      expect(sameRes.status).toBe(200);
+      expect(await User.findById(studentA.id)).toBeNull();
+    });
+
+    it('DELETE /api/admin/users/:userId should reject deleting your own account', async () => {
+      const res = await request(app)
+        .delete(`/api/admin/users/${adminAUser.id}`)
+        .set('Authorization', `Bearer ${adminAToken}`);
+      expect(res.status).toBe(400);
+    });
+
+    it('POST /api/admin/bulk-import-students should force a non-superadmin caller into their own college regardless of a body-supplied collegeId', async () => {
+      const res = await request(app)
+        .post('/api/admin/bulk-import-students')
+        .set('Authorization', `Bearer ${adminAToken}`)
+        .send({
+          users: [{ name: 'Injected Student', email: `injected-${Date.now()}@test.com` }],
+          defaultPassword: 'TempPassword123',
+          collegeId: collegeB._id.toString()
+        });
+
+      expect(res.status).toBe(200);
+      expect(res.body.count).toBe(1);
+      const stored = await User.findOne({ email: res.body.created[0].email });
+      expect(String(stored.collegeId)).toBe(String(collegeA._id));
+    });
+  });
+
+  describe('Rejudge and audit-log tenant scoping', () => {
+    let collegeA;
+    let collegeB;
+    let adminAToken;
+    let adminBToken;
+    let problem;
+    let assessmentA;
+    let submissionA;
+
+    beforeEach(async () => {
+      collegeA = await College.create({ name: 'College A', slug: `college-a-rj-${Date.now()}` });
+      collegeB = await College.create({ name: 'College B', slug: `college-b-rj-${Date.now()}` });
+
+      const adminA = await authService.register({
+        name: 'Admin A', email: `admin-a-rj-${Date.now()}@test.com`, password: 'password123',
+        role: 'admin', collegeId: collegeA._id.toString()
+      });
+      adminAToken = adminA.token;
+
+      const adminB = await authService.register({
+        name: 'Admin B', email: `admin-b-rj-${Date.now()}@test.com`, password: 'password123',
+        role: 'admin', collegeId: collegeB._id.toString()
+      });
+      adminBToken = adminB.token;
+
+      problem = await Problem.create({
+        title: 'Two Sum', description: 'desc', difficulty: 'Easy',
+        functionName: 'twoSum',
+        parameters: [{ name: 'nums', type: 'array<number>' }, { name: 'target', type: 'number' }],
+        returnType: 'array<number>',
+        testCases: [{ inputs: [[2, 7, 11, 15], 9], expected: [0, 1], isSample: true }]
+      });
+
+      assessmentA = await Assessment.create({
+        title: 'College B Assessment',
+        problems: [{ problemId: problem._id, maxScore: 50 }],
+        durationMinutes: 60,
+        startTime: new Date(),
+        endTime: new Date(Date.now() + 2 * 3600 * 1000),
+        createdBy: superadminUser.id,
+        collegeId: collegeB._id
+      });
+
+      submissionA = await Submission.create({
+        problemId: problem._id,
+        userId: superadminUser.id,
+        assessmentId: assessmentA._id,
+        collegeId: collegeB._id,
+        code: 'def twoSum(nums, target): return [0, 1]',
+        language: 'python',
+        status: 'Success',
+        score: 50
+      });
+    });
+
+    it('rejudge endpoints should 404 for an admin outside the target college, and succeed for a superadmin', async () => {
+      const subRes = await request(app)
+        .post(`/api/admin/rejudge/submission/${submissionA._id}`)
+        .set('Authorization', `Bearer ${adminAToken}`);
+      expect(subRes.status).toBe(404);
+
+      const probRes = await request(app)
+        .post(`/api/admin/rejudge/problem/${problem._id}`)
+        .set('Authorization', `Bearer ${adminAToken}`);
+      expect(probRes.status).toBe(200);
+      expect(probRes.body.count).toBe(0);
+
+      const assessRes = await request(app)
+        .post(`/api/admin/rejudge/assessment/${assessmentA._id}`)
+        .set('Authorization', `Bearer ${adminAToken}`);
+      expect(assessRes.status).toBe(404);
+
+      const superRes = await request(app)
+        .post(`/api/admin/rejudge/submission/${submissionA._id}`)
+        .set('Authorization', `Bearer ${superadminToken}`);
+      expect(superRes.status).toBe(200);
+    });
+
+    it('GET /api/admin/audit-logs should only return events scoped to the caller college, and everything for a superadmin', async () => {
+      // Admin A performs an action within their own college — this is the audit event
+      // we're testing visibility of.
+      await request(app)
+        .post('/api/admin/users')
+        .set('Authorization', `Bearer ${adminAToken}`)
+        .send({ name: 'Audit Target', email: `audit-target-${Date.now()}@test.com`, role: 'student' });
+
+      const bEventsRes = await request(app)
+        .get('/api/admin/audit-logs')
+        .set('Authorization', `Bearer ${adminBToken}`);
+      expect(bEventsRes.status).toBe(200);
+      expect(bEventsRes.body.some(l => l.event === 'USER_CREATED')).toBe(false);
+
+      const aEventsRes = await request(app)
+        .get('/api/admin/audit-logs')
+        .set('Authorization', `Bearer ${adminAToken}`);
+      expect(aEventsRes.status).toBe(200);
+      expect(aEventsRes.body.some(l => l.event === 'USER_CREATED')).toBe(true);
+
+      const allRes = await request(app)
+        .get('/api/admin/audit-logs')
+        .set('Authorization', `Bearer ${superadminToken}`);
+      expect(allRes.status).toBe(200);
+      expect(allRes.body.some(l => l.event === 'USER_CREATED')).toBe(true);
+    });
+  });
+
+  describe('system-stats tenant scoping', () => {
+    let collegeA;
+    let collegeB;
+    let adminAToken;
+    let problem;
+    let submissionB;
+
+    beforeEach(async () => {
+      collegeA = await College.create({ name: 'College A', slug: `college-a-ss-${Date.now()}` });
+      collegeB = await College.create({ name: 'College B', slug: `college-b-ss-${Date.now()}` });
+
+      const adminA = await authService.register({
+        name: 'Admin A', email: `admin-a-ss-${Date.now()}@test.com`, password: 'password123',
+        role: 'admin', collegeId: collegeA._id.toString()
+      });
+      adminAToken = adminA.token;
+
+      await authService.register({
+        name: 'Admin B', email: `admin-b-ss-${Date.now()}@test.com`, password: 'password123',
+        role: 'admin', collegeId: collegeB._id.toString()
+      });
+
+      problem = await Problem.create({
+        title: 'Two Sum', description: 'desc', difficulty: 'Easy',
+        functionName: 'twoSum',
+        parameters: [{ name: 'nums', type: 'array<number>' }, { name: 'target', type: 'number' }],
+        returnType: 'array<number>',
+        testCases: [{ inputs: [[2, 7, 11, 15], 9], expected: [0, 1], isSample: true }]
+      });
+
+      submissionB = await Submission.create({
+        problemId: problem._id,
+        userId: superadminUser.id,
+        collegeId: collegeB._id,
+        code: 'def twoSum(nums, target): return [0, 1]',
+        language: 'python',
+        status: 'Success',
+        score: 50
+      });
+    });
+
+    it("an admin's metrics and recent-submissions feed exclude another college's data", async () => {
+      const res = await request(app)
+        .get('/api/admin/system-stats')
+        .set('Authorization', `Bearer ${adminAToken}`);
+      expect(res.status).toBe(200);
+      expect(res.body.metrics.totalSubmissions).toBe(0);
+      expect(res.body.metrics.totalUsers).toBe(1); // just Admin A themselves
+      expect(res.body.recentSubmissions.some(s => String(s._id) === String(submissionB._id))).toBe(false);
+    });
+
+    it("superadmin's metrics and recent-submissions feed include every college's data", async () => {
+      const res = await request(app)
+        .get('/api/admin/system-stats')
+        .set('Authorization', `Bearer ${superadminToken}`);
+      expect(res.status).toBe(200);
+      expect(res.body.metrics.totalSubmissions).toBeGreaterThanOrEqual(1);
+      expect(res.body.recentSubmissions.some(s => String(s._id) === String(submissionB._id))).toBe(true);
     });
   });
 });

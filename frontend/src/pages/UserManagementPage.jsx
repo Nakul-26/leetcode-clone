@@ -3,6 +3,8 @@ import { Users, Upload, CheckCircle, AlertCircle, Trash2, UserPlus, FileText, Do
 import { readWorkbookRows, downloadAoaAsExcel, downloadRowsAsExcel } from '../utils/excel';
 import { admin } from '../api';
 
+const NEW_USER_DEFAULTS = { name: '', email: '', password: '', role: 'student', usn: '', section: '' };
+
 const UserManagementPage = () => {
   const [activeTab, setActiveTab] = useState('list'); // 'list' or 'bulk'
   const [usersJson, setUsersJson] = useState('');
@@ -18,6 +20,13 @@ const UserManagementPage = () => {
   const [roleFilter, setRoleFilter] = useState('');
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
+
+  // Add-single-user modal state
+  const [showAddUser, setShowAddUser] = useState(false);
+  const [newUser, setNewUser] = useState(NEW_USER_DEFAULTS);
+  const [addUserError, setAddUserError] = useState(null);
+  const [addUserResult, setAddUserResult] = useState(null);
+  const [addingUser, setAddingUser] = useState(false);
 
   const fetchUsers = useCallback(async () => {
     setLoading(true);
@@ -217,6 +226,41 @@ const UserManagementPage = () => {
     }
   };
 
+  const handleDeleteUser = async (userId, userName) => {
+    if (!window.confirm(`Remove ${userName}? This frees their seat and cannot be undone.`)) return;
+
+    try {
+      await admin.deleteUser(userId);
+      fetchUsers();
+    } catch (err) {
+      console.error(err);
+      alert(err.response?.data?.error || 'Failed to remove user');
+    }
+  };
+
+  const openAddUser = () => {
+    setNewUser(NEW_USER_DEFAULTS);
+    setAddUserError(null);
+    setAddUserResult(null);
+    setShowAddUser(true);
+  };
+
+  const handleAddUser = async (e) => {
+    e.preventDefault();
+    setAddingUser(true);
+    setAddUserError(null);
+    try {
+      const res = await admin.createUser(newUser);
+      setAddUserResult(res.data);
+      fetchUsers();
+    } catch (err) {
+      console.error(err);
+      setAddUserError(err.response?.data?.error || err.response?.data?.message || 'Failed to create user');
+    } finally {
+      setAddingUser(false);
+    }
+  };
+
   const downloadSample = () => {
     const sampleData = [
       ["USN", "Name", "Email", "Section"],
@@ -260,17 +304,20 @@ const UserManagementPage = () => {
           <p className="text-muted">Manage platform access and onboard students.</p>
         </div>
         <div className="flex-center gap-3">
-          <button 
+          <button
             className={`button ${activeTab === 'list' ? 'button-primary' : 'button-outline'}`}
             onClick={() => setActiveTab('list')}
           >
             <Users size={18} /> User List
           </button>
-          <button 
+          <button
             className={`button ${activeTab === 'bulk' ? 'button-primary' : 'button-outline'}`}
             onClick={() => { setActiveTab('bulk'); setResults(null); }}
           >
             <Upload size={18} /> Bulk Import
+          </button>
+          <button className="button button-primary" onClick={openAddUser}>
+            <UserPlus size={18} /> Add User
           </button>
         </div>
       </div>
@@ -331,13 +378,22 @@ const UserManagementPage = () => {
                     </td>
                     <td style={{ fontSize: '0.8rem', color: 'var(--text-muted)', fontFamily: 'monospace' }}>{user.id}</td>
                     <td style={{ textAlign: 'right' }}>
-                      <button 
-                        className="button button-outline" 
-                        onClick={() => handleResetPassword(user.id, user.name)}
-                        style={{ padding: '6px 12px', fontSize: '0.8rem' }}
-                      >
-                        <Key size={14} /> Reset Password
-                      </button>
+                      <div className="flex-center gap-2" style={{ justifyContent: 'flex-end' }}>
+                        <button
+                          className="button button-outline"
+                          onClick={() => handleResetPassword(user.id, user.name)}
+                          style={{ padding: '6px 12px', fontSize: '0.8rem' }}
+                        >
+                          <Key size={14} /> Reset Password
+                        </button>
+                        <button
+                          className="button button-outline"
+                          onClick={() => handleDeleteUser(user.id, user.name)}
+                          style={{ padding: '6px 12px', fontSize: '0.8rem', color: 'var(--error)', borderColor: 'rgba(239, 68, 68, 0.4)' }}
+                        >
+                          <Trash2 size={14} /> Remove
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -579,6 +635,73 @@ USN,Name,Email,Section
         </div>
       )}
       
+      {showAddUser && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
+          <div className="problem-card" style={{ width: '480px', maxHeight: '85vh', overflowY: 'auto', padding: '24px' }}>
+            <h3 className="mb-4">Add User</h3>
+
+            {addUserResult ? (
+              <div>
+                <div className="error-box mb-4" style={{ background: 'rgba(16, 185, 129, 0.1)', color: 'var(--success)', borderColor: 'rgba(16, 185, 129, 0.2)' }}>
+                  {addUserResult.user.name} created successfully.
+                </div>
+                <div className="form-group mb-4">
+                  <label className="label">Password (shown once)</label>
+                  <input type="text" className="input" readOnly value={addUserResult.password} onFocus={(e) => e.target.select()} />
+                </div>
+                <div style={{ textAlign: 'right' }}>
+                  <button className="button" onClick={() => setShowAddUser(false)}>Done</button>
+                </div>
+              </div>
+            ) : (
+              <form onSubmit={handleAddUser}>
+                {addUserError && (
+                  <div className="error-box mb-4 flex-center gap-2" style={{ justifyContent: 'flex-start' }}>
+                    <AlertCircle size={18} /> {addUserError}
+                  </div>
+                )}
+
+                <div className="form-group mb-4">
+                  <label className="label">Name</label>
+                  <input type="text" className="input" required value={newUser.name} onChange={(e) => setNewUser({ ...newUser, name: e.target.value })} />
+                </div>
+                <div className="form-group mb-4">
+                  <label className="label">Email</label>
+                  <input type="email" className="input" required value={newUser.email} onChange={(e) => setNewUser({ ...newUser, email: e.target.value })} />
+                </div>
+                <div className="form-group mb-4">
+                  <label className="label">Role</label>
+                  <select className="input" value={newUser.role} onChange={(e) => setNewUser({ ...newUser, role: e.target.value })}>
+                    <option value="student">Student</option>
+                    <option value="faculty">Faculty</option>
+                    <option value="admin">Admin</option>
+                  </select>
+                </div>
+                <div className="form-group mb-4">
+                  <label className="label">USN (optional)</label>
+                  <input type="text" className="input" value={newUser.usn} onChange={(e) => setNewUser({ ...newUser, usn: e.target.value })} />
+                </div>
+                <div className="form-group mb-4">
+                  <label className="label">Section (optional)</label>
+                  <input type="text" className="input" value={newUser.section} onChange={(e) => setNewUser({ ...newUser, section: e.target.value })} />
+                </div>
+                <div className="form-group mb-6">
+                  <label className="label">Password (optional — leave blank to auto-generate)</label>
+                  <input type="text" className="input" value={newUser.password} onChange={(e) => setNewUser({ ...newUser, password: e.target.value })} />
+                </div>
+
+                <div className="flex-center gap-3">
+                  <button type="button" className="button button-outline" style={{ flex: 1 }} onClick={() => setShowAddUser(false)}>Cancel</button>
+                  <button type="submit" className="button button-primary" style={{ flex: 1 }} disabled={addingUser}>
+                    {addingUser ? 'Creating...' : 'Create User'}
+                  </button>
+                </div>
+              </form>
+            )}
+          </div>
+        </div>
+      )}
+
       <style>{`
         .w-full { width: 100%; }
         .label { display: block; margin-bottom: 8px; font-weight: 500; color: var(--text-secondary); font-size: 0.95rem; }

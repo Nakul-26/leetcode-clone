@@ -94,6 +94,57 @@ func (p *ContainerPool) Acquire(ctx context.Context, lang string) *PooledContain
 	}
 }
 
+// AcquireBulk is Acquire for work that may wait: it will not take the last `reserve`
+// idle containers of a language, leaving them for latency-sensitive callers.
+//
+// Acquire alone cannot provide that. It is a plain channel receive, and Go wakes blocked
+// receivers in FIFO order, so an interactive request that arrives behind a backlog of
+// bulk work queues behind every bulk waiter for a container, however it was prioritised
+// on the message queue. Holding some containers back is what makes priority real.
+//
+// The reserve is capped below the language's Max so a one-container pool still runs bulk
+// work rather than starving it forever.
+func (p *ContainerPool) AcquireBulk(ctx context.Context, lang string, reserve int) *PooledContainer {
+	start := time.Now()
+
+	p.mu.Lock()
+	ch, ok := p.availChans[lang]
+	limits := p.limits[lang]
+	p.mu.Unlock()
+	if !ok {
+		return nil
+	}
+	if reserve > limits.Max-1 {
+		reserve = limits.Max - 1
+	}
+	if reserve < 0 {
+		reserve = 0
+	}
+
+	ticker := time.NewTicker(25 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		if len(ch) > reserve {
+			select {
+			case container := <-ch:
+				metrics.RecordAcquire(lang, time.Since(start), false)
+				p.mu.Lock()
+				container.Busy = true
+				p.inUse[container.ID] = container
+				p.mu.Unlock()
+				return container
+			default:
+			}
+		}
+		select {
+		case <-ctx.Done():
+			metrics.RecordAcquire(lang, time.Since(start), true)
+			return nil
+		case <-ticker.C:
+		}
+	}
+}
+
 // Release returns a container to the pool.
 func (p *ContainerPool) Release(container *PooledContainer) {
 	if container == nil {

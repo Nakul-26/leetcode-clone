@@ -217,6 +217,65 @@ function validateProblemPayload(payload) {
   return validationErrors;
 }
 
+// mcq/subjective problems never reach the judge (no compile/run/wrapper step), so
+// they get their own lightweight structural validators instead of
+// validateProblemPayload's coding-specific checks (functionName/parameters/
+// testCases) and skip validateProblemDefinition's deep judge-based validation
+// entirely — see createProblem/updateProblem below.
+function validateMcqPayload(payload) {
+  const validationErrors = [];
+
+  if (!payload.title || typeof payload.title !== "string" || !payload.title.trim()) {
+    validationErrors.push("title is required");
+  }
+  if (!payload.description || typeof payload.description !== "string" || !payload.description.trim()) {
+    validationErrors.push("description is required");
+  }
+  if (!payload.difficulty || !["Easy", "Medium", "Hard"].includes(payload.difficulty)) {
+    validationErrors.push("difficulty must be Easy, Medium, or Hard");
+  }
+
+  if (!Array.isArray(payload.options) || payload.options.length < 2) {
+    validationErrors.push("options must contain at least 2 choices");
+  } else {
+    payload.options.forEach((o, i) => {
+      if (!o || typeof o.text !== "string" || !o.text.trim()) {
+        validationErrors.push(`options[${i}].text is required`);
+      }
+    });
+    const correctCount = payload.options.filter((o) => o?.isCorrect === true).length;
+    if (correctCount === 0) {
+      validationErrors.push("options must include at least one correct answer");
+    }
+    if (!payload.allowMultipleAnswers && correctCount > 1) {
+      validationErrors.push("only one option may be marked correct unless allowMultipleAnswers is set");
+    }
+  }
+
+  return validationErrors;
+}
+
+function validateSubjectivePayload(payload) {
+  const validationErrors = [];
+
+  if (!payload.title || typeof payload.title !== "string" || !payload.title.trim()) {
+    validationErrors.push("title is required");
+  }
+  if (!payload.description || typeof payload.description !== "string" || !payload.description.trim()) {
+    validationErrors.push("description is required");
+  }
+  if (!payload.difficulty || !["Easy", "Medium", "Hard"].includes(payload.difficulty)) {
+    validationErrors.push("difficulty must be Easy, Medium, or Hard");
+  }
+  if (payload.maxWords !== undefined && payload.maxWords !== null) {
+    if (!Number.isFinite(Number(payload.maxWords)) || Number(payload.maxWords) < 1) {
+      validationErrors.push("maxWords must be a positive number");
+    }
+  }
+
+  return validationErrors;
+}
+
 function parsePagination(query) {
   const page = Math.max(1, Number(query.page || 1));
   const limit = Math.min(100, Math.max(1, Number(query.limit || 50)));
@@ -314,9 +373,19 @@ export async function getProblemStats(problemId) {
   };
 }
 
+// mcq/subjective skip both the coding-specific structural check and the deep
+// judge-based validation (schema/types/wrapper-generation/reference-solution run) —
+// there's no code to compile or run for either type.
+function structuralValidatorFor(problemType) {
+  if (problemType === "mcq") return validateMcqPayload;
+  if (problemType === "subjective") return validateSubjectivePayload;
+  return validateProblemPayload;
+}
+
 export async function createProblem(payload) {
   const normalizedPayload = normalizeProblemPayload(payload);
-  const validationErrors = validateProblemPayload(normalizedPayload);
+  const problemType = normalizedPayload.problemType || "function";
+  const validationErrors = structuralValidatorFor(problemType)(normalizedPayload);
   if (validationErrors.length > 0) {
     throw new HttpError(400, "Validation failed", {
       error: validationErrors.join(", "),
@@ -324,13 +393,15 @@ export async function createProblem(payload) {
     });
   }
 
-  // Mandatory deep validation (schema + types + wrappers + reference solution)
-  const report = await validateProblemDefinition(normalizedPayload);
-  if (!report.schemaValid || !report.typeValidation || !report.wrapperGeneration || !report.referenceSolutionPassed) {
-    throw new HttpError(400, "Deep validation failed", {
-      error: "Problem failed deep validation checks (schema, types, wrappers, or reference solution).",
-      errors: report.errors
-    });
+  if (problemType === "function") {
+    // Mandatory deep validation (schema + types + wrappers + reference solution)
+    const report = await validateProblemDefinition(normalizedPayload);
+    if (!report.schemaValid || !report.typeValidation || !report.wrapperGeneration || !report.referenceSolutionPassed) {
+      throw new HttpError(400, "Deep validation failed", {
+        error: "Problem failed deep validation checks (schema, types, wrappers, or reference solution).",
+        errors: report.errors
+      });
+    }
   }
 
   return problemsRepo.create(normalizedPayload);
@@ -338,7 +409,8 @@ export async function createProblem(payload) {
 
 export async function updateProblem(id, payload) {
   const normalizedPayload = normalizeProblemPayload(payload);
-  const validationErrors = validateProblemPayload(normalizedPayload);
+  const problemType = normalizedPayload.problemType || "function";
+  const validationErrors = structuralValidatorFor(problemType)(normalizedPayload);
   if (validationErrors.length > 0) {
     throw new HttpError(400, "Validation failed", {
       error: validationErrors.join(", "),
@@ -346,13 +418,15 @@ export async function updateProblem(id, payload) {
     });
   }
 
-  // Mandatory deep validation (schema + types + wrappers + reference solution)
-  const report = await validateProblemDefinition(normalizedPayload);
-  if (!report.schemaValid || !report.typeValidation || !report.wrapperGeneration || !report.referenceSolutionPassed) {
-    throw new HttpError(400, "Deep validation failed", {
-      error: "Problem failed deep validation checks (schema, types, wrappers, or reference solution).",
-      errors: report.errors
-    });
+  if (problemType === "function") {
+    // Mandatory deep validation (schema + types + wrappers + reference solution)
+    const report = await validateProblemDefinition(normalizedPayload);
+    if (!report.schemaValid || !report.typeValidation || !report.wrapperGeneration || !report.referenceSolutionPassed) {
+      throw new HttpError(400, "Deep validation failed", {
+        error: "Problem failed deep validation checks (schema, types, wrappers, or reference solution).",
+        errors: report.errors
+      });
+    }
   }
 
   return problemsRepo.updateById(id, normalizedPayload);

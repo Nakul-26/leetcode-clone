@@ -27,7 +27,14 @@
     },
     "userId": {
       "type": "string"
+    },
+    "selectedOptions": {
+      "type": "array",
+      "items": { "type": "integer" }
+    },
+    "answerText": {
+      "type": "string"
     }
   },
-  "required": ["problemId", "code", "language"]
+  "required": ["problemId"]
 }

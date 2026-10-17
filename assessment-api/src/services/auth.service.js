@@ -9,6 +9,16 @@ import { HttpError } from "../utils/httpError.js";
 import { escapeRegex } from "../utils/escapeRegex.js";
 import * as auditService from "./audit.service.js";
 
+// superadmin operates across colleges; everyone else is scoped to their own. Mirrors
+// assessments.service.js's collegeScopeFor exactly, including the same "known gap left
+// open on purpose" for legacy admins with no collegeId (see C2 in
+// docs/PLATFORM_AUDIT_AND_SAAS_ROADMAP.md) — falls back to unscoped rather than
+// scoped-to-nothing.
+function collegeScopeFor(user) {
+  if (!user || user.role === 'superadmin') return undefined;
+  return user.collegeId || undefined;
+}
+
 // Phase 2 billing seat limit — no-op for plans with an unbounded seat count (Infinity),
 // and fails open if the college doesn't exist yet (e.g. legacy/unscoped data) so this
 // never blocks account creation for reasons unrelated to billing.
@@ -218,6 +228,7 @@ export async function login({ email, password }, auditInfo = {}) {
   if (!user || !ok) {
     await auditService.logEvent({
       event: "LOGIN_FAILED",
+      collegeId: user?.collegeId || undefined,
       details: { email: email.toLowerCase() },
       ...auditInfo
     });
@@ -233,16 +244,20 @@ export async function login({ email, password }, auditInfo = {}) {
   await auditService.logEvent({
     event: "LOGIN_SUCCESS",
     userId: user._id,
+    collegeId: user.collegeId || undefined,
     ...auditInfo
   });
 
   return { token, user: toPublicUser(user) };
 }
 
-export async function listUsers(query = {}) {
+export async function listUsers(query = {}, requestingUser) {
   const { search, role, page = 1, limit = 50 } = query;
   const filter = {};
-  
+
+  const scope = collegeScopeFor(requestingUser);
+  if (scope) filter.collegeId = scope;
+
   if (search) {
     const safeSearch = escapeRegex(search);
     filter.$or = [
@@ -250,7 +265,7 @@ export async function listUsers(query = {}) {
       { email: { $regex: safeSearch, $options: 'i' } }
     ];
   }
-  
+
   if (role) {
     filter.role = role;
   }
@@ -270,9 +285,20 @@ export async function listUsers(query = {}) {
   };
 }
 
+// Non-superadmin callers may only act on a target within their own college — a 404
+// (not 403) so cross-college user IDs aren't distinguishable from nonexistent ones,
+// matching the convention in assessments.repo.js's findById(id, collegeId).
+function assertTargetInScope(targetUser, requestingUser) {
+  const scope = collegeScopeFor(requestingUser);
+  if (scope && String(targetUser.collegeId || '') !== String(scope)) {
+    throw new HttpError(404, "User not found");
+  }
+}
+
 export async function resetUserPassword(userId, newPassword, adminUser, auditInfo = {}) {
   const user = await User.findById(userId);
   if (!user) throw new HttpError(404, "User not found");
+  assertTargetInScope(user, adminUser);
 
   const hashed = await bcrypt.hash(newPassword, 10);
   await User.updateOne({ _id: userId }, { password: hashed });
@@ -280,9 +306,62 @@ export async function resetUserPassword(userId, newPassword, adminUser, auditInf
   await auditService.logEvent({
     event: "USER_PASSWORD_RESET",
     userId: adminUser._id,
+    collegeId: adminUser.collegeId || undefined,
     details: { targetUserId: userId, targetEmail: user.email },
     ...auditInfo
   });
 
   return { msg: "Password reset successful" };
+}
+
+// Single-user seat-management counterpart to bulkRegister — for adding one user to an
+// existing college outside the CSV/bulk-import flow (see
+// docs/PLATFORM_AUDIT_AND_SAAS_ROADMAP.md Phase 2: "an admin console for seat-level
+// management... is still open"). A non-superadmin caller is always scoped to their own
+// college and can never assign the superadmin role (privilege escalation guard).
+export async function adminCreateUser({ name, email, password, role, usn, section }, requestingUser, auditInfo = {}) {
+  if (role === 'superadmin' && requestingUser.role !== 'superadmin') {
+    throw new HttpError(403, "Forbidden", { message: "Only a superadmin can create a superadmin account" });
+  }
+
+  const scope = collegeScopeFor(requestingUser);
+  const collegeId = scope || requestingUser.collegeId || undefined;
+
+  const plainPassword = password || Math.random().toString(36).substring(2, 10);
+  const { user } = await register({ name, email, password: plainPassword, role, collegeId, usn, section });
+
+  await auditService.logEvent({
+    event: "USER_CREATED",
+    userId: requestingUser._id,
+    collegeId: collegeId || undefined,
+    details: { targetUserId: user.id, targetEmail: user.email, role: user.role },
+    ...auditInfo
+  });
+
+  return { user, password: plainPassword };
+}
+
+export async function deleteUser(userId, requestingUser, auditInfo = {}) {
+  const user = await User.findById(userId);
+  if (!user) throw new HttpError(404, "User not found");
+  assertTargetInScope(user, requestingUser);
+
+  if (String(user._id) === String(requestingUser._id)) {
+    throw new HttpError(400, "Cannot delete your own account");
+  }
+  if (user.role === 'superadmin' && requestingUser.role !== 'superadmin') {
+    throw new HttpError(403, "Forbidden", { message: "Only a superadmin can delete a superadmin account" });
+  }
+
+  await User.deleteOne({ _id: userId });
+
+  await auditService.logEvent({
+    event: "USER_DELETED",
+    userId: requestingUser._id,
+    collegeId: requestingUser.collegeId || undefined,
+    details: { targetUserId: userId, targetEmail: user.email },
+    ...auditInfo
+  });
+
+  return { msg: "User deleted successfully" };
 }

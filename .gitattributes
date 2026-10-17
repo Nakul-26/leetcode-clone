@@ -1,0 +1,5 @@
+# Shell scripts run inside Linux Docker containers - a CRLF shebang line (e.g. from a
+# Windows checkout with core.autocrlf=true) breaks exec() with a misleading
+# "no such file or directory" error that looks like the file is missing, not malformed.
+# See frontend/docker-entrypoint.sh's git history for the bug this fixes.
+*.sh text eol=lf

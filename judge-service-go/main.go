@@ -60,6 +60,7 @@ const (
 	// for the operator-facing summary.
 	defaultPoolGlobalCap          = 60
 	defaultWorkerConcurrency      = 24
+	defaultInteractiveWorkers     = 4
 	defaultAutoscaleInterval      = 15 * time.Second
 	defaultScaleUpThresholdMs     = 150.0
 	defaultScaleDownThresholdMs   = 20.0
@@ -193,6 +194,10 @@ func getDurationSecondsEnv(name string, def time.Duration) time.Duration {
 
 // MaxExecutionsPerContainer controls how many times a pooled container may be
 // used before being evicted. Can be changed at startup from env.
+// bulkContainerReserve is how many idle containers per language bulk work leaves untouched
+// for interactive callers. Set from JUDGE_INTERACTIVE_RESERVE at startup.
+var bulkContainerReserve = 1
+
 var MaxExecutionsPerContainer int32 = 100
 
 func failOnError(err error, msg string) {
@@ -304,6 +309,41 @@ func fetchProblemData(ctx context.Context, problemsCollection *mongo.Collection,
 	return problem, nil
 }
 
+// Ceilings for caller-supplied limits on ad-hoc submissions, matching /raw-run.
+const (
+	maxAdHocTimeLimitMs   = 60000
+	maxAdHocMemoryLimitMb = 2048
+)
+
+// adHocProblem builds the in-memory Problem for a submission that carries its own
+// test cases instead of referencing a stored one (SubmissionMessage.Kind ==
+// SubmissionKindAdHoc). Always stdin-mode — Validate enforces that — so there is no
+// function signature, wrapper or comparison config to reconstruct.
+//
+// Title and Description exist only to satisfy Problem.ValidateBasic; nothing renders
+// them, because an ad-hoc submission has no problem page to render them on.
+func adHocProblem(submissionMsg models.SubmissionMessage) models.Problem {
+	// The limits come from an external caller, so they are clamped here rather than trusted.
+	// /raw-run has always done the same; without it a caller could ask for an hour and hold a
+	// container for the whole of the submission budget.
+	timeLimitMs := submissionMsg.TimeLimitMs
+	if timeLimitMs > maxAdHocTimeLimitMs {
+		timeLimitMs = maxAdHocTimeLimitMs
+	}
+	memoryLimitMb := submissionMsg.MemoryLimitMb
+	if memoryLimitMb > maxAdHocMemoryLimitMb {
+		memoryLimitMb = maxAdHocMemoryLimitMb
+	}
+	return models.Problem{
+		Title:         "Ad-hoc execution",
+		Description:   "Submitted through the public execution API; no stored problem.",
+		Type:          models.StdinProblem,
+		TestCases:     submissionMsg.Tests,
+		TimeLimitMs:   timeLimitMs,
+		MemoryLimitMb: memoryLimitMb,
+	}
+}
+
 // prepareSubmissionFiles generates the necessary wrapper and source files for execution.
 func prepareSubmissionFiles(submissionMsg models.SubmissionMessage, problem models.Problem, lang *languages.Language, tempDir string) ([]string, []string, []string, error) {
 	// The problem's TestCases have been parsed and normalized by ValidateBasic().
@@ -396,94 +436,25 @@ func prepareSubmissionFiles(submissionMsg models.SubmissionMessage, problem mode
 
 // rawRunFilesAndCommands returns the file(s) to write, compile command, and run command
 // for RAW (unwrapped) execution of a single source file against stdin — no function
-// wrapper, no test harness, no structural comparison. The run command for each language
-// is intentionally the SAME command the wrapper-based flow already uses (languages.go),
-// so the sandbox images don't need to change; only the source is written straight into
-// the file that command already expects, instead of being merged into a wrapper.
+// wrapper, no test harness, no structural comparison.
 //
-// Java is the one case that constrains the student's code: RunCmd always invokes class
-// "Main", so raw Java submissions must declare `public class Main`. C# raw execution
-// compiles the student's Program.cs as the project's sole entry point — unlike the
-// wrapper flow, which forces StartupObject=Harness to make the fixed test-harness class
-// win over the (also present) Solution class, raw mode has no Harness in the mix, so no
-// override is needed.
+// This is exactly what adapters.StdinAdapterRegistry describes, so it delegates there
+// rather than keeping a second copy. The two used to be separate switch statements and
+// had silently drifted: /raw-run supported twelve languages while the stdin registry
+// supported five, and the two disagreed on optimisation flags and on Go's offline build
+// hardening (see the registry's comment). One definition means the synchronous raw path
+// and the queue-backed stdin path cannot diverge again.
 func rawRunFilesAndCommands(lang *languages.Language, code string, tempDir string) ([]string, []string, []string, error) {
-	switch lang.ID {
-	case "python":
-		if err := workspace.WriteFile(tempDir, "wrapper.py", []byte(code), 0644); err != nil {
-			return nil, nil, nil, fmt.Errorf("failed to write submission file: %w", err)
-		}
-		return []string{"wrapper.py"}, nil, lang.RunCmd, nil
-	case "javascript":
-		if err := workspace.WriteFile(tempDir, "wrapper.js", []byte(code), 0644); err != nil {
-			return nil, nil, nil, fmt.Errorf("failed to write submission file: %w", err)
-		}
-		return []string{"wrapper.js"}, nil, lang.RunCmd, nil
-	case "typescript":
-		if err := workspace.WriteFile(tempDir, "wrapper.ts", []byte(code), 0644); err != nil {
-			return nil, nil, nil, fmt.Errorf("failed to write submission file: %w", err)
-		}
-		return []string{"wrapper.ts"}, nil, lang.RunCmd, nil
-	case "c":
-		if err := workspace.WriteFile(tempDir, "main.c", []byte(code), 0644); err != nil {
-			return nil, nil, nil, fmt.Errorf("failed to write submission file: %w", err)
-		}
-		return []string{"main.c"}, lang.CompileCmd, lang.RunCmd, nil
-	case "cpp":
-		if err := workspace.WriteFile(tempDir, "main.cpp", []byte(code), 0644); err != nil {
-			return nil, nil, nil, fmt.Errorf("failed to write submission file: %w", err)
-		}
-		return []string{"main.cpp"}, lang.CompileCmd, lang.RunCmd, nil
-	case "go":
-		if err := workspace.WriteFile(tempDir, "main.go", []byte(code), 0644); err != nil {
-			return nil, nil, nil, fmt.Errorf("failed to write submission file: %w", err)
-		}
-		// lang.CompileCmd is already offline-safe (see languages.go) — no need for a
-		// second copy of the compile command here.
-		return []string{"main.go"}, lang.CompileCmd, lang.RunCmd, nil
-	case "java":
-		if err := workspace.WriteFile(tempDir, "Main.java", []byte(code), 0644); err != nil {
-			return nil, nil, nil, fmt.Errorf("failed to write submission file: %w", err)
-		}
-		compileCmd := []string{"javac", "-cp", "/usr/share/java/gson.jar:.", "/app/Main.java"}
-		return []string{"Main.java"}, compileCmd, lang.RunCmd, nil
-	case "ruby":
-		if err := workspace.WriteFile(tempDir, "wrapper.rb", []byte(code), 0644); err != nil {
-			return nil, nil, nil, fmt.Errorf("failed to write submission file: %w", err)
-		}
-		return []string{"wrapper.rb"}, nil, lang.RunCmd, nil
-	case "php":
-		if err := workspace.WriteFile(tempDir, "wrapper.php", []byte(code), 0644); err != nil {
-			return nil, nil, nil, fmt.Errorf("failed to write submission file: %w", err)
-		}
-		return []string{"wrapper.php"}, nil, lang.RunCmd, nil
-	case "rust":
-		if err := workspace.WriteFile(tempDir, "main.rs", []byte(code), 0644); err != nil {
-			return nil, nil, nil, fmt.Errorf("failed to write submission file: %w", err)
-		}
-		return []string{"main.rs"}, lang.CompileCmd, lang.RunCmd, nil
-	case "kotlin":
-		// Unlike the wrapper-based flow (Solution.kt + Harness.kt), raw execution
-		// compiles a single self-contained file the student's own `fun main()` lives in.
-		if err := workspace.WriteFile(tempDir, "Main.kt", []byte(code), 0644); err != nil {
-			return nil, nil, nil, fmt.Errorf("failed to write submission file: %w", err)
-		}
-		compileCmd := []string{"kotlinc", "-cp", "/usr/share/java/gson.jar", "-d", "/app/out", "/app/Main.kt"}
-		runCmd := []string{"java", "-cp", "/app/out:/opt/kotlinc/lib/kotlin-stdlib.jar:/usr/share/java/gson.jar", "MainKt"}
-		return []string{"Main.kt"}, compileCmd, runCmd, nil
-	case "csharp":
-		if err := workspace.WriteFile(tempDir, "Program.cs", []byte(code), 0644); err != nil {
-			return nil, nil, nil, fmt.Errorf("failed to write submission file: %w", err)
-		}
-		// The image pre-warms a "dotnet new console" project at /home/judge/app so the
-		// first real build isn't paying SDK/restore cold-start cost; app.csproj is
-		// copied in fresh per run, same as the wrapper adapter does.
-		compileCmd := []string{"sh", "-c", "cp /home/judge/app/app.csproj . && dotnet build -c Release -o out"}
-		runCmd := []string{"dotnet", "out/app.dll"}
-		return []string{"Program.cs"}, compileCmd, runCmd, nil
-	default:
+	adapter, ok := adapters.GetStdinAdapter(lang.ID)
+	if !ok {
 		return nil, nil, nil, fmt.Errorf("raw execution is not supported for language %q yet", lang.ID)
 	}
+
+	filesToCopy, err := adapter.PrepareFiles(tempDir, code)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	return filesToCopy, adapters.StdinCompileCommand(adapter), adapter.RunCommand(), nil
 }
 
 type rawRunRequest struct {
@@ -508,7 +479,7 @@ type rawRunResponse struct {
 
 // handleRawRun serves POST /raw-run: compile (if needed) and execute a single raw source
 // file against a single stdin payload, with no problem/test-case/wrapper concept at all.
-// This is the primitive the public Judge0-compatible shim in assessment-api calls into —
+// This is the primitive the public GO Judge public API shim in assessment-api calls into —
 // judge-service-go itself is never exposed publicly (see docker-compose.prod.yml), so this
 // endpoint intentionally has no auth of its own; the network boundary is the control.
 func handleRawRun(containerPool *pool.ContainerPool, ex *executor.Executor) http.HandlerFunc {
@@ -621,6 +592,15 @@ func handleRawRun(containerPool *pool.ContainerPool, ex *executor.Executor) http
 					// Echo back the requested limit so the caller's own
 					// "memory >= limit => reclassify as MLE" heuristic fires
 					// even though we don't meter actual peak usage here.
+				case executor.ErrRuntimeError:
+					// A non-zero exit from the submitted program is an ordinary judging
+					// outcome, not a judge failure, so Error is deliberately left empty:
+					// ExitCode and Stderr above already carry everything the caller needs.
+					// This matters because the GO Judge shim checks raw.error before
+					// exitCode, so setting it here reported every student crash as
+					// INTERNAL_ERROR (13, "the judge broke") instead of RUNTIME_ERROR
+					// (11, NZEC) — which left a consuming platform unable to tell a
+					// crashing submission apart from our own infrastructure failing.
 				default:
 					resp.Error = execErr.Error()
 				}
@@ -637,6 +617,19 @@ func handleRawRun(containerPool *pool.ContainerPool, ex *executor.Executor) http
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(resp)
 	}
+}
+
+// testCountFromResult is how many test cases a submission actually executed, falling back
+// to the number it carried when no result was produced (e.g. a compile failure) so a
+// failed run is still metered as the work that was requested.
+func testCountFromResult(result *models.SubmissionResult, requested int) int {
+	if result != nil && result.Total > 0 {
+		return result.Total
+	}
+	if requested > 0 {
+		return requested
+	}
+	return 1
 }
 
 // elapsedMsFromResult extracts the total execution time already computed onto the result
@@ -931,11 +924,22 @@ func processAndStoreResults(ctx context.Context, executionPath string, stdout, s
 		"language":     submissionMsg.Language,
 		"status":       submissionStatus,
 		"elapsedMs":    elapsedMsFromResult(submissionTestResult),
+		// A coalesced batch is one submission with many test cases, so usage is also
+		// recorded in tests. Without it a client sending six cases in one request would meter
+		// as one, undercounting exactly the traffic the batch endpoint is meant to attract.
+		"testCount":    testCountFromResult(submissionTestResult, len(submissionMsg.Tests)),
 		"createdAt":    time.Now(),
 	}
 	if submissionMsg.CollegeID != "" {
 		if collegeObjID, err := primitive.ObjectIDFromHex(submissionMsg.CollegeID); err == nil {
 			usageEvent["collegeId"] = collegeObjID
+		}
+	}
+	// Attribution for per-customer metering and invoicing. Same best-effort posture as
+	// the rest of this block: a malformed id is dropped rather than failing the result.
+	if submissionMsg.ApiClientID != "" {
+		if apiClientObjID, err := primitive.ObjectIDFromHex(submissionMsg.ApiClientID); err == nil {
+			usageEvent["apiClientId"] = apiClientObjID
 		}
 	}
 	if _, err := usageEventsCollection.InsertOne(ctx, usageEvent); err != nil {
@@ -986,7 +990,7 @@ func markSubmissionExecutionFailed(ctx context.Context, submissionsCollection *m
 }
 
 // processSubmission is the main coordinator for handling a submission message.
-func processSubmission(d amqp.Delivery, ch *amqp.Channel, retryQueueName string, problemsCollection *mongo.Collection, submissionsCollection *mongo.Collection, usageEventsCollection *mongo.Collection, redisClient *redis.Client, executor *executor.Executor, containerPool *pool.ContainerPool) {
+func processSubmission(interactive bool, d amqp.Delivery, ch *amqp.Channel, retryQueueName string, problemsCollection *mongo.Collection, submissionsCollection *mongo.Collection, usageEventsCollection *mongo.Collection, redisClient *redis.Client, executor *executor.Executor, containerPool *pool.ContainerPool) {
 	ctx := context.Background()
 
 	submissionMsg, err := validateAndDecodeSubmission(d)
@@ -996,11 +1000,21 @@ func processSubmission(d amqp.Delivery, ch *amqp.Channel, retryQueueName string,
 		return
 	}
 
-	problem, err := fetchProblemData(ctx, problemsCollection, submissionMsg.ProblemID)
-	if err != nil {
-		slog.Error("Failed to fetch problem data", "submissionId", submissionMsg.SubmissionID, "error", err)
-		d.Nack(false, true) // Transient failure (DB might be down)
-		return
+	// An ad-hoc submission carries its own tests and has no stored problem to
+	// fetch, so the Problem is built in memory. Everything downstream — strategy
+	// dispatch, the container pool, retries, persistence and metering — then
+	// treats it exactly like any other stdin submission, which is the entire
+	// point: the public GO Judge surface stops being a separate execution path.
+	var problem models.Problem
+	if submissionMsg.IsAdHoc() {
+		problem = adHocProblem(submissionMsg)
+	} else {
+		problem, err = fetchProblemData(ctx, problemsCollection, submissionMsg.ProblemID)
+		if err != nil {
+			slog.Error("Failed to fetch problem data", "submissionId", submissionMsg.SubmissionID, "error", err)
+			d.Nack(false, true) // Transient failure (DB might be down)
+			return
+		}
 	}
 
 	// Validate the problem data and parse/normalize test cases from the problem doc.
@@ -1032,7 +1046,15 @@ func processSubmission(d amqp.Delivery, ch *amqp.Channel, retryQueueName string,
 	acquireCtx, acquireCancel := context.WithTimeout(ctx, 30*time.Second)
 	defer acquireCancel()
 
-	pooledContainer := containerPool.Acquire(acquireCtx, lang.ID)
+	// Bulk work leaves a reserve of idle containers for interactive callers; without it
+	// a backlog of bulk submissions holds every container and the priority queue is
+	// priority in name only (see pool.AcquireBulk).
+	var pooledContainer *pool.PooledContainer
+	if interactive {
+		pooledContainer = containerPool.Acquire(acquireCtx, lang.ID)
+	} else {
+		pooledContainer = containerPool.AcquireBulk(acquireCtx, lang.ID, bulkContainerReserve)
+	}
 	if pooledContainer == nil {
 		if submissionMsg.RetryCount >= models.MaxSubmissionRetries {
 			slog.Error("Submission exceeded max retries waiting for a container; marking as failed",
@@ -1472,6 +1494,7 @@ func main() {
 	}
 
 	workerConcurrency := getIntEnv("JUDGE_WORKER_CONCURRENCY", defaultWorkerConcurrency)
+	bulkContainerReserve = getIntEnv("JUDGE_INTERACTIVE_RESERVE", bulkContainerReserve)
 
 	// Max executions per pooled container before eviction
 	maxExecs := 100
@@ -1647,6 +1670,46 @@ func main() {
 	)
 	failOnError(err, "Failed to declare retry queue")
 
+	// A second queue for latency-sensitive work: a caller waiting synchronously on a
+	// result (the GO Judge public API surface with wait=true) should not queue behind a
+	// bulk backlog it has nothing to do with.
+	//
+	// A separate queue rather than x-max-priority on the existing one, because adding
+	// that argument to an already-declared queue fails with PRECONDITION_FAILED and
+	// takes publishing down until someone deletes the queue by hand. This is purely
+	// additive, so a judge running this code against an older broker, or an older judge
+	// against this one, both keep working.
+	interactiveQueueName := submissionQueueName + "_fast"
+	_, err = ch.QueueDeclare(
+		interactiveQueueName,
+		true,
+		false,
+		false,
+		false,
+		amqp.Table{
+			"x-dead-letter-exchange": dlxName,
+		},
+	)
+	failOnError(err, "Failed to declare interactive submission queue")
+
+	// Its own retry queue, dead-lettering back to the interactive queue: sending these
+	// retries to the bulk retry queue would quietly demote a waiting caller to bulk
+	// priority the first time no container was free.
+	interactiveRetryQueueName := interactiveQueueName + "_retry"
+	_, err = ch.QueueDeclare(
+		interactiveRetryQueueName,
+		true,
+		false,
+		false,
+		false,
+		amqp.Table{
+			"x-dead-letter-exchange":    "",
+			"x-dead-letter-routing-key": interactiveQueueName,
+			"x-message-ttl":             5000,
+		},
+	)
+	failOnError(err, "Failed to declare interactive retry queue")
+
 	msgs, err := ch.Consume(
 		submissionQueueName, // queue
 		"",                  // consumer
@@ -1658,7 +1721,18 @@ func main() {
 	)
 	failOnError(err, "Failed to register a consumer")
 
-	slog.Info("Waiting for messages", "queue", submissionQueueName)
+	interactiveMsgs, err := ch.Consume(
+		interactiveQueueName,
+		"",
+		false,
+		false,
+		false,
+		false,
+		nil,
+	)
+	failOnError(err, "Failed to register the interactive consumer")
+
+	slog.Info("Waiting for messages", "queue", submissionQueueName, "interactiveQueue", interactiveQueueName)
 
 	// Graceful Shutdown implementation
 	sigChan := make(chan os.Signal, 1)
@@ -1674,9 +1748,26 @@ func main() {
 			defer workerWg.Done()
 			slog.Debug("Worker started", "workerId", workerID)
 			for d := range msgs {
-				processSubmission(d, ch, retryQueueName, problemsCollection, submissionsCollection, usageEventsCollection, redisClient, executor, containerPool)
+				processSubmission(false, d, ch, retryQueueName, problemsCollection, submissionsCollection, usageEventsCollection, redisClient, executor, containerPool)
 			}
 			slog.Debug("Worker stopped", "workerId", workerID)
+		}(i)
+	}
+
+	// Interactive work gets its own workers rather than sharing the bulk ones: when every
+	// shared worker is busy or blocked waiting for a container on bulk work, a priority
+	// queue is never even read. These are in addition to numWorkers, not carved out of
+	// it, so bulk throughput is unchanged; they spend nearly all their time blocked on
+	// the sandbox, not on CPU.
+	interactiveWorkers := getIntEnv("JUDGE_INTERACTIVE_WORKERS", defaultInteractiveWorkers)
+	slog.Info("Starting interactive workers", "count", interactiveWorkers, "bulkContainerReserve", bulkContainerReserve)
+	for i := 0; i < interactiveWorkers; i++ {
+		workerWg.Add(1)
+		go func(workerID int) {
+			defer workerWg.Done()
+			for d := range interactiveMsgs {
+				processSubmission(true, d, ch, interactiveRetryQueueName, problemsCollection, submissionsCollection, usageEventsCollection, redisClient, executor, containerPool)
+			}
 		}(i)
 	}
 

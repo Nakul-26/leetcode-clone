@@ -157,6 +157,87 @@ export function buildProblemPayload(formData) {
   };
 }
 
+export function buildMcqPayload(formData) {
+  const errors = {};
+  const title = String(formData.title || "").trim();
+  const description = String(formData.description || "").trim();
+
+  if (!title) addError(errors, "title", "Title is required");
+  if (!description) addError(errors, "description", "Description is required");
+
+  const rawOptions = formData.options || [];
+  const options = rawOptions
+    .map((o = {}) => ({ text: String(o.text || "").trim(), isCorrect: !!o.isCorrect }))
+    .filter((o) => o.text);
+
+  if (options.length < 2) {
+    addError(errors, "options", "At least 2 options are required");
+  } else {
+    const correctCount = options.filter((o) => o.isCorrect).length;
+    if (correctCount === 0) {
+      addError(errors, "options", "Mark at least one option as correct");
+    } else if (!formData.allowMultipleAnswers && correctCount > 1) {
+      addError(errors, "options", "Only one option may be marked correct unless multiple answers are allowed");
+    }
+  }
+
+  if (Object.keys(errors).length > 0) {
+    return { errors };
+  }
+
+  return {
+    errors: {},
+    payload: {
+      title,
+      description,
+      difficulty: formData.difficulty,
+      problemType: "mcq",
+      options,
+      allowMultipleAnswers: !!formData.allowMultipleAnswers,
+      tags: String(formData.tags || "")
+        .split(",")
+        .map((tag) => tag.trim())
+        .filter(Boolean),
+      isPremium: !!formData.isPremium
+    }
+  };
+}
+
+export function buildSubjectivePayload(formData) {
+  const errors = {};
+  const title = String(formData.title || "").trim();
+  const description = String(formData.description || "").trim();
+
+  if (!title) addError(errors, "title", "Title is required");
+  if (!description) addError(errors, "description", "Description is required");
+
+  const maxWords = formData.maxWords === "" || formData.maxWords === undefined ? undefined : Number(formData.maxWords);
+  if (maxWords !== undefined && (!Number.isFinite(maxWords) || maxWords < 1)) {
+    addError(errors, "maxWords", "Max words must be a positive number");
+  }
+
+  if (Object.keys(errors).length > 0) {
+    return { errors };
+  }
+
+  return {
+    errors: {},
+    payload: {
+      title,
+      description,
+      difficulty: formData.difficulty,
+      problemType: "subjective",
+      ...(maxWords !== undefined ? { maxWords } : {}),
+      rubricNotes: String(formData.rubricNotes || "").trim(),
+      tags: String(formData.tags || "")
+        .split(",")
+        .map((tag) => tag.trim())
+        .filter(Boolean),
+      isPremium: !!formData.isPremium
+    }
+  };
+}
+
 export function collectErrorMessages(errors = {}) {
   return Object.values(errors);
 }

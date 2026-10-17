@@ -273,7 +273,7 @@ restart is not. **Do not push to `main` near an exam window** — exams are run 
 Co-ordinate the timing with the friend first.
 **Also worth settling while you are in there**: GO Judge publishes the domain
 `coding2.fortifyhub.net`, but this repo and `docs/` only ever reference
-`coding.fortifyhub.net` — the host the Judge0/Arventiq partner integrations actually call.
+`coding.fortifyhub.net` — the host the GO Judge/Arventiq partner integrations actually call.
 Both answer `200` healthy right now even though our `assessment-api` is not running, so
 something other than our stack is serving at least one of them. The two stacks have separate
 MongoDB instances, so if partner traffic is landing on the sandbox stack it is reading and

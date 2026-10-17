@@ -173,6 +173,70 @@ exactly two `{{FUNCTION_NAME}}` markers and no other `{{...}}` markers, which is
 string-replacement path is correct for it and why the removed `text/template` branch could never
 have parsed it. The removal was right.
 
+## 5b. Rebuilding judge-service-go locally - FIXED 2026-10-16
+
+**Editing `judge-service-go/` and running `docker compose up` silently runs the old code.**
+Cost real debugging time: a fix was applied, the container restarted, the source was
+confirmed present inside the container — and the behaviour did not change.
+
+Cause: `docker-compose.yml` sets
+
+```yaml
+command: sh -c "go build -o ./tmp/go-judge-service . && ./tmp/go-judge-service"
+```
+
+but `judge-service-go/Dockerfile` ends with an exec-form entrypoint:
+
+```dockerfile
+ENTRYPOINT ["/usr/local/bin/go-judge-service"]
+```
+
+With an exec-form ENTRYPOINT, `command:` is passed as **arguments to the entrypoint**, not
+as a replacement. The container therefore runs
+`/usr/local/bin/go-judge-service sh -c "go build ..."`; the Go binary ignores the extra
+args and starts normally, serving the **image-baked binary** and never touching the mounted
+source. The `go build` never runs — `/src/tmp` does not even exist in the container.
+It could not work anyway: the runtime stage is `alpine:3.19`, which has no Go toolchain
+(the compile happens in an earlier build stage).
+
+**Until this is fixed, to test a judge-service-go change locally:**
+
+```bash
+docker compose build judge-service-go
+docker compose up -d --force-recreate judge-service-go
+```
+
+`docker compose restart` is NOT enough — it restarts the container from the same image.
+
+**How to tell which binary is running**: `docker compose exec judge-service-go ls /src/tmp`.
+If it says "No such file or directory", the compose `command` never ran and you are on the
+image-baked binary.
+
+**Fixed 2026-10-16.** `judge-service-go/Dockerfile` now has a `dev` stage (golang base,
+Go toolchain, no ENTRYPOINT) and `docker-compose.yml` selects it with `target: dev`. The
+broken `command:` is gone - the dev stage's own CMD rebuilds from the bind-mounted source
+on every container start, so:
+
+```bash
+docker compose restart judge-service-go   # now really does pick up your edits
+```
+
+Verified by editing `/health` to return a sentinel, running only `restart` (no rebuild),
+and seeing `{"status":"DEVSTAGE-PROBE"}` come back - then reverting. A persistent
+`judge_go_build_cache` volume keeps those restarts incremental.
+
+Two things to be careful of if you touch this again:
+- **The `dev` stage sits BEFORE `runtime` in the Dockerfile on purpose.** A multi-stage
+  build defaults to the LAST stage, and `docker-compose.prod.yml` pins no `target:`, so
+  moving `dev` to the end would silently make production build the dev image - with a Go
+  toolchain, root user and no slim runtime.
+- **The dev stage uses `WORKDIR /src`, the runtime stage `/app`.** That is not cosmetic:
+  `wrapper.GenerateWrapper` resolves templates relative to the working directory
+  (`pkg/wrappers/...`). The runtime stage copies them to `/app`; dev gets them from the
+  bind mount. Verified present at `/src/pkg/wrappers` (19 templates) in the dev container.
+
+Contract harness re-run against the dev-stage image: 21 fixtures, 0 differences, so the
+switch changed no observable behaviour.
 ## 6. Backend lint cleanup — `problemDifficultyStats` fix has no test coverage
 
 While clearing the backend's ~27 pre-existing ESLint violations (to flip the CI lint gate from

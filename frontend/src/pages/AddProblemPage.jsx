@@ -2,12 +2,13 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Plus, Save, Trash2, AlertTriangle, CheckCircle2, ChevronLeft, Info, Settings } from 'lucide-react';
 import api from '../api';
-import { buildProblemPayload, collectErrorMessages } from '../utils/problemForm';
+import { buildProblemPayload, buildMcqPayload, buildSubjectivePayload, collectErrorMessages } from '../utils/problemForm';
 import { PROBLEM_TEMPLATES } from '../utils/problemTemplates';
 
 const AddProblemPage = () => {
   const navigate = useNavigate();
   const [formData, setFormData] = useState({
+    problemType: 'function',
     title: '',
     description: '',
     difficulty: 'Easy',
@@ -23,7 +24,13 @@ const AddProblemPage = () => {
     },
     testCases: [{ inputs: '[]', expected: '', isSample: true }],
     referenceSolution: '',
-    solutionLanguage: 'javascript'
+    solutionLanguage: 'javascript',
+    // mcq-only
+    options: [{ text: '', isCorrect: false }, { text: '', isCorrect: false }],
+    allowMultipleAnswers: false,
+    // subjective-only
+    maxWords: '',
+    rubricNotes: ''
   });
   const [apiError, setApiError] = useState('');
   const [apiErrors, setApiErrors] = useState([]);
@@ -83,6 +90,28 @@ const AddProblemPage = () => {
     setIsValidated(false);
   };
 
+  const handleOptionChange = (index, e) => {
+    const { name, value, type, checked } = e.target;
+    const next = [...formData.options];
+    next[index] = { ...next[index], [name]: type === 'checkbox' ? checked : value };
+    if (name === 'isCorrect' && checked && !formData.allowMultipleAnswers) {
+      next.forEach((o, i) => { if (i !== index) o.isCorrect = false; });
+    }
+    setFormData({ ...formData, options: next });
+    setIsValidated(false);
+  };
+
+  const addOption = () => {
+    setFormData({ ...formData, options: [...formData.options, { text: '', isCorrect: false }] });
+    setIsValidated(false);
+  };
+
+  const removeOption = (index) => {
+    if (formData.options.length <= 2) return;
+    setFormData({ ...formData, options: formData.options.filter((_, i) => i !== index) });
+    setIsValidated(false);
+  };
+
   const handleCompareConfigChange = (e) => {
     const { name, value, type, checked } = e.target;
     setFormData({
@@ -95,13 +124,21 @@ const AddProblemPage = () => {
     setIsValidated(false);
   };
 
+  const payloadBuilderFor = (problemType) => {
+    if (problemType === 'mcq') return buildMcqPayload;
+    if (problemType === 'subjective') return buildSubjectivePayload;
+    return buildProblemPayload;
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!isValidated) return;
+    // Coding problems must be Validated first (deep judge-based check); mcq/subjective
+    // have no judge step at all, so there's nothing to gate on.
+    if (formData.problemType === 'function' && !isValidated) return;
     setApiError('');
     setApiErrors([]);
 
-    const { errors, payload } = buildProblemPayload(formData);
+    const { errors, payload } = payloadBuilderFor(formData.problemType)(formData);
     if (Object.keys(errors).length > 0) {
       setFormErrors(errors);
       window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -122,6 +159,7 @@ const AddProblemPage = () => {
   };
 
   const handleValidate = async () => {
+    if (formData.problemType !== 'function') return;
     setApiError('');
     setApiErrors([]);
     setValidationReport(null);
@@ -239,19 +277,45 @@ const AddProblemPage = () => {
       <div className="problem-card mb-8">
         <div className="flex-center gap-2 mb-4" style={{ justifyContent: 'flex-start' }}>
           <Settings size={20} color="var(--primary)" />
-          <h3 style={{ margin: 0, fontSize: '1.1rem' }}>Templates</h3>
+          <h3 style={{ margin: 0, fontSize: '1.1rem' }}>Problem Type</h3>
         </div>
         <div className="form-group">
-          <label>Start from a template:</label>
-          <select onChange={handleTemplateSelect} defaultValue="" style={{ marginTop: '8px' }}>
-            <option value="" disabled>Select a template...</option>
-            {PROBLEM_TEMPLATES.map(t => (
-              <option key={t.id} value={t.id}>{t.label}</option>
-            ))}
+          <select
+            name="problemType"
+            value={formData.problemType}
+            onChange={(e) => { handleChange(e); setValidationReport(null); }}
+            style={{ marginTop: '8px' }}
+          >
+            <option value="function">Coding (function + test cases)</option>
+            <option value="mcq">Multiple Choice</option>
+            <option value="subjective">Subjective (free-text, manually graded)</option>
           </select>
-          <p className="form-hint">Selecting a template auto-fills the function name, parameters, and return type.</p>
+          <p className="form-hint">
+            {formData.problemType === 'mcq' && 'Auto-graded: correct iff the student picks exactly the marked option(s).'}
+            {formData.problemType === 'subjective' && 'Ungraded on submit — a faculty/admin manually scores each answer afterward.'}
+            {formData.problemType === 'function' && 'Executed and graded by the judge against your test cases.'}
+          </p>
         </div>
       </div>
+
+      {formData.problemType === 'function' && (
+        <div className="problem-card mb-8">
+          <div className="flex-center gap-2 mb-4" style={{ justifyContent: 'flex-start' }}>
+            <Settings size={20} color="var(--primary)" />
+            <h3 style={{ margin: 0, fontSize: '1.1rem' }}>Templates</h3>
+          </div>
+          <div className="form-group">
+            <label>Start from a template:</label>
+            <select onChange={handleTemplateSelect} defaultValue="" style={{ marginTop: '8px' }}>
+              <option value="" disabled>Select a template...</option>
+              {PROBLEM_TEMPLATES.map(t => (
+                <option key={t.id} value={t.id}>{t.label}</option>
+              ))}
+            </select>
+            <p className="form-hint">Selecting a template auto-fills the function name, parameters, and return type.</p>
+          </div>
+        </div>
+      )}
 
       <form onSubmit={handleSubmit} className="mb-12">
         <h3 className="mb-4">Basic Information</h3>
@@ -286,6 +350,7 @@ const AddProblemPage = () => {
           </label>
         </div>
 
+        {formData.problemType === 'function' && (<>
         <h3 className="mb-4">Signature & Types</h3>
         <div className="grid grid-cols-2 gap-6 mb-6" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px' }}>
           <div className="form-group">
@@ -446,12 +511,70 @@ const AddProblemPage = () => {
               <Plus size={16} /> Add Test Case
             </button>
         </div>
+        </>)}
+
+        {formData.problemType === 'mcq' && (
+          <div className="mb-8">
+            <h3 className="mb-2">Options</h3>
+            {fieldError('options') && <div className="error-text mb-4">{fieldError('options')}</div>}
+            <div className="form-group mb-4">
+              <label className="flex-center gap-2" style={{ justifyContent: 'flex-start', cursor: 'pointer' }}>
+                <input
+                  type="checkbox"
+                  checked={formData.allowMultipleAnswers}
+                  onChange={(e) => setFormData({ ...formData, allowMultipleAnswers: e.target.checked })}
+                  style={{ width: 'auto' }}
+                />
+                <span style={{ fontSize: '0.9rem' }}>Allow multiple correct answers</span>
+              </label>
+            </div>
+            {formData.options.map((o, i) => (
+              <div key={i} className="flex-center gap-4 mb-4">
+                <label className="flex-center gap-2" style={{ cursor: 'pointer' }}>
+                  <input
+                    type={formData.allowMultipleAnswers ? 'checkbox' : 'radio'}
+                    name="isCorrect"
+                    checked={!!o.isCorrect}
+                    onChange={(e) => handleOptionChange(i, e)}
+                    style={{ width: 'auto' }}
+                  />
+                </label>
+                <div style={{ flex: 1 }}>
+                  <input type="text" name="text" placeholder={`Option ${i + 1}`} value={o.text} onChange={(e) => handleOptionChange(i, e)} />
+                </div>
+                <button type="button" onClick={() => removeOption(i)} className="button button-outline" style={{ color: 'var(--error)', padding: '10px' }} disabled={formData.options.length <= 2}>
+                  <Trash2 size={18} />
+                </button>
+              </div>
+            ))}
+            <button type="button" onClick={addOption} className="button button-outline" style={{ width: '100%' }}>
+              <Plus size={16} /> Add Option
+            </button>
+          </div>
+        )}
+
+        {formData.problemType === 'subjective' && (
+          <div className="mb-8">
+            <h3 className="mb-4">Grading Guidance</h3>
+            <div className="form-group mb-4">
+              <label>Max Words (optional)</label>
+              <input type="number" min="1" value={formData.maxWords} onChange={(e) => setFormData({ ...formData, maxWords: e.target.value })} className={fieldClassName('maxWords')} placeholder="e.g. 200" />
+              {fieldError('maxWords') && <div className="error-text">{fieldError('maxWords')}</div>}
+            </div>
+            <div className="form-group mb-4">
+              <label>Rubric Notes (faculty-only, never shown to students)</label>
+              <textarea value={formData.rubricNotes} onChange={(e) => setFormData({ ...formData, rubricNotes: e.target.value })} placeholder="What should a full-score answer cover?" style={{ height: '120px' }} />
+            </div>
+          </div>
+        )}
 
         <div className="flex-between gap-4 mt-8">
-          <button type="button" onClick={handleValidate} className="button button-outline" style={{ flex: 1, padding: '14px' }} disabled={isValidating}>
-            {isValidating ? 'Validating...' : 'Validate Problem'}
-          </button>
-          <button type="submit" className="button" style={{ flex: 1, padding: '14px' }} disabled={!isValidated || isValidating}>
+          {formData.problemType === 'function' && (
+            <button type="button" onClick={handleValidate} className="button button-outline" style={{ flex: 1, padding: '14px' }} disabled={isValidating}>
+              {isValidating ? 'Validating...' : 'Validate Problem'}
+            </button>
+          )}
+          <button type="submit" className="button" style={{ flex: 1, padding: '14px' }} disabled={(formData.problemType === 'function' && (!isValidated || isValidating))}>
             <Save size={20} /> Create Problem
           </button>
         </div>

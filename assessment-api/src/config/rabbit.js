@@ -32,3 +32,9 @@ export async function initRabbit() {
 export function getChannel() {
   return channel;
 }
+
+// The amqplib connection object (the thing that can open further channels). Deliberately not
+// `channel.connection`, which is the low-level protocol connection and has no createChannel.
+export function getConnection() {
+  return connection;
+}

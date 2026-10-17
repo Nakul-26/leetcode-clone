@@ -6,7 +6,7 @@ import rateLimit from "express-rate-limit";
 import { v4 as uuidv4 } from "uuid";
 import routes from "./routes/index.js";
 import { errorHandler } from "./middleware/errorHandler.js";
-import { env } from "./config/env.js";
+import { getAllowedOrigins } from "./config/corsOrigins.js";
 
 import swaggerUi from "swagger-ui-express";
 import { swaggerSpec } from "./config/swagger.js";
@@ -48,6 +48,16 @@ const arventiqLimiter = rateLimit({
   legacyHeaders: false,
 });
 
+// Public, unauthenticated route (external interviewer's signed link) — stricter than
+// generalLimiter since there's no account behind it to hold accountable.
+const interviewLinkLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 200,
+  message: "Too many requests, please try again later",
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 app.use((req, res, next) => {
   req.id = req.headers["x-request-id"] || uuidv4();
   res.setHeader("x-request-id", req.id);
@@ -64,10 +74,7 @@ app.use((req, res, next) => {
 // for any credentialed/cookie request). No hardcoded production origin: there is no
 // deployed frontend yet, so CORS_ALLOWED_ORIGINS stays unset until one exists - see
 // docs/PLATFORM_AUDIT_AND_SAAS_ROADMAP.md, H8.
-const allowedOrigins = env.CORS_ALLOWED_ORIGINS.split(",").map((o) => o.trim()).filter(Boolean);
-if (process.env.NODE_ENV !== "production") {
-  allowedOrigins.push("http://localhost:5173", "http://127.0.0.1:5173");
-}
+const allowedOrigins = getAllowedOrigins();
 
 const corsOptions = {
   origin(origin, callback) {
@@ -118,12 +125,14 @@ app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 app.use("/api/v1/auth", authLimiter);
 app.use("/api/v1/integration", integrationLimiter);
 app.use("/api/v1/arventiq", arventiqLimiter);
+app.use("/api/v1/interview-slots/external", interviewLinkLimiter);
 app.use("/api/v1", generalLimiter);
 app.use("/api/v1", routes);
 
 // Backward Compatibility / Default Prefix
 app.use("/api/auth", authLimiter);
 app.use("/api/integration", integrationLimiter);
+app.use("/api/interview-slots/external", interviewLinkLimiter);
 app.use("/api", generalLimiter);
 app.use("/api", routes);
 

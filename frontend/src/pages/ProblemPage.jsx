@@ -5,8 +5,9 @@ import { Play, Send, ChevronLeft, Info, History, Settings2, Terminal, AlertCircl
 import api, { problems } from '../api';
 import SubmissionOutput from '../components/SubmissionOutput';
 import buildTemplate from '../utils/buildTemplate';
-
-const supportedLanguages = ['python', 'javascript', 'typescript', 'java', 'cpp', 'c', 'csharp', 'go', 'ruby', 'php', 'kotlin', 'rust'];
+import { SUPPORTED_LANGUAGES } from '../utils/languages';
+import { defineModernDarkTheme, MONACO_EDITOR_OPTIONS } from '../utils/editorTheme';
+import { buildCustomTests } from '../utils/buildCustomTests';
 
 const ProblemPage = ({ user }) => {
   const { _id } = useParams();
@@ -115,11 +116,7 @@ const ProblemPage = ({ user }) => {
 
     let tests = [];
     try {
-      tests = testCases.map(tcStr => {
-        const parsed = JSON.parse(tcStr || '[]');
-        const inputArr = Array.isArray(parsed) ? parsed : [parsed];
-        return { inputs: inputArr, expected: null, isSample: true };
-      });
+      tests = buildCustomTests(testCases);
     } catch (err) {
       console.error('Invalid JSON in test cases:', err);
       setRunResult({ status: 'Error', error: 'Invalid JSON in one of the test cases.' });
@@ -177,20 +174,6 @@ const ProblemPage = ({ user }) => {
       return next;
     });
     setActiveTestCaseIdx(prev => prev >= idx ? Math.max(0, prev - 1) : prev);
-  };
-
-  const handleEditorWillMount = (monaco) => {
-    monaco.editor.defineTheme('modern-dark', {
-      base: 'vs-dark',
-      inherit: true,
-      rules: [],
-      colors: {
-        'editor.background': '#0d1117',
-        'editor.lineHighlightBackground': '#161b22',
-        'editorLineNumber.foreground': '#484f58',
-        'editorIndentGuide.background': '#21262d',
-      }
-    });
   };
 
   if (!problem) return <div className="container flex-center" style={{ height: '100vh' }}><Loader2 className="spin" size={48} color="var(--primary)" /></div>;
@@ -368,7 +351,7 @@ const ProblemPage = ({ user }) => {
                 onChange={(e) => setSelectedLanguage(e.target.value)}
                 style={{ width: 'auto', padding: '4px 8px', fontSize: '0.85rem', background: 'var(--bg)' }}
               >
-                {supportedLanguages.map(lang => <option key={lang} value={lang}>{lang}</option>)}
+                {SUPPORTED_LANGUAGES.map(lang => <option key={lang} value={lang}>{lang}</option>)}
               </select>
             </div>
             <div className="flex-center gap-2">
@@ -395,25 +378,8 @@ const ProblemPage = ({ user }) => {
             theme="modern-dark"
             value={code}
             onChange={(val) => setCode(val)}
-            beforeMount={handleEditorWillMount}
-            options={{
-              fontSize: 15,
-              fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
-              minimap: { enabled: false },
-              scrollBeyondLastLine: false,
-              automaticLayout: true,
-              padding: { top: 20, bottom: 20 },
-              renderLineHighlight: 'all',
-              mouseWheelZoom: false,
-              mouseWheelScrollSensitivity: 1,
-              scrollbar: {
-                vertical: 'visible',
-                horizontal: 'visible',
-                verticalScrollbarSize: 10,
-                horizontalScrollbarSize: 10,
-                alwaysConsumeMouseWheel: false
-              }
-            }}
+            beforeMount={defineModernDarkTheme}
+            options={MONACO_EDITOR_OPTIONS}
           />
         </div>
 

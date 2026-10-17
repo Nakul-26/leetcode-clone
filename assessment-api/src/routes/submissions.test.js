@@ -183,3 +183,165 @@ describe('Submissions API', () => {
     expect(updatedAttempt.status).toBe('TimedOut');
   });
 });
+
+describe('Submissions API — mcq/subjective', () => {
+  let studentToken;
+  let studentId;
+  let facultyToken;
+  let mcqProblemId;
+  let subjectiveProblemId;
+
+  beforeEach(async () => {
+    const student = await authService.register({
+      name: 'MCQ Student',
+      email: `mcq-student-${Date.now()}@test.com`,
+      password: 'password123',
+      role: 'student'
+    });
+    studentToken = student.token;
+    studentId = student.user.id;
+
+    const faculty = await authService.register({
+      name: 'Grading Faculty',
+      email: `grading-faculty-${Date.now()}@test.com`,
+      password: 'password123',
+      role: 'faculty'
+    });
+    facultyToken = faculty.token;
+
+    const mcqProblem = await Problem.create({
+      title: 'Capital of France',
+      description: 'Pick the capital of France',
+      difficulty: 'Easy',
+      problemType: 'mcq',
+      options: [
+        { text: 'Paris', isCorrect: true },
+        { text: 'London', isCorrect: false },
+        { text: 'Berlin', isCorrect: false }
+      ]
+    });
+    mcqProblemId = mcqProblem._id;
+
+    const subjectiveProblem = await Problem.create({
+      title: 'Explain recursion',
+      description: 'In your own words, explain recursion',
+      difficulty: 'Medium',
+      problemType: 'subjective',
+      maxWords: 100
+    });
+    subjectiveProblemId = subjectiveProblem._id;
+  });
+
+  it('auto-grades a correct mcq submission as Success', async () => {
+    const res = await request(app)
+      .post('/api/submissions')
+      .set('Authorization', `Bearer ${studentToken}`)
+      .send({ problemId: mcqProblemId.toString(), selectedOptions: [0] });
+
+    expect(res.status).toBe(202);
+    expect(res.body.status).toBe('Success');
+    expect(res.body.score).toBe(100);
+  });
+
+  it('auto-grades an incorrect mcq submission as Fail', async () => {
+    const res = await request(app)
+      .post('/api/submissions')
+      .set('Authorization', `Bearer ${studentToken}`)
+      .send({ problemId: mcqProblemId.toString(), selectedOptions: [1] });
+
+    expect(res.status).toBe(202);
+    expect(res.body.status).toBe('Fail');
+    expect(res.body.score).toBe(0);
+  });
+
+  it('rejects an mcq submission with no selectedOptions', async () => {
+    const res = await request(app)
+      .post('/api/submissions')
+      .set('Authorization', `Bearer ${studentToken}`)
+      .send({ problemId: mcqProblemId.toString() });
+
+    expect(res.status).toBe(400);
+  });
+
+  it('rejects an mcq submission with an out-of-range option index', async () => {
+    const res = await request(app)
+      .post('/api/submissions')
+      .set('Authorization', `Bearer ${studentToken}`)
+      .send({ problemId: mcqProblemId.toString(), selectedOptions: [99] });
+
+    expect(res.status).toBe(400);
+  });
+
+  it('queues a subjective submission as PendingReview with zero score', async () => {
+    const res = await request(app)
+      .post('/api/submissions')
+      .set('Authorization', `Bearer ${studentToken}`)
+      .send({ problemId: subjectiveProblemId.toString(), answerText: 'Recursion is a function calling itself.' });
+
+    expect(res.status).toBe(202);
+    expect(res.body.status).toBe('PendingReview');
+    expect(res.body.score).toBe(0);
+  });
+
+  it('rejects a subjective submission exceeding maxWords', async () => {
+    const longAnswer = Array(101).fill('word').join(' ');
+    const res = await request(app)
+      .post('/api/submissions')
+      .set('Authorization', `Bearer ${studentToken}`)
+      .send({ problemId: subjectiveProblemId.toString(), answerText: longAnswer });
+
+    expect(res.status).toBe(400);
+  });
+
+  it('lets faculty grade a subjective submission and lists it in the ungraded queue first', async () => {
+    const assessment = await Assessment.create({
+      title: 'Subjective Grading Assessment',
+      problems: [{ problemId: subjectiveProblemId, maxScore: 50 }],
+      durationMinutes: 30,
+      startTime: new Date(Date.now() - 60_000),
+      endTime: new Date(Date.now() + 3_600_000),
+      createdBy: studentId,
+      status: 'Published'
+    });
+    const attempt = await AssessmentAttempt.create({
+      assessmentId: assessment._id,
+      studentId,
+      status: 'Active'
+    });
+
+    const submitRes = await request(app)
+      .post('/api/submissions')
+      .set('Authorization', `Bearer ${studentToken}`)
+      .send({
+        problemId: subjectiveProblemId.toString(),
+        answerText: 'A function that calls itself.',
+        assessmentId: assessment._id.toString(),
+        attemptId: attempt._id.toString()
+      });
+    const submissionId = submitRes.body._id;
+
+    await request(app)
+      .post(`/api/submissions/${submissionId}/grade`)
+      .set('Authorization', `Bearer ${studentToken}`)
+      .send({ score: 40, feedback: 'Good explanation' })
+      .expect(403);
+
+    const ungraded = await request(app)
+      .get(`/api/submissions/assessment/${assessment._id}/ungraded`)
+      .set('Authorization', `Bearer ${facultyToken}`);
+    expect(ungraded.status).toBe(200);
+    expect(ungraded.body.length).toBe(1);
+
+    const gradeRes = await request(app)
+      .post(`/api/submissions/${submissionId}/grade`)
+      .set('Authorization', `Bearer ${facultyToken}`)
+      .send({ score: 40, feedback: 'Good explanation' });
+
+    expect(gradeRes.status).toBe(200);
+    expect(gradeRes.body.status).toBe('Graded');
+    expect(gradeRes.body.score).toBe(40);
+
+    const updatedAttempt = await AssessmentAttempt.findById(attempt._id);
+    expect(updatedAttempt.score).toBe(40);
+  });
+});

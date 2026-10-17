@@ -1,7 +1,7 @@
 import * as submissionsService from "../services/submissions.service.js";
 
 export async function submitSolution(req, res, next) {
-  const { problemId, code, language, assessmentId, attemptId } = req.body;
+  const { problemId, code, language, selectedOptions, answerText, assessmentId, attemptId } = req.body;
   const userId = req.user && req.user._id;
 
   try {
@@ -13,11 +13,16 @@ export async function submitSolution(req, res, next) {
       problemId,
       code,
       language,
+      selectedOptions,
+      answerText,
       userId,
       collegeId: req.user && req.user.collegeId,
       assessmentId,
       attemptId,
-      requestId: req.id
+      requestId: req.id,
+      // Attribution when this came in through an external API key rather than the
+      // frontend. Undefined for browser traffic and for legacy shared-secret callers.
+      apiClientId: req.apiClient ? req.apiClient._id : undefined
     });
     if (result.notFound) {
       return res.status(404).json({ msg: "Problem not found" });
@@ -77,6 +82,35 @@ export async function getMyAnalytics(req, res, next) {
     const result = await submissionsService.getMyAnalytics(userId);
     res.json(result);
   } catch (err) {
+    next(err);
+  }
+}
+
+export async function listUngradedSubjectiveSubmissions(req, res, next) {
+  const { assessmentId } = req.params;
+
+  try {
+    const result = await submissionsService.listUngradedSubjectiveSubmissions(assessmentId, req.user);
+    res.json(result);
+  } catch (err) {
+    if (err.status) {
+      return res.status(err.status).json(err.body || { msg: err.message });
+    }
+    next(err);
+  }
+}
+
+export async function gradeSubjectiveSubmission(req, res, next) {
+  const { _id } = req.params;
+  const { score, feedback } = req.body;
+
+  try {
+    const result = await submissionsService.gradeSubjectiveSubmission(_id, { score, feedback }, req.user);
+    res.json(result);
+  } catch (err) {
+    if (err.status) {
+      return res.status(err.status).json(err.body || { msg: err.message });
+    }
     next(err);
   }
 }

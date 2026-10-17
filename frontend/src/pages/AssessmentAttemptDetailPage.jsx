@@ -338,19 +338,71 @@ const AssessmentAttemptDetailPage = () => {
                   </div>
                 </div>
               </div>
-              <pre style={{ 
-                flex: 1, 
-                margin: 0, 
-                padding: '24px', 
-                backgroundColor: '#1e1e1e', 
-                color: '#d4d4d4',
-                overflow: 'auto',
-                fontSize: '14px',
-                lineHeight: '1.6',
-                fontFamily: "'Fira Code', monospace"
-              }}>
-                {selectedSubmission.code}
-              </pre>
+              {selectedSubmission.problemId?.problemType === 'mcq' ? (
+                <div style={{ flex: 1, overflow: 'auto', padding: '24px' }}>
+                  {(selectedSubmission.problemId.options || []).map((opt, idx) => {
+                    const wasSelected = (selectedSubmission.selectedOptions || []).includes(idx);
+                    return (
+                      <div
+                        key={idx}
+                        style={{
+                          padding: '12px 16px',
+                          marginBottom: '10px',
+                          borderRadius: 'var(--radius-md)',
+                          border: `1px solid ${opt.isCorrect ? 'var(--success)' : wasSelected ? 'var(--error)' : 'var(--border)'}`,
+                          background: wasSelected ? 'rgba(255,255,255,0.04)' : 'transparent',
+                          color: '#d4d4d4',
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          gap: '12px'
+                        }}
+                      >
+                        <span>{opt.text}</span>
+                        <span style={{ display: 'flex', gap: '8px', fontSize: '0.75rem', flexShrink: 0 }}>
+                          {wasSelected && <span style={{ color: 'var(--text-muted)' }}>Selected</span>}
+                          {opt.isCorrect && <span style={{ color: 'var(--success)' }}>Correct</span>}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : selectedSubmission.problemId?.problemType === 'subjective' ? (
+                <div style={{ flex: 1, overflow: 'auto', padding: '24px', display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                  <div>
+                    <div style={{ fontSize: '0.75rem', textTransform: 'uppercase', color: 'var(--text-muted)', fontWeight: '700', letterSpacing: '0.05em', marginBottom: '8px' }}>
+                      Answer
+                    </div>
+                    <div style={{ color: '#d4d4d4', whiteSpace: 'pre-wrap', lineHeight: '1.6' }}>
+                      {selectedSubmission.answerText || <span style={{ color: 'var(--text-muted)' }}>No answer submitted.</span>}
+                    </div>
+                  </div>
+                  {selectedSubmission.status === 'Graded' && (
+                    <div>
+                      <div style={{ fontSize: '0.75rem', textTransform: 'uppercase', color: 'var(--text-muted)', fontWeight: '700', letterSpacing: '0.05em', marginBottom: '8px' }}>
+                        Faculty Feedback (Score: {selectedSubmission.score})
+                      </div>
+                      <div style={{ color: '#d4d4d4', whiteSpace: 'pre-wrap', lineHeight: '1.6' }}>
+                        {selectedSubmission.feedback || <span style={{ color: 'var(--text-muted)' }}>No feedback given.</span>}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <pre style={{
+                  flex: 1,
+                  margin: 0,
+                  padding: '24px',
+                  backgroundColor: '#1e1e1e',
+                  color: '#d4d4d4',
+                  overflow: 'auto',
+                  fontSize: '14px',
+                  lineHeight: '1.6',
+                  fontFamily: "'Fira Code', monospace"
+                }}>
+                  {selectedSubmission.code}
+                </pre>
+              )}
             </>
           ) : (
             <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%', color: 'var(--text-muted)', flexDirection: 'column', gap: '16px' }}>

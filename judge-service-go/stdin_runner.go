@@ -42,7 +42,8 @@ func runSubmissionStdinDetailed(ctx context.Context, exec *executor.Executor, po
 		}
 	}()
 
-	baseFiles, err := stdinAdapter.PrepareFiles(submissionWorkspace.HostPath, util.UnescapeCode(submissionMsg.Code))
+	source := stdinSourceFor(submissionMsg)
+	baseFiles, err := stdinAdapter.PrepareFiles(submissionWorkspace.HostPath, source)
 	if err != nil {
 		return nil, cleanupFailed, err
 	}
@@ -74,7 +75,7 @@ func runSubmissionStdinDetailed(ctx context.Context, exec *executor.Executor, po
 		// validation (e.g. a future direct-call path) fails a single test
 		// cleanly instead of panicking the whole submission.
 		stdinText, inputOk := stdinTestInput(tc)
-		expectedText, expectedOk := stdinTestExpected(tc)
+		expectedText, hasExpected, expectedOk := stdinTestExpected(tc)
 		if !inputOk || !expectedOk {
 			markTestFailed(&tr, models.SubmissionStatusRuntimeError)
 			tr.Error = "invalid stdin test case shape (expected string input/expected)"
@@ -94,7 +95,7 @@ func runSubmissionStdinDetailed(ctx context.Context, exec *executor.Executor, po
 		}
 
 		testCtx, cancel := context.WithTimeout(ctx, testTimeout)
-		stdout, stderr, runErr := exec.RunInContainerWithStdin(
+		stdout, stderr, exitCode, runErr := exec.RunInContainerWithStdin(
 			testCtx,
 			pooledContainer.ID,
 			filesToCopy,
@@ -112,6 +113,9 @@ func runSubmissionStdinDetailed(ctx context.Context, exec *executor.Executor, po
 		stderrForLog, stderrTruncated := truncateString(strings.TrimSpace(stderr), maxLogOutputBytes)
 		tr.Stdout = stdoutForResult
 		tr.Stderr = stderrForLog
+		// Reported as GO Judge exit_code on the public surface, which a caller uses to
+		// distinguish a crash from a wrong answer.
+		tr.ExitCode = exitCode
 
 		if runErr != nil {
 			errStr := strings.ToLower(runErr.Error())
@@ -148,11 +152,19 @@ func runSubmissionStdinDetailed(ctx context.Context, exec *executor.Executor, po
 		}
 
 		tr.Output = stdout
-		tr.Passed = comparator.CompareText(stdout, expectedText)
-		tr.Ok = tr.Passed
-		if !tr.Passed {
-			tr.ErrorType = models.ErrorTypeWrongAnswer
+		if hasExpected {
+			tr.Passed = comparator.CompareText(stdout, expectedText)
+			if !tr.Passed {
+				tr.ErrorType = models.ErrorTypeWrongAnswer
+			}
+		} else {
+			// No expected output: the test exists only to run the program and
+			// capture what it wrote. Having run to completion IS the pass
+			// condition — a non-zero exit was already handled as a runtime error
+			// above — so stdout is reported without being judged.
+			tr.Passed = true
 		}
+		tr.Ok = tr.Passed
 		tr.TimeMs = time.Since(testStart).Milliseconds()
 		result.AddTestResult(tr)
 	}
@@ -201,7 +213,28 @@ func stdinTestInput(tc models.TestCase) (string, bool) {
 	return s, ok
 }
 
-func stdinTestExpected(tc models.TestCase) (string, bool) {
-	s, ok := tc.Expected.(string)
-	return s, ok
+// stdinTestExpected reports the expected stdout text for a stdin test case.
+// It distinguishes three states, because "absent" and "malformed" must not be
+// treated alike: hasExpected is false when the test carries no expected output
+// at all (run and report, do not judge — see the call site), while ok is false
+// only when an expected output is present but is not a string, which is bad
+// test data and fails the test.
+func stdinTestExpected(tc models.TestCase) (text string, hasExpected bool, ok bool) {
+	if tc.Expected == nil {
+		return "", false, true
+	}
+	s, isString := tc.Expected.(string)
+	return s, true, isString
+}
+
+// stdinSourceFor returns the program text to write for a stdin submission.
+// Ad-hoc source arrives exactly as the caller wrote it, as /raw-run always treated it.
+// UnescapeCode exists for stored-problem submissions whose code can arrive with literal
+// backslash sequences. Applied to raw source it rewrites the escape inside every string
+// literal into a real newline, so a C++ program printing a newline stops compiling.
+func stdinSourceFor(msg models.SubmissionMessage) string {
+	if msg.IsAdHoc() {
+		return msg.Code
+	}
+	return util.UnescapeCode(msg.Code)
 }

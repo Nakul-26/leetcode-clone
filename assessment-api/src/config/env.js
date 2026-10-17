@@ -11,10 +11,10 @@ export const env = {
   JWT_SECRET: process.env.JWT_SECRET || (process.env.NODE_ENV === "production" ? null : "dev_secret_change_me"),
   TESTING_PLATFORM_KEY: process.env.TESTING_PLATFORM_KEY || (process.env.NODE_ENV === "production" ? null : "testing_platform_secret"),
   ARVENTIQ_SECRET: process.env.ARVENTIQ_SECRET || (process.env.NODE_ENV === "production" ? null : "arventiq_dev_secret"),
-  // Shared secret for the Judge0-wire-compatible /codeAssess/submissions shim. Kept
+  // Shared secret for the GO Judge public API /codeAssess/submissions shim. Kept
   // separate from TESTING_PLATFORM_KEY so it can be rotated independently of the main
   // integration key, and because the caller sends it as `x-rapidapi-key` (it's
-  // built to talk to a Judge0-shaped instance), not `x-service-key`.
+  // built to talk to a GO Judge-style instance), not `x-service-key`.
   CODEASSESS_SHIM_KEY: process.env.CODEASSESS_SHIM_KEY || (process.env.NODE_ENV === "production" ? null : "codeassess_shim_secret"),
   JUDGE_SERVICE_URL: process.env.JUDGE_SERVICE_URL || "http://judge-service-go:8081",
   // H5 fair-scheduling quota: submissions per college allowed within the rolling
@@ -35,6 +35,11 @@ export const env = {
   // confusing "college quota exceeded".
   STUDENT_SUBMISSION_QUOTA: Number(process.env.STUDENT_SUBMISSION_QUOTA) || 10,
   STUDENT_SUBMISSION_QUOTA_WINDOW_SECONDS: Number(process.env.STUDENT_SUBMISSION_QUOTA_WINDOW_SECONDS) || 60,
+  // Defaults for external API clients (plan Phase 4), applied when a client has no limit of its
+  // own set. 0 means unlimited, so nothing changes until a limit is deliberately configured.
+  // Counted in test cases, not requests: a batch of six is six.
+  API_CLIENT_DEFAULT_RATE_PER_MIN: Number(process.env.API_CLIENT_DEFAULT_RATE_PER_MIN) || 0,
+  API_CLIENT_DEFAULT_MONTHLY_QUOTA: Number(process.env.API_CLIENT_DEFAULT_MONTHLY_QUOTA) || 0,
   // Phase 2 billing (Stripe). Unlike the secrets above, these have no production
   // fail-fast guard on purpose: billing isn't live yet, so a missing key must not crash
   // the whole API. billing.service.js/stripe.js soft-fail (503) at call time instead.
@@ -46,7 +51,19 @@ export const env = {
   // H8: browser-facing CORS allowlist for cookie-based auth (comma-separated origins).
   // No production default on purpose - there is no deployed frontend yet, so this stays
   // unset until one exists; set it then, no code change needed at that point.
-  CORS_ALLOWED_ORIGINS: process.env.CORS_ALLOWED_ORIGINS || ""
+  CORS_ALLOWED_ORIGINS: process.env.CORS_ALLOWED_ORIGINS || "",
+  // Phase C notifications (SMTP via nodemailer) - optional, same soft-fail-when-unconfigured
+  // pattern as Stripe above: no live mail provider yet, so these have no production
+  // fail-fast. notification.service.js/mailer.js no-op instead of throwing when unset.
+  SMTP_HOST: process.env.SMTP_HOST || null,
+  SMTP_PORT: Number(process.env.SMTP_PORT) || 587,
+  SMTP_USER: process.env.SMTP_USER || null,
+  SMTP_PASS: process.env.SMTP_PASS || null,
+  SMTP_FROM: process.env.SMTP_FROM || null,
+  // Base URL of the deployed frontend, used to build links embedded in emails (e.g. an
+  // external interviewer's signed access link). No production default for the same reason
+  // as CORS_ALLOWED_ORIGINS - unset until a frontend is actually deployed against this API.
+  APP_BASE_URL: process.env.APP_BASE_URL || "http://localhost:5173"
 };
 
 if (process.env.NODE_ENV === "production" && !env.JWT_SECRET) {

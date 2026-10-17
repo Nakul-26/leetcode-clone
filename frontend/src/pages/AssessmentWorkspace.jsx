@@ -5,9 +5,9 @@ import { Clock, CheckCircle2, ChevronRight, Terminal, Play, Send, Info, Code2, A
 import api, { assessments } from '../api';
 import SubmissionOutput from '../components/SubmissionOutput';
 import buildTemplate from '../utils/buildTemplate';
-
-
-const supportedLanguages = ['python', 'javascript', 'typescript', 'java', 'cpp', 'c', 'csharp', 'go', 'ruby', 'php', 'kotlin', 'rust'];
+import { SUPPORTED_LANGUAGES } from '../utils/languages';
+import { defineModernDarkTheme, MONACO_EDITOR_OPTIONS } from '../utils/editorTheme';
+import { buildCustomTests } from '../utils/buildCustomTests';
 
 function loadDraft(attemptId) {
   try {
@@ -42,6 +42,8 @@ const AssessmentWorkspace = () => {
 
   const [codeMap, setCodeMap] = useState({}); // problemId -> code
   const [langMap, setLangMap] = useState({}); // problemId -> language
+  const [mcqAnswerMap, setMcqAnswerMap] = useState({}); // problemId -> selected option indexes
+  const [subjectiveAnswerMap, setSubjectiveAnswerMap] = useState({}); // problemId -> free-text answer
   const [submissionMap, setSubmissionMap] = useState({}); // problemId -> submission object
   const intervalRefs = useRef({}); // problemId -> intervalId
   const finishStartedRef = useRef(false);
@@ -504,15 +506,7 @@ const AssessmentWorkspace = () => {
     let tests = [];
     const tcs = testCasesMap[currentProblem._id] || ['[]'];
     try {
-      tests = tcs.map((tcStr, idx) => {
-        const parsed = JSON.parse(tcStr || '[]');
-        const inputArr = Array.isArray(parsed) ? parsed : [parsed];
-        // Attach expected value from problem's sample test cases if available
-        const expectedFromProblem = (currentProblem.testCases && currentProblem.testCases[idx] && currentProblem.testCases[idx].expected !== undefined)
-          ? currentProblem.testCases[idx].expected
-          : null;
-        return { inputs: inputArr, expected: expectedFromProblem, isSample: true };
-      });
+      tests = buildCustomTests(tcs, currentProblem);
     } catch (err) {
       console.error(err);
       setRunResultMap(prev => ({ 
@@ -538,6 +532,25 @@ const AssessmentWorkspace = () => {
     }
   };
 
+  // mcq resolves synchronously (Success/Fail is already final in the POST response) and
+  // subjective sits at 'PendingReview' until a faculty member grades it later — neither
+  // has anything for checkStatus's polling loop to wait on, unlike a coding submission
+  // that's still Pending/Running in judge-service-go when this call returns.
+  const handleMcqOptionToggle = (problemId, optionIndex, allowMultiple) => {
+    setMcqAnswerMap(prev => {
+      const current = prev[problemId] || [];
+      if (!allowMultiple) return { ...prev, [problemId]: [optionIndex] };
+      const next = current.includes(optionIndex)
+        ? current.filter(i => i !== optionIndex)
+        : [...current, optionIndex];
+      return { ...prev, [problemId]: next };
+    });
+  };
+
+  const handleSubjectiveAnswerChange = (problemId, text) => {
+    setSubjectiveAnswerMap(prev => ({ ...prev, [problemId]: text }));
+  };
+
   const handleSubmit = async () => {
     const problemId = currentProblem._id;
     if (intervalRefs.current[problemId]) return;
@@ -545,19 +558,23 @@ const AssessmentWorkspace = () => {
     setShowConsole(true);
     setConsoleTab('result');
     setRunResultMap(prev => ({ ...prev, [problemId]: null }));
-    
+
+    const problemType = currentProblem.problemType || 'function';
+    const basePayload = { problemId, assessmentId: assessment._id, attemptId: attempt._id };
+    const payload = problemType === 'mcq'
+      ? { ...basePayload, selectedOptions: mcqAnswerMap[problemId] || [] }
+      : problemType === 'subjective'
+        ? { ...basePayload, answerText: subjectiveAnswerMap[problemId] || '' }
+        : { ...basePayload, code: codeMap[problemId], language: langMap[problemId] };
+
     try {
       setSubmissionMap(prev => ({ ...prev, [problemId]: { status: 'Submitting...' } }));
-      const res = await api.post('/api/v1/submissions', {
-        problemId,
-        code: codeMap[problemId],
-        language: langMap[problemId],
-        assessmentId: assessment._id,
-        attemptId: attempt._id
-      });
+      const res = await api.post('/api/v1/submissions', payload);
       const newSubmission = res.data;
       setSubmissionMap(prev => ({ ...prev, [problemId]: newSubmission }));
-      intervalRefs.current[problemId] = setInterval(() => checkStatus(newSubmission._id, problemId), 2000);
+      if (problemType === 'function') {
+        intervalRefs.current[problemId] = setInterval(() => checkStatus(newSubmission._id, problemId), 2000);
+      }
     } catch (err) {
       console.error(err);
       setSubmissionMap(prev => ({
@@ -581,20 +598,6 @@ const AssessmentWorkspace = () => {
     if (window.confirm('Are you sure you want to finish the assessment?')) {
       await finishAttempt();
     }
-  };
-
-  const handleEditorWillMount = (monaco) => {
-    monaco.editor.defineTheme('modern-dark', {
-      base: 'vs-dark',
-      inherit: true,
-      rules: [],
-      colors: {
-        'editor.background': '#0d1117',
-        'editor.lineHighlightBackground': '#161b22',
-        'editorLineNumber.foreground': '#484f58',
-        'editorIndentGuide.background': '#21262d',
-      }
-    });
   };
 
   if (loading) return <div className="container flex-center" style={{ height: '100vh' }}><Loader2 className="spin" size={48} color="var(--primary)" /></div>;
@@ -1071,57 +1074,109 @@ const AssessmentWorkspace = () => {
             <div className="workspace-editor" style={{ flex: 1, display: 'flex', flexDirection: 'column', background: 'var(--editor-bg)', boxShadow: 'inset 1px 1px 4px rgba(0,0,0,0.2)', minHeight: 0 }}>
               <div className="ide-toolbar">
                 <div className="flex-center gap-4">
-                  <div className="flex-center gap-2">
-                    <span style={{ fontSize: '0.75rem', fontWeight: '700', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Language</span>
-                    <select
-                      value={langMap[currentProblem._id]}
-                      onChange={(e) => handleLanguageChange(currentProblem._id, e.target.value)}
-                      disabled={isJudging}
-                      style={{ width: 'auto', padding: '4px 8px', fontSize: '0.85rem', background: 'var(--bg)' }}
-                    >
-                      {(assessment.allowedLanguages?.length > 0 ? assessment.allowedLanguages : supportedLanguages).map(lang => (
-                        <option key={lang} value={lang}>{lang}</option>
-                      ))}
-                    </select>
-                  </div>
+                  {(currentProblem.problemType || 'function') === 'function' && (
+                    <div className="flex-center gap-2">
+                      <span style={{ fontSize: '0.75rem', fontWeight: '700', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Language</span>
+                      <select
+                        value={langMap[currentProblem._id]}
+                        onChange={(e) => handleLanguageChange(currentProblem._id, e.target.value)}
+                        disabled={isJudging}
+                        style={{ width: 'auto', padding: '4px 8px', fontSize: '0.85rem', background: 'var(--bg)' }}
+                      >
+                        {(assessment.allowedLanguages?.length > 0 ? assessment.allowedLanguages : SUPPORTED_LANGUAGES).map(lang => (
+                          <option key={lang} value={lang}>{lang}</option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
                 </div>
                 <div className="flex-center gap-2">
-                  <button onClick={handleRun} disabled={isRunning || isJudging} className="button button-outline" style={{ height: '36px', padding: '0 16px', fontSize: '0.85rem', borderColor: 'rgba(255,255,255,0.1)' }}>
-                    <Play size={14} /> Run
-                  </button>
+                  {(currentProblem.problemType || 'function') === 'function' && (
+                    <button onClick={handleRun} disabled={isRunning || isJudging} className="button button-outline" style={{ height: '36px', padding: '0 16px', fontSize: '0.85rem', borderColor: 'rgba(255,255,255,0.1)' }}>
+                      <Play size={14} /> Run
+                    </button>
+                  )}
                   <button onClick={handleSubmit} disabled={isRunning || isJudging} className="button button-primary" style={{ height: '36px', padding: '0 20px', fontSize: '0.85rem' }}>
                     <Send size={14} /> Submit
                   </button>
                 </div>
               </div>
 
-              <div style={{ flex: 1, position: 'relative', minHeight: 0 }}>
-                <Editor
-                  height="100%"
-                  language={langMap[currentProblem._id] === 'python' ? 'python' : langMap[currentProblem._id] === 'javascript' ? 'javascript' : langMap[currentProblem._id]}
-                  theme="modern-dark"
-                  value={codeMap[currentProblem._id]}
-                  onChange={(val) => handleCodeChange(currentProblem._id, val)}
-                  beforeMount={handleEditorWillMount}
-                  options={{
-                    fontSize: 15,
-                    fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
-                    minimap: { enabled: false },
-                    scrollBeyondLastLine: false,
-                    automaticLayout: true,
-                    padding: { top: 20, bottom: 20 },
-                    renderLineHighlight: 'all',
-                    mouseWheelZoom: false,
-                    mouseWheelScrollSensitivity: 1,
-                    scrollbar: {
-                      vertical: 'visible',
-                      horizontal: 'visible',
-                      verticalScrollbarSize: 10,
-                      horizontalScrollbarSize: 10,
-                      alwaysConsumeMouseWheel: false
-                    }
-                  }}
-                />
+              <div style={{ flex: 1, position: 'relative', minHeight: 0, overflowY: 'auto' }}>
+                {(currentProblem.problemType || 'function') === 'function' && (
+                  <Editor
+                    height="100%"
+                    language={langMap[currentProblem._id] === 'python' ? 'python' : langMap[currentProblem._id] === 'javascript' ? 'javascript' : langMap[currentProblem._id]}
+                    theme="modern-dark"
+                    value={codeMap[currentProblem._id]}
+                    onChange={(val) => handleCodeChange(currentProblem._id, val)}
+                    beforeMount={defineModernDarkTheme}
+                    options={MONACO_EDITOR_OPTIONS}
+                  />
+                )}
+
+                {currentProblem.problemType === 'mcq' && (
+                  <div style={{ padding: '32px', maxWidth: '640px' }}>
+                    {currentSubmission && currentSubmission.status !== 'Submitting...' && (
+                      <div
+                        className={currentSubmission.status === 'Success' ? 'success-text' : 'error-text'}
+                        style={{ marginBottom: '20px', fontWeight: '600' }}
+                      >
+                        {currentSubmission.status === 'Success' ? '✓ Correct' : currentSubmission.status === 'Fail' ? '✗ Incorrect' : currentSubmission.error || currentSubmission.status}
+                      </div>
+                    )}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                      {(currentProblem.options || []).map((opt, idx) => (
+                        <label
+                          key={idx}
+                          className="flex-center gap-2"
+                          style={{
+                            justifyContent: 'flex-start',
+                            cursor: 'pointer',
+                            padding: '14px 16px',
+                            borderRadius: 'var(--radius-md)',
+                            border: `1px solid ${(mcqAnswerMap[currentProblem._id] || []).includes(idx) ? 'var(--primary)' : 'var(--border)'}`,
+                            background: (mcqAnswerMap[currentProblem._id] || []).includes(idx) ? 'var(--primary-glow)' : 'var(--surface)'
+                          }}
+                        >
+                          <input
+                            type={currentProblem.allowMultipleAnswers ? 'checkbox' : 'radio'}
+                            name={`mcq-${currentProblem._id}`}
+                            checked={(mcqAnswerMap[currentProblem._id] || []).includes(idx)}
+                            onChange={() => handleMcqOptionToggle(currentProblem._id, idx, currentProblem.allowMultipleAnswers)}
+                            disabled={isJudging}
+                            style={{ width: 'auto' }}
+                          />
+                          <span>{opt.text}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {currentProblem.problemType === 'subjective' && (
+                  <div style={{ padding: '32px', maxWidth: '720px', height: '100%', display: 'flex', flexDirection: 'column' }}>
+                    {currentSubmission && currentSubmission.status !== 'Submitting...' && (
+                      <div className="success-text" style={{ marginBottom: '16px', fontWeight: '600' }}>
+                        {currentSubmission.status === 'PendingReview' && 'Submitted — awaiting grading by faculty.'}
+                        {currentSubmission.status === 'Graded' && `Graded: ${currentSubmission.score} — ${currentSubmission.feedback || 'No feedback given'}`}
+                        {currentSubmission.status === 'Error' && (currentSubmission.error || 'Submission failed')}
+                      </div>
+                    )}
+                    <textarea
+                      value={subjectiveAnswerMap[currentProblem._id] || ''}
+                      onChange={(e) => handleSubjectiveAnswerChange(currentProblem._id, e.target.value)}
+                      placeholder="Write your answer here..."
+                      disabled={isJudging}
+                      style={{ flex: 1, minHeight: '300px', fontSize: '0.95rem', lineHeight: '1.6', padding: '16px', borderRadius: 'var(--radius-md)', border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)', resize: 'vertical' }}
+                    />
+                    {currentProblem.maxWords && (
+                      <p className="form-hint mt-2">
+                        {(subjectiveAnswerMap[currentProblem._id] || '').trim().split(/\s+/).filter(Boolean).length} / {currentProblem.maxWords} words
+                      </p>
+                    )}
+                  </div>
+                )}
               </div>
 
               {/* Developer Console Drawer */}
