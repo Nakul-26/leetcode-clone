@@ -225,6 +225,20 @@ services:
       # Add more origins (custom college domains, other frontends) by setting CORS_ALLOWED_ORIGINS
       # in the Dokploy environment; set it to the FULL list, it replaces this default.
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-https://assess.fortifyhub.net}
+      # Settings the API reads that were never passed through, so setting them in Dokploy did nothing.
+      # Empty means "use the API's built-in default" (see assessment-api/src/config/env.js).
+      # Default per-client limits for API keys that have none of their own (0 = unlimited).
+      API_CLIENT_DEFAULT_RATE_PER_MIN: ${API_CLIENT_DEFAULT_RATE_PER_MIN:-}
+      API_CLIENT_DEFAULT_MONTHLY_QUOTA: ${API_CLIENT_DEFAULT_MONTHLY_QUOTA:-}
+      # Public URL of the web frontend, used to build links in emails and interview invites.
+      # Unset, it falls back to a localhost dev URL, so set it (e.g. https://assess.fortifyhub.net).
+      APP_BASE_URL: ${APP_BASE_URL:-}
+      # Outgoing email (optional; email features stay off without SMTP_HOST).
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      SMTP_FROM: ${SMTP_FROM:-}
       # H5 per-college submission quota — optional, falls back to 30 per 60s (see env.js) if
       # unset. That default is a fairness guard sized for small/incidental multi-college
       # traffic, not a real exam cohort — measured too strict for ~500 students sharing one
@@ -344,6 +358,43 @@ services:
       JUDGE_POOL_GLOBAL_CAP: ${JUDGE_POOL_GLOBAL_CAP:-60}
       JUDGE_POOL_AUTOSCALE_ENABLED: ${JUDGE_POOL_AUTOSCALE_ENABLED:-false}
       JUDGE_WORKER_CONCURRENCY: ${JUDGE_WORKER_CONCURRENCY:-24}
+      # Every other judge setting is passed through as well. Only variables listed here reach the
+      # container, so a setting added in Dokploy but missing here is silently ignored (this happened
+      # to JUDGE_INTERACTIVE_WORKERS, JUDGE_POOL_MAX_PY and JUDGE_BATCH_THRESHOLD_*). An empty value
+      # means "use the judge's built-in default", so listing them changes nothing until they are set.
+      JUDGE_INTERACTIVE_WORKERS: ${JUDGE_INTERACTIVE_WORKERS:-}
+      JUDGE_INTERACTIVE_RESERVE: ${JUDGE_INTERACTIVE_RESERVE:-}
+      JUDGE_BATCH_THRESHOLD_PY: ${JUDGE_BATCH_THRESHOLD_PY:-}
+      JUDGE_BATCH_THRESHOLD_JS: ${JUDGE_BATCH_THRESHOLD_JS:-}
+      JUDGE_BATCH_THRESHOLD_JAVA: ${JUDGE_BATCH_THRESHOLD_JAVA:-}
+      JUDGE_BATCH_THRESHOLD_CPP: ${JUDGE_BATCH_THRESHOLD_CPP:-}
+      JUDGE_POOL_MAX_PY: ${JUDGE_POOL_MAX_PY:-}
+      JUDGE_POOL_MAX_JS: ${JUDGE_POOL_MAX_JS:-}
+      JUDGE_POOL_MAX_TS: ${JUDGE_POOL_MAX_TS:-}
+      JUDGE_POOL_MAX_C: ${JUDGE_POOL_MAX_C:-}
+      JUDGE_POOL_MAX_CS: ${JUDGE_POOL_MAX_CS:-}
+      JUDGE_POOL_MAX_GO: ${JUDGE_POOL_MAX_GO:-}
+      JUDGE_POOL_MAX_RS: ${JUDGE_POOL_MAX_RS:-}
+      JUDGE_POOL_MAX_RB: ${JUDGE_POOL_MAX_RB:-}
+      JUDGE_POOL_MAX_PHP: ${JUDGE_POOL_MAX_PHP:-}
+      JUDGE_POOL_MAX_KT: ${JUDGE_POOL_MAX_KT:-}
+      JUDGE_POOL_MIN_PY: ${JUDGE_POOL_MIN_PY:-}
+      JUDGE_POOL_MIN_JS: ${JUDGE_POOL_MIN_JS:-}
+      JUDGE_POOL_MIN_TS: ${JUDGE_POOL_MIN_TS:-}
+      JUDGE_POOL_MIN_JAVA: ${JUDGE_POOL_MIN_JAVA:-}
+      JUDGE_POOL_MIN_C: ${JUDGE_POOL_MIN_C:-}
+      JUDGE_POOL_MIN_CPP: ${JUDGE_POOL_MIN_CPP:-}
+      JUDGE_POOL_MIN_CS: ${JUDGE_POOL_MIN_CS:-}
+      JUDGE_POOL_MIN_GO: ${JUDGE_POOL_MIN_GO:-}
+      JUDGE_POOL_MIN_RS: ${JUDGE_POOL_MIN_RS:-}
+      JUDGE_POOL_MIN_RB: ${JUDGE_POOL_MIN_RB:-}
+      JUDGE_POOL_MIN_PHP: ${JUDGE_POOL_MIN_PHP:-}
+      JUDGE_POOL_MIN_KT: ${JUDGE_POOL_MIN_KT:-}
+      JUDGE_POOL_AUTOSCALE_INTERVAL: ${JUDGE_POOL_AUTOSCALE_INTERVAL:-}
+      JUDGE_POOL_SCALE_UP_THRESHOLD_MS: ${JUDGE_POOL_SCALE_UP_THRESHOLD_MS:-}
+      JUDGE_POOL_SCALE_DOWN_THRESHOLD_MS: ${JUDGE_POOL_SCALE_DOWN_THRESHOLD_MS:-}
+      JUDGE_POOL_SCALE_UP_COOLDOWN: ${JUDGE_POOL_SCALE_UP_COOLDOWN:-}
+      JUDGE_POOL_SCALE_DOWN_COOLDOWN: ${JUDGE_POOL_SCALE_DOWN_COOLDOWN:-}
       JUDGE_CENTRAL_COMPARE_PY: "true"
       JUDGE_CENTRAL_COMPARE_JS: "true"
       JUDGE_CENTRAL_COMPARE_JAVA: "true"
