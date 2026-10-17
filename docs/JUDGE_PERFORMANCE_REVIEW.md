@@ -54,17 +54,17 @@ Each sandbox container is capped at 1 CPU, so a language can never use more thre
 
 ```
 JUDGE_POOL_AUTOSCALE_ENABLED=true
-JUDGE_POOL_MAX_PY=6
-JUDGE_POOL_MAX_CPP=6
-JUDGE_POOL_MAX_JAVA=6
-JUDGE_INTERACTIVE_WORKERS=8
+JUDGE_POOL_MAX_PY=10
+JUDGE_POOL_MAX_CPP=10
+JUDGE_POOL_MAX_JAVA=10
+JUDGE_INTERACTIVE_WORKERS=12
 ```
 
 - `JUDGE_POOL_SIZE`: the warm minimum per language (the testing stack uses 4). Write env lines without spaces around `=`.
 - Leave `JUDGE_POOL_GLOBAL_CAP` at 60. It must stay above the sum of the minimums (2 x 12 languages = 24) or the
   judge refuses to start; the CPU limit comes from the per-language maximums and the worker counts.
 - Use the **Submissions by language** card to pick which languages get a higher maximum.
-- Expected: up to ~3x for one busy language on 6 cores. Past full CPU, more containers only add latency.
+- Sized for 12 threads, leaving ~2 for the API, databases and the production stack. The first tuning run (section 6b) used max 6 and 8 workers. Past 6 busy containers the extra work lands on hyper-threads and the smaller Zen 4c cores, so expect roughly +30-50% for compile-heavy languages, not +66%.
 - While both stacks share the server, a load test on the testing stack takes CPU from production. Run tests when
   the exam portal is idle, or after the move in section 6.
 
