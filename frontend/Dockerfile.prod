@@ -1,0 +1,29 @@
+# Production image: build the static bundle once, serve it with nginx.
+# (The plain Dockerfile in this folder is the dev image - Vite dev server with hot reload.)
+
+FROM node:20-alpine AS build
+WORKDIR /usr/src/app
+
+COPY package*.json ./
+RUN npm ci
+
+COPY . .
+
+# Vite inlines VITE_* values at BUILD time, so they must be build args, not runtime env.
+# VITE_API_URL stays empty on purpose: the bundle then calls /api on its own origin and
+# nginx (nginx.conf) proxies it to assessment-api, so there is no CORS to configure.
+ARG VITE_API_URL=
+ARG VITE_TURN_URL=
+ARG VITE_TURN_USERNAME=
+ARG VITE_TURN_CREDENTIAL=
+ENV VITE_API_URL=$VITE_API_URL \
+    VITE_TURN_URL=$VITE_TURN_URL \
+    VITE_TURN_USERNAME=$VITE_TURN_USERNAME \
+    VITE_TURN_CREDENTIAL=$VITE_TURN_CREDENTIAL
+RUN npm run build
+
+FROM nginx:1.27-alpine
+COPY nginx.conf /etc/nginx/conf.d/default.conf
+COPY --from=build /usr/src/app/dist /usr/share/nginx/html
+EXPOSE 80
+HEALTHCHECK --interval=30s --timeout=5s --retries=3 CMD wget -qO- http://127.0.0.1/healthz || exit 1

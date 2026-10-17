@@ -17,15 +17,15 @@ For whoever keeps the platform running. Assumes you have read [`ARCHITECTURE.md`
 | Environment | What it is |
 |---|---|
 | **Local** | `docker compose up -d --build` from the repo root. The judge builds from source on start (the `dev` Dockerfile stage), so editing Go code and restarting the container is enough |
-| **Production: GO Judge** | The stack that serves clients. Autodeploys from `main` |
-| **Production: Exam Sandbox** | A second stack built from the **same** compose file, used for exams. Also autodeploys from `main` |
+| **Production: GO Judge** | The stack that serves clients. Redeployed **manually** in Dokploy (auto-deploy on push is not working) |
+| **Production: Exam Sandbox** | A second stack built from the **same** compose file, used for exams. Also redeployed manually, by its owner |
 
 Deployments are managed in Dokploy. **Only the GO Judge project is ours to change.** Other projects on the
 same Dokploy instance belong to other people. Do not edit or redeploy them.
 
 ### The rules that have already cost us
 
-1. **A push to `main` redeploys both stacks.** One compose file serves both, so any change to
+1. **Both stacks are built from the same compose file.** A push does not deploy by itself, but whoever redeploys next gets every change on `main`, so any change to
    `docker-compose.prod.yml` lands on the exam stack too.
 2. **Never push near an exam window.** A deploy restarts the stack. Check the exam calendar first.
 3. **Work on a branch; merge deliberately.** The long-lived work branch carries large unreleased changes. Pushing
@@ -47,6 +47,29 @@ same Dokploy instance belong to other people. Do not edit or redeploy them.
 Redeploy the previous commit in Dokploy. The changes in this codebase are additive: new queues
 (`submission_queue_fast` and its retry queue), new optional fields, new collections' fields. An older judge
 or API running against newer data keeps working, so rolling back is safe. Leftover empty queues are harmless.
+
+### The web frontend (`frontend` service)
+
+`docker-compose.prod.yml` includes a `frontend` service: the React app built by `frontend/Dockerfile.prod` and
+served by nginx (`frontend/nginx.conf`). nginx proxies `/api/` and the `/ws/interview` WebSocket to
+`assessment-api:5000`, so the browser uses a single origin and there is no CORS to configure. `VITE_API_URL`
+stays empty for that reason.
+
+To put it on a hostname (for example `assess.fortifyhub.net`):
+
+1. Create the DNS record at your DNS provider, pointing at the server like the other hostnames.
+2. In Dokploy, open the compose service, then **Domains**, then add the hostname with **service `frontend`,
+   container port `80`**. Do not point it at `assessment-api`.
+3. Redeploy. The first build takes a few minutes (it runs `npm ci` and `vite build`).
+4. Check: the hostname loads the login page, and `https://<hostname>/api/health` returns `healthy`.
+
+Things to know:
+
+- `frontend/Dockerfile` (no suffix) is the **dev** image with the Vite dev server. Production uses `Dockerfile.prod`.
+- `VITE_*` values are baked in at **build** time. Changing one needs a rebuild, not just a restart.
+- The `coturn` TURN relay is **not** part of this file. It lives in `docker-compose.turn.yml` so deploys do not
+  need the `TURN_*` variables.
+- Client IPs: nginx forwards `X-Forwarded-For`, but the API does not trust proxies yet (see Known risks).
 
 ---
 

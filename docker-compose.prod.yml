@@ -1,6 +1,6 @@
 # docker-compose.prod.yml
 # ─────────────────────────────────────────────────────────────────────────────
-# Dokploy production deployment — BACKEND ONLY (no frontend).
+# Dokploy production deployment: backend plus the frontend (nginx) service.
 #
 # Before deploying, set these required env vars in Dokploy:
 #   RABBITMQ_PASS     strong password for RabbitMQ
@@ -343,6 +343,31 @@ services:
       resources:
         limits:
           memory: 2G    # Judge compiles/runs code — cap memory to protect the host
+    networks:
+      - assessment-net
+
+  # ── 7. frontend (static SPA + nginx reverse proxy) ───────────────────────────
+  # Serves the built React app and proxies /api and /ws/interview to assessment-api, so the
+  # browser uses a single origin (no CORS). Attach the public domain to THIS service on
+  # container port 80 in Dokploy (Domains tab). It publishes no host port.
+  # VITE_* values are baked in at build time; set them in the Dokploy environment BEFORE
+  # building if you use TURN (see docker-compose.turn.yml). Leave unset otherwise.
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.prod
+      args:
+        VITE_API_URL: ${VITE_API_URL:-}
+        VITE_TURN_URL: ${VITE_TURN_URL:-}
+        VITE_TURN_USERNAME: ${VITE_TURN_USERNAME:-}
+        VITE_TURN_CREDENTIAL: ${VITE_TURN_CREDENTIAL:-}
+    restart: unless-stopped
+    depends_on:
+      - assessment-api
+    deploy:
+      resources:
+        limits:
+          memory: 128M
     networks:
       - assessment-net
 
