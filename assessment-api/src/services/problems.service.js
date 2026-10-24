@@ -1,7 +1,8 @@
 import * as problemsRepo from "../repositories/problems.repo.js";
 import Submission from "../../models/Submission.mjs";
 import { HttpError } from "../utils/httpError.js";
-import { validateProblemDefinition } from "./preview.service.js";
+import { validateProblemDefinition, checkTestsAgainstReference } from "./preview.service.js";
+import { referenceOutputsFor, runReferenceSolution } from "./referenceSolution.service.js";
 import { env } from "../config/env.js";
 import { collegeAllowsPremium } from "./billing.service.js";
 import { escapeRegex } from "../utils/escapeRegex.js";
@@ -103,7 +104,8 @@ function normalizeProblemPayload(payload = {}) {
     testCases: normalized.testCases.map((tc = {}) => {
       const sample = tc.isSample === true;
       return {
-        inputs: tc.inputs,
+        // A stdin test's input is one block of text; accept it bare as well as wrapped.
+        inputs: normalized.problemType === "stdin" && typeof tc.inputs === "string" ? [tc.inputs] : tc.inputs,
         expected: tc.expected,
         isSample: sample,
         isHidden: !sample
@@ -326,10 +328,12 @@ export async function listProblems(query = {}, user = null) {
 }
 
 export async function getProblemById(id, user = null) {
-  const problem = await problemsRepo.findById(id);
+  const privileged = isPrivilegedRole(user && user.role);
+  // Staff editing a problem need its reference solution; students must never receive it.
+  const problem = privileged ? await problemsRepo.findByIdWithReference(id) : await problemsRepo.findById(id);
   if (!problem) return null;
 
-  if (isPrivilegedRole(user && user.role)) {
+  if (privileged) {
     return { ...(typeof problem.toObject === "function" ? problem.toObject() : problem), locked: false };
   }
 
@@ -376,9 +380,35 @@ export async function getProblemStats(problemId) {
 // mcq/subjective skip both the coding-specific structural check and the deep
 // judge-based validation (schema/types/wrapper-generation/reference-solution run) —
 // there's no code to compile or run for either type.
+// A stdin problem: the program reads each test's input text and its printed output is
+// compared with the expected text (JUDGE_FIX_PLAN P8). It has no function signature, so
+// validateProblemPayload's functionName/parameters/returnType checks do not apply. A reference
+// solution is required: it is what proves the expected outputs are right (P7).
+function validateStdinPayload(payload) {
+  const errors = [];
+  if (!payload.title || typeof payload.title !== "string" || !payload.title.trim()) errors.push("title is required");
+  if (!payload.description || typeof payload.description !== "string" || !payload.description.trim()) errors.push("description is required");
+  if (!["Easy", "Medium", "Hard"].includes(payload.difficulty)) errors.push("difficulty must be Easy, Medium, or Hard");
+  if (!Array.isArray(payload.testCases) || payload.testCases.length === 0) {
+    errors.push("testCases must contain at least one test case");
+  } else {
+    payload.testCases.forEach((tc, i) => {
+      if (!tc || !Array.isArray(tc.inputs) || tc.inputs.length !== 1 || typeof tc.inputs[0] !== "string") {
+        errors.push(`testCases[${i}].inputs must be the input text`);
+      }
+      if (typeof tc?.expected !== "string") errors.push(`testCases[${i}].expected must be the expected output text`);
+    });
+    if (!payload.testCases.some((tc) => tc && tc.isSample === true)) errors.push("at least one test case must be a sample");
+  }
+  if (!payload.referenceSolution || typeof payload.referenceSolution !== "string") errors.push("referenceSolution is required");
+  if (!payload.solutionLanguage || typeof payload.solutionLanguage !== "string") errors.push("solutionLanguage is required");
+  return errors;
+}
+
 function structuralValidatorFor(problemType) {
   if (problemType === "mcq") return validateMcqPayload;
   if (problemType === "subjective") return validateSubjectivePayload;
+  if (problemType === "stdin") return validateStdinPayload;
   return validateProblemPayload;
 }
 
@@ -400,6 +430,14 @@ export async function createProblem(payload) {
       throw new HttpError(400, "Deep validation failed", {
         error: "Problem failed deep validation checks (schema, types, wrappers, or reference solution).",
         errors: report.errors
+      });
+    }
+  } else if (problemType === "stdin") {
+    const check = await checkTestsAgainstReference(normalizedPayload);
+    if (!check.passed) {
+      throw new HttpError(400, "Reference solution check failed", {
+        error: "Every expected output must match what the reference solution prints.",
+        errors: check.errors
       });
     }
   }
@@ -427,6 +465,14 @@ export async function updateProblem(id, payload) {
         errors: report.errors
       });
     }
+  } else if (problemType === "stdin") {
+    const check = await checkTestsAgainstReference(normalizedPayload);
+    if (!check.passed) {
+      throw new HttpError(400, "Reference solution check failed", {
+        error: "Every expected output must match what the reference solution prints.",
+        errors: check.errors
+      });
+    }
   }
 
   return problemsRepo.updateById(id, normalizedPayload);
@@ -436,100 +482,152 @@ export async function deleteProblem(id) {
   return problemsRepo.deleteById(id);
 }
 
+/**
+ * For the problem editor (JUDGE_FIX_PLAN P6): runs the draft's reference solution on every
+ * test input and returns, per test, its output and whether it agrees with the expected value
+ * already typed in. The author fills the expected column from this instead of by hand.
+ */
+export async function computeReferenceOutputs(draft) {
+  const problem = normalizeProblemPayload(draft);
+  if (!Array.isArray(problem.testCases) || problem.testCases.length === 0) {
+    throw new HttpError(400, "No test cases", { msg: "Add at least one test input first." });
+  }
+  if (problem.testCases.length > 200) {
+    throw new HttpError(400, "Too many test cases", { msg: "At most 200 test cases can be generated at once." });
+  }
+  if ((problem.problemType || "function") === "function" && (!problem.functionName || !Array.isArray(problem.parameters) || !problem.returnType)) {
+    throw new HttpError(400, "Function signature required", { msg: "Fill in the function name, parameters and return type first." });
+  }
+  return { tests: await runReferenceSolution(problem, problem.testCases) };
+}
+
+// A student may add up to this many tests of their own to a Run (JUDGE_FIX_PLAN P2).
+export const MAX_CUSTOM_TESTS = 8;
+
+const inputsKey = (inputs) => {
+  try {
+    return JSON.stringify(inputs);
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * "Run": the student's code against the sample tests, or against tests they wrote
+ * (JUDGE_FIX_PLAN Phase 6). Expected outputs always come from the server, never from the
+ * browser: an exact match with a sample gives that sample's answer, anything else is computed
+ * by running the reference solution (P1, P3). A test with no computable expected output still
+ * runs and shows its output, marked noExpected, without a verdict.
+ */
 export async function runProblem(id, payload) {
-  const problem = await problemsRepo.findById(id);
+  const problem = await problemsRepo.findByIdWithReference(id);
   if (!problem) throw new HttpError(404, "Problem not found");
 
   const { code, language, customTests } = payload;
   const problemType = problem.problemType || "function";
+  const samples = (problem.testCases || []).filter((tc) => isSampleTestCase(tc));
+
+  let tests;
+  const custom = Array.isArray(customTests) && customTests.length > 0;
+  if (custom) {
+    if (customTests.length > MAX_CUSTOM_TESTS) {
+      throw new HttpError(400, "Too many test cases", { msg: `Run accepts at most ${MAX_CUSTOM_TESTS} test cases.` });
+    }
+    const sampleAnswers = new Map(samples.map((tc) => [inputsKey(tc.inputs), tc.expected]));
+    tests = customTests.map((t) => {
+      const raw = t && typeof t === "object" && "inputs" in t ? t.inputs : t;
+      const inputs = problemType === "stdin" && typeof raw === "string" ? [raw] : (Array.isArray(raw) ? raw : [raw]);
+      const key = inputsKey(inputs);
+      return { inputs, expected: sampleAnswers.has(key) ? sampleAnswers.get(key) : undefined };
+    });
+    const unknown = tests.map((t, i) => (t.expected === undefined ? i : -1)).filter((i) => i >= 0);
+    if (unknown.length > 0) {
+      let computed = [];
+      try {
+        computed = await referenceOutputsFor(problem, unknown.map((i) => tests[i].inputs));
+      } catch (err) {
+        // A broken reference solution must not stop the student from running their code.
+        console.warn(`Reference solution failed for problem ${id}:`, err.body?.msg || err.message);
+      }
+      unknown.forEach((i, k) => {
+        if (computed[k] !== undefined) tests[i].expected = computed[k];
+      });
+    }
+  } else {
+    // The exact sample list, so the judge never falls back to its own selection (P4).
+    tests = samples.map((tc) => ({ inputs: tc.inputs, expected: tc.expected }));
+  }
+  const noExpected = new Set(tests.map((t, i) => (t.expected === undefined ? i + 1 : -1)).filter((n) => n > 0));
 
   const judgeMsg = {
     schemaVersion: "1",
     submissionId: "run-" + Date.now(), // Ephemeral ID
     problemId: id,
-    language: language,
-    code: code,
+    language,
+    code,
     problemType,
     compareMode: problem.compareConfig?.mode || "STRUCTURAL",
     compareConfig: problem.compareConfig || {},
-    tests: customTests || [] // Pass custom tests if provided
+    tests: tests.map((t) => ({ inputs: t.inputs, expected: t.expected === undefined ? null : t.expected, isSample: true }))
   };
-  // functionName is only meaningful for the named-function problem model — sending
-  // it unconditionally (as this used to) breaks stdin-type problems: with no
-  // problemType in the message, the Go judge defaulted to function-mode and
-  // rejected the request for missing functionName.
+  // functionName is only meaningful for the named-function problem model; sending it to a
+  // stdin problem made the judge treat it as function mode.
   if (problemType !== "stdin") {
     judgeMsg.functionName = problem.functionName;
   }
 
-  // If custom tests were provided without expected values, try to fill expected
-  // from the problem's sample test cases (match by inputs JSON) so the judge and UI
-  // can show Expected Output even when the frontend omitted it.
-  try {
-    if (Array.isArray(judgeMsg.tests) && judgeMsg.tests.length > 0 && Array.isArray(problem.testCases) && problem.testCases.length > 0) {
-      const fillMap = new Map();
-      for (const tc of problem.testCases) {
-        try {
-          fillMap.set(JSON.stringify(tc.inputs), tc.expected);
-        } catch {
-          // ignore non-serializable
-        }
-      }
-      judgeMsg.tests = judgeMsg.tests.map((t) => {
-        if (t == null) return t;
-        if (t.expected !== undefined && t.expected !== null) return t;
-        try {
-          const key = JSON.stringify(t.inputs);
-          if (fillMap.has(key)) {
-            t.expected = fillMap.get(key);
-          }
-        } catch {
-          // ignore
-        }
-        return t;
-      });
-    }
-  } catch (e) {
-    // best-effort only; do not fail the run if merging fails
-    console.warn('Failed to merge expected values into custom tests:', e && e.message ? e.message : e);
-  }
-
+  let judgeResult;
   try {
     const response = await fetch(`${env.JUDGE_SERVICE_URL}/run`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify(judgeMsg)
     });
-
     if (!response.ok) {
       const errorText = await response.text();
       throw new HttpError(response.status, "Judge service error: " + errorText);
     }
-
-    const judgeResult = await response.json();
-    if (judgeResult && Array.isArray(judgeResult.details)) {
-      if (customTests && customTests.length > 0) {
-        // For custom tests, everything is visible, just normalize field names
-        judgeResult.details = judgeResult.details.map(detail => ({
-          ...detail,
-          inputs: detail.inputs ?? detail.input ?? detail.Input,
-          expected: detail.expected ?? detail.Expected,
-          output: detail.output ?? detail.Output,
-          passed: detail.passed ?? detail.ok ?? detail.Passed ?? detail.Ok ?? false,
-          ok: detail.passed ?? detail.ok ?? detail.Passed ?? detail.Ok ?? false,
-          stdout: detail.stdout ?? detail.Stdout,
-          stderr: detail.stderr ?? detail.Stderr,
-          traceback: detail.traceback ?? detail.Traceback,
-          timeMs: detail.timeMs ?? detail.TimeMs,
-        }));
-      } else {
-        judgeResult.details = sanitizeResultDetails(judgeResult.details, problem.testCases, false); // runProblem is for practice
-      }
-    }
-    return judgeResult;
+    judgeResult = await response.json();
   } catch (err) {
     if (err instanceof HttpError) throw err;
     console.error("Failed to connect to judge service:", err);
     throw new HttpError(500, "Failed to connect to judge service");
   }
+
+  if (judgeResult && Array.isArray(judgeResult.details)) {
+    // Every test here is a sample or the student's own, so everything is visible.
+    judgeResult.details = judgeResult.details.map((detail) => {
+      const d = {
+        ...detail,
+        inputs: detail.inputs ?? detail.input ?? detail.Input,
+        expected: detail.expected ?? detail.Expected,
+        output: detail.output ?? detail.Output,
+        passed: detail.passed ?? detail.ok ?? detail.Passed ?? detail.Ok ?? false,
+        ok: detail.passed ?? detail.ok ?? detail.Passed ?? detail.Ok ?? false,
+        stdout: detail.stdout ?? detail.Stdout,
+        stderr: detail.stderr ?? detail.Stderr,
+        traceback: detail.traceback ?? detail.Traceback,
+        timeMs: detail.timeMs ?? detail.TimeMs
+      };
+      // No expected output: the run is shown, but there is nothing to judge it against. Only a
+      // real failure (crash, time or memory limit) keeps its verdict.
+      if (noExpected.has(d.test) && (d.errorType === "wrong_answer" || d.passed)) {
+        d.noExpected = true;
+        d.passed = null;
+        d.ok = null;
+        delete d.expected;
+        delete d.errorType;
+        delete d.error;
+      }
+      return d;
+    });
+    if (noExpected.size > 0) {
+      const judged = judgeResult.details.filter((d) => !d.noExpected);
+      const failed = judged.find((d) => d.passed === false);
+      if (!failed) judgeResult.status = judged.length > 0 ? "Accepted" : "Finished";
+      judgeResult.passed = judgeResult.passedCount = judged.filter((d) => d.passed).length;
+      judgeResult.total = judgeResult.totalCount = judged.length;
+    }
+  }
+  return judgeResult;
 }

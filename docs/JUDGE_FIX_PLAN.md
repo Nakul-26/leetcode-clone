@@ -1,6 +1,6 @@
 # Judge Fix Plan
 
-**Created:** 2026-10-23 · **Last updated:** 2026-10-24 (R1-R9, T1-T3, T7, F1-F4, C1-C3 done)
+**Created:** 2026-10-23 · **Last updated:** 2026-10-24 (R1-R9, T1-T3, T7, F1-F4, C1-C3 done; Phase 6 planned)
 
 The single list of everything found in the 2026-10-23 judge review, plus the open items already recorded in
 [`JUDGE_PERFORMANCE_REVIEW.md`](./JUDGE_PERFORMANCE_REVIEW.md) §5,
@@ -83,6 +83,40 @@ b")` and C++ `cout << "x
 | M1 | `/run` and `/raw-run` are reached by one hostname, so synchronous work cannot spread across judges | Move them onto the queue (the interactive queue already exists), or put a load balancer in front | M | todo | |
 | M2 | Second judge server consuming the same queues (perf review §5 / plan Phase 5) | After R1-R6 (redelivery becomes routine with more hosts) | M | todo | |
 
+## Phase 6 — Run / Submit modes and correct test cases (added 2026-10-24)
+
+The platform needs four ways to execute code, two actions times two problem styles:
+
+| | Function problems (LeetCode style: write `twoSum`) | Stdin/stdout problems (read input, print output) |
+|---|---|---|
+| **Run** | Sample tests, plus up to 8 tests the student adds. Every test runs. Expected output for a student's own test comes from the reference solution | Same; the student's own tests are plain text boxes, not JSON |
+| **Submit** | Every test, hidden ones included. Stops at the first failure (T1) | Same |
+
+Today: Run and Submit exist for function problems; the judge supports stdin for both, but the editor
+cannot create stdin problems (they only arrive through the API). The rest of this section is what is
+wrong now and what we build.
+
+**Principle for test-case correctness:** the author's reference solution is the source of truth for
+expected output. Authors enter inputs; the platform computes the outputs. A typed expected output is
+only kept if the reference solution agrees, so a typo can no longer make a correct student solution fail.
+
+| # | Problem | Fix | Size | Status | Date / commit |
+|---|---|---|---|---|---|
+| P1 | **Run in the exam workspace compares a student's own test against the wrong expected output**: `buildCustomTests.js` takes `expected` from the sample *at the same position*, so editing sample 1's input and pressing Run checks against sample 1's original answer: correct code shows Wrong Answer | Frontend sends inputs only; the API supplies expected (exact sample match, else the reference solution, P3) | S | todo | |
+| P2 | No cap on student tests per Run | API rejects more than 8 custom tests | S | todo | |
+| P3 | A student's own test has no expected output unless it equals a sample exactly | API runs the reference solution on custom inputs to get expected (cached in Redis per problem + input); without a reference solution, show output only, no verdict | M | todo | |
+| P4 | Run's test selection disagrees between API and judge: the judge picks samples by `isSample` only, the API also treats "not hidden" as sample. A problem marked with `isHidden:false` and no `isSample` runs **every test, hidden included**, on each Run | The API always sends the exact sample list to `/run`; the judge's fallback is no longer used | S | todo | |
+| P5 | Problem validation calls a hardcoded `http://judge-service-go:8081` instead of `JUDGE_SERVICE_URL` (prod: `go-judge-engine`); on Dokploy that name can resolve to another project's container | Use `env.JUDGE_SERVICE_URL` | S | todo | |
+| P6 | Authors type expected outputs by hand (or paste from Excel); a wrong one silently fails correct students | "Generate expected outputs" endpoint + button: runs the reference solution on all inputs and fills the column. Where the author typed a different value, both are shown and the author chooses | M | todo | |
+| P7 | Stdin problems are saved with no check at all (function problems must pass the reference solution) | Same save gate for stdin: every expected output must equal the reference solution's output; the error lists each test with expected vs reference output | M | todo | |
+| P8 | The editor cannot create stdin problems | Add the stdin type to Add/Edit Problem: plain-text input/output per test, reference solution required | M | todo | |
+| P9 | Stdin custom tests in Run are typed as JSON (`["5
+"]`) | Plain text boxes for stdin problems | S | todo | |
+| P10 | Bulk test entry is manual | Paste many inputs at once (one test per block, or CSV/Excel with an `input` column; `expected` optional), then generate outputs (P6) | M | todo | |
+| P11 | One wrong reference solution still makes every expected output wrong | Optional second solution (e.g. brute force) run on the same inputs; any disagreement blocks saving | M | todo | later |
+
+Order: P5, P4, P1+P2 (bugs, small) → P6 + P7 (the core fix) → P3 → P8 + P9 + P10 (editor and UI) → P11.
+
 ## Phase 0 — Small cleanups (do alongside Phase 1)
 
 | # | Problem | Fix | Size | Status | Date / commit |
@@ -105,3 +139,4 @@ b")` and C++ `cout << "x
 | 2026-10-24 | Done: T7 (PCH). Revised F2: function-mode C++ uses -O1 after measuring -O2 cost +2.6 s per compile. Added T11 (function-mode C++ compile cost) |
 | 2026-10-24 | Done: R8 (stuck-submission reaper). Phase 1 complete |
 | 2026-10-24 | Done: T1 (stop at first failure for students' graded submissions). F6 now also covers stopping batch mode early |
+| 2026-10-24 | Added Phase 6 (four run/submit modes and correct test cases: reference solution as the source of truth for expected output). CI fixed (npm advisories, Playwright on Ubuntu 26) in a37f804 |

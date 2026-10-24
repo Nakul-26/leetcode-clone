@@ -72,6 +72,13 @@ const ProblemSchema = new Schema({
 
   testsJSON: { type: String },
 
+  // The author's correct solution, the source of truth for expected outputs (JUDGE_FIX_PLAN
+  // Phase 6): saving checks every expected output against it, and a student's own Run test
+  // gets its expected output from it. select:false keeps it out of every query unless asked
+  // for explicitly (problemsRepo.findByIdWithReference), so it never reaches a student.
+  referenceSolution: { type: String, select: false },
+  solutionLanguage: { type: String, select: false },
+
   // mcq-only. Auto-graded in submissions.service.js: correct iff the submitted
   // selectedOptions set exactly equals the set of isCorrect indexes.
   options: { type: [OptionSchema], default: [] },
@@ -90,6 +97,9 @@ const ProblemSchema = new Schema({
   acceptedCount: { type: Number, default: 0 },
 
   createdAt: { type: Date, default: Date.now }
+}, {
+  // updatedAt versions the cached reference outputs for students' Run tests.
+  timestamps: { createdAt: false, updatedAt: true }
 });
 
 export default mongoose.model('Problem', ProblemSchema);

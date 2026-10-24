@@ -30,6 +30,17 @@ export async function getProblemStats(req, res, next) {
   }
 }
 
+export async function computeReferenceOutputs(req, res, next) {
+  try {
+    res.json(await problemsService.computeReferenceOutputs({ ...req.body }));
+  } catch (err) {
+    if (err.status && err.body) {
+      return res.status(err.status).json(err.body);
+    }
+    next(err);
+  }
+}
+
 export async function createProblem(req, res, next) {
   try {
     const problem = await problemsService.createProblem({ ...req.body });

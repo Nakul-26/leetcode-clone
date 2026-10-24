@@ -3,6 +3,7 @@ import addFormats from 'ajv-formats';
 import fs from 'fs';
 import path from 'path';
 import { validateData, isValidType } from "../utils/typeValidator.mjs";
+import { runReferenceSolution } from "./referenceSolution.service.js";
 
 const ajv = new Ajv({ allErrors: true });
 addFormats(ajv);
@@ -96,60 +97,10 @@ export async function validateProblemDefinition(problem) {
 
   // Stage 4: Reference Solution Verification
   if (report.wrapperGeneration && problem.referenceSolution && problem.solutionLanguage) {
-    console.log(`[Validation] Starting reference solution verification for problem: ${problem.title}`);
-    try {
-      const judgeMsg = {
-        schemaVersion: "1",
-        submissionId: "cert-" + Date.now(),
-        problemId: problem._id || "temp",
-        language: problem.solutionLanguage,
-        code: problem.referenceSolution,
-        functionName: problem.functionName,
-        parameters: problem.parameters,
-        returnType: problem.returnType,
-        compareMode: problem.compareConfig?.mode || "STRUCTURAL",
-        floatTolerance: problem.compareConfig?.floatTolerance || 0,
-        orderInsensitive: !!problem.compareConfig?.orderInsensitive,
-        tests: problem.testCases.map(tc => ({
-          inputs: tc.inputs,
-          expected: tc.expected,
-          isHidden: !!tc.isHidden
-        }))
-      };
-
-      console.log(`[Validation] Sending POST to http://judge-service-go:8081/run`);
-      const response = await fetch("http://judge-service-go:8081/run", {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(judgeMsg)
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error(`[Validation] Judge service error: ${errorText}`);
-        report.errors.push(`Judge service error during certification: ${errorText}`);
-      } else {
-        const result = await response.json();
-        console.log(`[Validation] Judge service result: ${result.status}`);
-        if (result.status === "Success" || result.status === "Accepted") {
-          report.referenceSolutionPassed = true;
-        } else {
-          const failMsg = result.message || "Reference solution failed one or more tests";
-          console.error(`[Validation] Reference solution failed: ${failMsg}`);
-          report.errors.push(`Reference solution failed: ${failMsg}`);
-          if (result.testResults) {
-            result.testResults.forEach((tr, idx) => {
-              if (tr.status !== "Success" && tr.status !== "Accepted") {
-                report.errors.push(`Test case ${idx + 1} (${tr.isHidden ? 'Hidden' : 'Sample'}): ${tr.message || tr.status}`);
-              }
-            });
-          }
-        }
-      }
-    } catch (err) {
-      console.error(`[Validation] Reference solution verification crashed: ${err.message}`);
-      report.errors.push(`Reference solution verification crashed: ${err.message}`);
-    }
+    const check = await checkTestsAgainstReference(problem);
+    report.referenceSolutionPassed = check.passed;
+    report.errors.push(...check.errors);
+    report.testResults = check.tests;
   } else if (report.wrapperGeneration) {
     report.errors.push("referenceSolution and solutionLanguage are required to pass deep validation.");
   }
@@ -204,4 +155,31 @@ export async function buildPreview({ problem, language }) {
   tpl = tpl.replace(/{{CLASS_NAME}}/g, functionName);
 
   return { wrapper: tpl, tests: tests };
+}
+
+const show = (v) => JSON.stringify(v);
+
+/**
+ * Runs the reference solution on every test case and compares with the expected outputs the
+ * author entered (JUDGE_FIX_PLAN P7). A mismatch means either the expected output or the
+ * reference solution is wrong; either way a correct student would be marked wrong, so it
+ * blocks saving. Each error names the test and shows both values.
+ */
+export async function checkTestsAgainstReference(problem) {
+  const errors = [];
+  let tests;
+  try {
+    tests = await runReferenceSolution(problem, problem.testCases || []);
+  } catch (err) {
+    const detail = err.body?.compileOutput ? `${err.body.msg}
+${err.body.compileOutput}` : (err.body?.msg || err.message);
+    return { passed: false, errors: [detail], tests: [] };
+  }
+  tests.forEach((t, i) => {
+    const tc = problem.testCases[i];
+    const label = `Test case ${i + 1} (${tc.isHidden || tc.isSample === false ? "hidden" : "sample"})`;
+    if (t.error) errors.push(`${label}: the reference solution failed: ${t.error}`);
+    else if (t.matches === false) errors.push(`${label}: expected ${show(tc.expected)} but the reference solution gives ${show(t.output)}`);
+  });
+  return { passed: errors.length === 0 && tests.length > 0, errors, tests };
 }

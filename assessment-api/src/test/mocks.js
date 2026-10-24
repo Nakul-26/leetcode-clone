@@ -35,16 +35,27 @@ vi.mock('amqplib', () => {
   };
 });
 
-global.fetch = vi.fn().mockResolvedValue({
-  ok: true,
-  json: async () => ({
-    schemaValid: true,
-    typeValidation: true,
-    wrapperGeneration: true,
-    referenceSolutionPassed: true,
-    errors: [],
-    status: 'Accepted',
-    passedCount: 1,
-    totalCount: 1
-  }),
+// A judge /run that accepts everything: one passing result per test it was sent, with the
+// expected value as the output (the reference solution "agrees" with every test).
+global.fetch = vi.fn().mockImplementation(async (_url, init = {}) => {
+  let tests = [];
+  try {
+    tests = JSON.parse(init.body || '{}').tests || [];
+  } catch {
+    tests = [];
+  }
+  return {
+    ok: true,
+    json: async () => ({
+      schemaValid: true,
+      typeValidation: true,
+      wrapperGeneration: true,
+      referenceSolutionPassed: true,
+      errors: [],
+      status: 'Accepted',
+      passedCount: tests.length || 1,
+      totalCount: tests.length || 1,
+      details: tests.map((t, i) => ({ test: i + 1, passed: true, output: t.expected }))
+    }),
+  };
 });

@@ -19,7 +19,7 @@
     },
     "problemType": {
       "type": "string",
-      "enum": ["function", "mcq", "subjective"]
+      "enum": ["function", "stdin", "mcq", "subjective"]
     },
     "functionName": {
       "type": "string",
@@ -90,6 +90,12 @@
     "testsJSON": {
       "type": "string"
     },
+    "inputFormat": {
+      "type": "string"
+    },
+    "outputFormat": {
+      "type": "string"
+    },
     "tags": {
       "type": "array",
       "items": {
@@ -145,6 +151,15 @@
       },
       "then": {
         "required": ["functionName", "parameters", "returnType", "testCases"]
+      }
+    },
+    {
+      "if": {
+        "properties": { "problemType": { "const": "stdin" } },
+        "required": ["problemType"]
+      },
+      "then": {
+        "required": ["testCases", "referenceSolution", "solutionLanguage"]
       }
     },
     {
