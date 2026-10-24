@@ -10,6 +10,14 @@ import (
 	"judge-service-go/pkg/workspace"
 )
 
+// jvmHeapFlag sizes the heap at 75% of the container's memory limit, which the judge sets to
+// the problem's limit before running. A fixed -Xmx256m against the default 256 MB limit left
+// no room for the JVM itself, so a program using ~230 MB was SIGKILLed; with no flag at all
+// the JVM picks about half the limit and a 180 MB program failed. Measured 2026-10-24
+// (JUDGE_FIX_PLAN F3/F4). A heap overflow then exits with java.lang.OutOfMemoryError, which
+// the executor reports as Memory Limit Exceeded.
+const jvmHeapFlag = "-XX:MaxRAMPercentage=75"
+
 type JavaAdapter struct{}
 
 func (JavaAdapter) Name() string {
@@ -54,9 +62,9 @@ func (JavaAdapter) CompileCommand() []string {
 }
 
 func (JavaAdapter) RunCommand(inputB64 string) []string {
-	return []string{"java", "-cp", "/usr/share/java/gson.jar:.", "Main", inputB64}
+	return []string{"java", jvmHeapFlag, "-cp", "/usr/share/java/gson.jar:.", "Main", inputB64}
 }
 
 func (JavaAdapter) BatchRunCommand(testsB64 string) []string {
-	return []string{"java", "-cp", "/usr/share/java/gson.jar:.", "Main", testsB64}
+	return []string{"java", jvmHeapFlag, "-cp", "/usr/share/java/gson.jar:.", "Main", testsB64}
 }

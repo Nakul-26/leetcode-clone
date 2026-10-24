@@ -38,7 +38,7 @@ var Languages = map[string]*Language{
 		Image:   "judge-java-env",
 		// Compile both the user file (Solution.java) and the harness (Main.java)
 		CompileCmd:      []string{"javac", "-cp", "/usr/share/java/gson.jar:.", "/app/Solution.java", "/app/Main.java"},
-		RunCmd:          []string{"java", "-Xmx256m", "-cp", "/usr/share/java/gson.jar:.", "Main"},
+		RunCmd:          []string{"java", "-XX:MaxRAMPercentage=75", "-cp", "/usr/share/java/gson.jar:.", "Main"},
 		WrapperTemplate: "java_single_wrapper.tpl",
 	},
 	"c": {
@@ -46,7 +46,7 @@ var Languages = map[string]*Language{
 		Name:            "C",
 		FileExt:         ".c",
 		Image:           "judge-c-env",
-		CompileCmd:      []string{"gcc", "-o", "/app/main", "/app/main.c", "-ljson-c", "-lm"},
+		CompileCmd:      []string{"gcc", "-O2", "-o", "/app/main", "/app/main.c", "-ljson-c", "-lm"},
 		RunCmd:          []string{"/app/main"},
 		WrapperTemplate: "c_wrapper.tpl",
 	},
@@ -64,7 +64,7 @@ var Languages = map[string]*Language{
 		Name:            "C++",
 		FileExt:         ".cpp",
 		Image:           "judge-cpp-env",
-		CompileCmd:      []string{"g++", "-o", "/app/main", "/app/main.cpp"},
+		CompileCmd:      []string{"g++", "-O2", "-o", "/app/main", "/app/main.cpp"},
 		RunCmd:          []string{"/app/main"},
 		WrapperTemplate: "cpp_single_wrapper.tpl",
 	},
@@ -122,7 +122,7 @@ var Languages = map[string]*Language{
 		FileExt:         ".kt",
 		Image:           "judge-kotlin-env",
 		CompileCmd:      []string{"kotlinc", "-cp", "/usr/share/java/gson.jar", "-d", "/app/out", "/app/Solution.kt", "/app/Harness.kt"},
-		RunCmd:          []string{"java", "-cp", "/app/out:/opt/kotlinc/lib/kotlin-stdlib.jar:/usr/share/java/gson.jar", "HarnessKt"},
+		RunCmd:          []string{"java", "-XX:MaxRAMPercentage=75", "-cp", "/app/out:/opt/kotlinc/lib/kotlin-stdlib.jar:/usr/share/java/gson.jar", "HarnessKt"},
 		WrapperTemplate: "kotlin_wrapper.tpl",
 	},
 }

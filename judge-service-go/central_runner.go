@@ -190,10 +190,11 @@ func runSubmissionCentralPerTest(ctx context.Context, exec *executor.Executor, p
 			case errors.Is(runErr, executor.ErrMemoryLimitExceeded) || strings.Contains(errStr, "memory limit exceeded"):
 				markTestFailed(&tr, models.SubmissionStatusMemoryLimitExceeded)
 			default:
+				// A non-zero exit is the student's program failing (a segfault, sys.exit(1),
+				// a Go panic): the wrappers catch exceptions and exit 0. Not a wrapper error,
+				// so InternalError stays unset (JUDGE_FIX_PLAN T3). A broken wrapper shows up
+				// as unparseable output below, which is still InternalErrorJudge.
 				markTestFailed(&tr, models.SubmissionStatusRuntimeError)
-				if !errors.Is(runErr, context.DeadlineExceeded) && !strings.Contains(strings.ToLower(runErr.Error()), "deadline exceeded") {
-					result.InternalError = models.InternalErrorWrapper
-				}
 				if stderrForLog != "" {
 					tr.Error = "Runtime Error"
 					tr.Traceback = stderrForLog
@@ -354,9 +355,11 @@ func runSubmissionCentralBatched(ctx context.Context, exec *executor.Executor, p
 		runErrText := strings.ToLower(runErr.Error())
 		if strings.Contains(runErrText, "timed out") || strings.Contains(runErrText, "deadline exceeded") {
 			remainingReason = "Time Limit Exceeded"
+		} else if errors.Is(runErr, executor.ErrMemoryLimitExceeded) {
+			remainingReason = models.SubmissionStatusMemoryLimitExceeded
 		} else {
+			// The student's program exited non-zero (see the per-test path, T3).
 			remainingReason = "Runtime Error"
-			result.InternalError = models.InternalErrorWrapper
 		}
 	case parseErr != nil:
 		remainingReason = "Runtime Error"

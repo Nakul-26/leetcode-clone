@@ -33,7 +33,7 @@ func (CAdapter) PrepareFiles(workDir string, submissionMsg models.SubmissionMess
 }
 
 func (CAdapter) CompileCommand() []string {
-	return []string{"gcc", "-o", "/app/main", "/app/main.c", "-ljson-c", "-lm"}
+	return []string{"gcc", "-O2", "-o", "/app/main", "/app/main.c", "-ljson-c", "-lm"}
 }
 
 func (CAdapter) RunCommand(inputB64 string) []string {

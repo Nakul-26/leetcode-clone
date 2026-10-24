@@ -136,11 +136,22 @@ func TestCompiledStdinLanguagesOptimise(t *testing.T) {
 		}
 	}
 
-	// A Java submission that can allocate without bound can exhaust the sandbox's
-	// memory ceiling on its own.
-	java, _ := adapters.GetStdinAdapter("java")
-	if !containsArg(java.RunCommand(), "-Xmx256m") {
-		t.Errorf("java run command does not bound the heap: %v", java.RunCommand())
+	// The JVM heap must follow the problem's memory limit (JUDGE_FIX_PLAN F3/F4), on
+	// every path that runs Java or Kotlin.
+	for _, id := range []string{"java", "kotlin"} {
+		stdin, _ := adapters.GetStdinAdapter(id)
+		fn, _ := adapters.GetAdapter(id)
+		for name, cmd := range map[string][]string{"stdin": stdin.RunCommand(), "function": fn.RunCommand("")} {
+			if !containsArg(cmd, "-XX:MaxRAMPercentage=75") {
+				t.Errorf("%s %s run command does not size the heap from the limit: %v", id, name, cmd)
+			}
+		}
+	}
+	for _, id := range []string{"c", "cpp"} {
+		fn, _ := adapters.GetAdapter(id)
+		if !containsArg(fn.(adapters.CompilingLanguageAdapter).CompileCommand(), "-O2") {
+			t.Errorf("%s function-mode compile is not -O2", id)
+		}
 	}
 }
 

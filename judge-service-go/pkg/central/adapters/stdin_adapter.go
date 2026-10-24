@@ -153,17 +153,17 @@ var StdinAdapterRegistry = map[string]StdinLanguageAdapter{
 	"java": compiledStdinAdapter{
 		name: "java", fileName: "Main.java",
 		// gson stays on both paths' classpath because the image ships it and a
-		// submission may import it; -Xmx256m bounds the heap so one submission
-		// cannot exhaust the sandbox's memory ceiling on its own.
+		// submission may import it; jvmHeapFlag sizes the heap from the
+		// problem's memory limit (see java.go).
 		compileCmd: []string{"javac", "-cp", "/usr/share/java/gson.jar:.", "/app/Main.java"},
-		runCmd:     []string{"java", "-Xmx256m", "-cp", "/usr/share/java/gson.jar:.", "Main"},
+		runCmd:     []string{"java", jvmHeapFlag, "-cp", "/usr/share/java/gson.jar:.", "Main"},
 	},
 	"kotlin": compiledStdinAdapter{
 		name: "kotlin", fileName: "Main.kt",
 		// Unlike the wrapper flow (Solution.kt + Harness.kt), a stdin submission is
 		// a single self-contained file whose own top-level main() is the entry point.
 		compileCmd: []string{"kotlinc", "-cp", "/usr/share/java/gson.jar", "-d", "/app/out", "/app/Main.kt"},
-		runCmd:     []string{"java", "-cp", "/app/out:/opt/kotlinc/lib/kotlin-stdlib.jar:/usr/share/java/gson.jar", "MainKt"},
+		runCmd:     []string{"java", jvmHeapFlag, "-cp", "/app/out:/opt/kotlinc/lib/kotlin-stdlib.jar:/usr/share/java/gson.jar", "MainKt"},
 	},
 	"csharp": compiledStdinAdapter{
 		name: "csharp", fileName: "Program.cs",

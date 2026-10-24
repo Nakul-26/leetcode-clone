@@ -239,10 +239,7 @@ func (e *Executor) runExecWithTimeout(ctx context.Context, containerID string, u
 	}
 
 	if inspect.ExitCode != 0 {
-		if inspect.ExitCode == 137 {
-			return stdoutBuf.String(), stderrBuf.String(), inspect.ExitCode, NewExecutionError(ErrMemoryLimitExceeded, "process killed (possibly OOM)", inspect.ExitCode)
-		}
-		return stdoutBuf.String(), stderrBuf.String(), inspect.ExitCode, NewExecutionError(ErrRuntimeError, fmt.Sprintf("exit code %d", inspect.ExitCode), inspect.ExitCode)
+		return stdoutBuf.String(), stderrBuf.String(), inspect.ExitCode, exitError(inspect.ExitCode, stderrBuf.String())
 	}
 
 	return stdoutBuf.String(), stderrBuf.String(), inspect.ExitCode, nil
@@ -335,10 +332,7 @@ func (e *Executor) runExecWithStdinTimeout(ctx context.Context, containerID stri
 	}
 
 	if inspect.ExitCode != 0 {
-		if inspect.ExitCode == 137 {
-			return stdoutBuf.String(), stderrBuf.String(), inspect.ExitCode, NewExecutionError(ErrMemoryLimitExceeded, "process killed (possibly OOM)", inspect.ExitCode)
-		}
-		return stdoutBuf.String(), stderrBuf.String(), inspect.ExitCode, NewExecutionError(ErrRuntimeError, fmt.Sprintf("exit code %d", inspect.ExitCode), inspect.ExitCode)
+		return stdoutBuf.String(), stderrBuf.String(), inspect.ExitCode, exitError(inspect.ExitCode, stderrBuf.String())
 	}
 
 	return stdoutBuf.String(), stderrBuf.String(), inspect.ExitCode, nil
@@ -561,6 +555,10 @@ func (e *Executor) collectStream(stream *ExecStream) (string, string, int, error
 
 	exitCode, waitErr := stream.Wait()
 	wg.Wait()
+	// The waiter classified the exit before stderr was fully read; re-check now that it is.
+	if errors.Is(waitErr, ErrRuntimeError) {
+		waitErr = exitError(exitCode, stderrBuf.String())
+	}
 	return stdoutBuf.String(), stderrBuf.String(), exitCode, waitErr
 }
 
@@ -849,10 +847,7 @@ func (e *Executor) runExecWithStdin(ctx context.Context, containerID string, use
 	}
 
 	if inspect.ExitCode != 0 {
-		if inspect.ExitCode == 137 {
-			return stdoutBuf.String(), stderrBuf.String(), inspect.ExitCode, NewExecutionError(ErrMemoryLimitExceeded, "process killed (possibly OOM)", inspect.ExitCode)
-		}
-		return stdoutBuf.String(), stderrBuf.String(), inspect.ExitCode, NewExecutionError(ErrRuntimeError, fmt.Sprintf("exit code %d", inspect.ExitCode), inspect.ExitCode)
+		return stdoutBuf.String(), stderrBuf.String(), inspect.ExitCode, exitError(inspect.ExitCode, stderrBuf.String())
 	}
 
 	return stdoutBuf.String(), stderrBuf.String(), inspect.ExitCode, nil

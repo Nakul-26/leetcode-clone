@@ -1,6 +1,6 @@
 # Judge Fix Plan
 
-**Created:** 2026-10-23 · **Last updated:** 2026-10-24 (R1-R7, R9, F1, C1-C3 done)
+**Created:** 2026-10-23 · **Last updated:** 2026-10-24 (R1-R7, R9, T3, F1-F4, C1-C3 done)
 
 The single list of everything found in the 2026-10-23 judge review, plus the open items already recorded in
 [`JUDGE_PERFORMANCE_REVIEW.md`](./JUDGE_PERFORMANCE_REVIEW.md) §5,
@@ -34,7 +34,7 @@ Line numbers are as of commit `8a24162` and will drift.
 |---|---|---|---|---|---|
 | T1 | Every test case always runs, even after a failure. Scoring is all-or-nothing, so a TLE on test 1 of 10 wastes ~9x the limit | Stop at the first failed test for graded submissions (remaining tests marked "not run"); keep full runs for Run/sample tests and ad-hoc API calls. Check the UI copes with "x of y" when stopped early | M | todo | |
 | T2 | Containers are discarded after every TLE/MLE, every runtime error on `/raw-run`, and any non-zero exit in function mode | Trust the per-submission reset (kills processes, wipes `/app` + `/tmp`); discard only if the reset fails or Docker reports the container unhealthy | S | todo | |
-| T3 | Function mode labels any non-zero exit (e.g. a student's segfault) as a judge "wrapper" error (`central_runner.go` runtime-error branch) | Treat a non-zero exit of the user's program as Runtime Error; keep InternalError only for unparseable wrapper output | S | todo | |
+| T3 | Function mode labels any non-zero exit (e.g. a student's segfault) as a judge "wrapper" error (`central_runner.go` runtime-error branch) | Treat a non-zero exit of the user's program as Runtime Error; keep InternalError only for unparseable wrapper output | S | done | 2026-10-24 · per-test and batch paths; batch also reports MLE instead of Runtime Error on a kill. Fewer discards as a side effect (T2). Verified live (C++ segfault → Runtime Error, no internal error) |
 | T4 | Bulk workers are shared across languages and each blocks up to 30 s waiting for a container: a burst in one language starves the others | Per-language admission: a worker only takes on a message when that language has capacity, otherwise send it straight to the retry queue (or per-language queues) | M | todo | |
 | T5 | ~6 Docker API calls per test case (exec create/start/inspect + a cleanup exec after every test) | Run the cleanup once per submission (the reset already does it); later, one exec for all tests via an in-container runner [known, perf review §5] | M | todo | |
 | T6 | `wait=true` callers poll Mongo every 100 ms each | Redis pub/sub (or a short-lived key) notifying completion; poll as fallback only | M | todo | |
@@ -50,9 +50,9 @@ Line numbers are as of commit `8a24162` and will drift.
 | F1 | [known] Stored-problem code is "unescaped": `print("a\nb")` becomes a SyntaxError, `cout << "x\n"` does not compile | Run the two read-only queries in `FRIEND_PORTAL_CHANGES.md` §7 on production; if the first is ~0, remove `UnescapeCode` from the adapters and stdin runner | S | done | 2026-10-24 · prod query returned 0; `UnescapeCode` deleted from all six adapters and the stdin runner. Verified live (Python `print("a
 b")` and C++ `cout << "x
 "` both Accepted) |
-| F2 | [known] Function-mode C/C++ compile at `-O0` while stdin mode uses `-O2` | `-O2` in `cpp.go` / `c.go` (same flags as the PCH, T7) | S | todo | |
-| F3 | [known] Function-mode Java has no heap cap | Add `-Xmx` to `adapters/java.go` run commands | S | todo | |
-| F4 | Java stdin uses `-Xmx256m` while the default problem memory limit is 256 MB: heap + JVM overhead exceeds the cgroup, reported as MLE | Derive `-Xmx` from the problem limit (e.g. limit minus ~64 MB), or give JVM languages a memory allowance | S | todo | |
+| F2 | [known] Function-mode C/C++ compile at `-O0` while stdin mode uses `-O2` | `-O2` in `cpp.go` / `c.go` (same flags as the PCH, T7) | S | done | 2026-10-24 · also `languages.go` (legacy `/run`). Verified live |
+| F3 | [known] Function-mode Java has no heap cap | Add `-Xmx` to `adapters/java.go` run commands | S | done | 2026-10-24 · worse than "no cap": the JVM defaulted to ~half the limit, so a 180 MB program failed with OutOfMemoryError. Now `-XX:MaxRAMPercentage=75` on Java and Kotlin, function and stdin. Verified live (180 MB Accepted, 400 MB MLE) |
+| F4 | Java stdin uses `-Xmx256m` while the default problem memory limit is 256 MB: heap + JVM overhead exceeds the cgroup, reported as MLE | Derive `-Xmx` from the problem limit (e.g. limit minus ~64 MB), or give JVM languages a memory allowance | S | done | 2026-10-24 · same flag (heap = 75% of the limit the judge sets). Java's own OutOfMemoryError exit is now reported as MLE by the executor (was Runtime Error). Measured under 256 MB: `-Xmx256m` was SIGKILLed at 230 MB. Verified live |
 | F5 | Time limits are wall-clock around `docker exec`: they include exec overhead, JVM start and CPU contention, so verdicts depend on server load | Measure CPU time (cgroup `cpu.stat` / `/usr/bin/time` in the runner) and judge on that, with wall-clock as a 2-3x safety cap; keep busy containers <= physical cores | L | todo | |
 | F6 | Batch mode (>= 20 tests) only has a whole-run timeout, so per-test TLE is not enforced; per-test times are ~0 ms | Per-test timing and limit inside the batch wrappers | M | todo | |
 
@@ -88,3 +88,4 @@ b")` and C++ `cout << "x
 | 2026-10-23 | Plan created from the judge review; known items folded in |
 | 2026-10-23 | Done: R1, R2, R3, R4, R5, R6, R9, C1, C2, C3. Verified on the local Docker stack (missing problem, unsupported language, redelivery, rejudge, graceful stop, RabbitMQ restart). Judge unit tests pass except the two symlink tests that need admin rights on Windows; API suite passes (3 files flaky only under full parallel run). Dev compose judge now has `restart: unless-stopped` |
 | 2026-10-24 | Done: F1 (owner ran the prod query: 0 pre-escaped submissions) and R7 (confirmed publish + API reconnect). T10 deferred by the owner. API suite 241/241; judge tests pass except the Windows symlink pair |
+| 2026-10-24 | Done: F2, F3, F4, T3. JVM heap now follows the problem limit; C/C++ function mode at -O2; student crashes no longer flagged as wrapper errors |

@@ -40,5 +40,5 @@ func (KotlinAdapter) CompileCommand() []string {
 }
 
 func (KotlinAdapter) RunCommand(inputB64 string) []string {
-	return []string{"java", "-cp", "/app/out:/opt/kotlinc/lib/kotlin-stdlib.jar:/usr/share/java/gson.jar", "HarnessKt", inputB64}
+	return []string{"java", jvmHeapFlag, "-cp", "/app/out:/opt/kotlinc/lib/kotlin-stdlib.jar:/usr/share/java/gson.jar", "HarnessKt", inputB64}
 }

@@ -50,7 +50,7 @@ func (CppAdapter) PrepareBatchFiles(workDir string, submissionMsg models.Submiss
 }
 
 func (CppAdapter) CompileCommand() []string {
-	return []string{"g++", "-o", "/app/main", "/app/main.cpp"}
+	return []string{"g++", "-O2", "-o", "/app/main", "/app/main.cpp"}
 }
 
 func (CppAdapter) RunCommand(inputB64 string) []string {
