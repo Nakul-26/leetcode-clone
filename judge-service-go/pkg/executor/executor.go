@@ -649,11 +649,8 @@ func (e *Executor) RunInContainerWithStdin(ctx context.Context, containerID stri
 		}
 	}
 
-	// Clear /tmp and kill leftover processes to prevent contamination between reused containers,
-	// mirroring the cleanup RunInContainerStream performs after each run.
-	cStdout, cStderr, cExit, cErr := e.runExecWithTimeout(context.Background(), containerID, "root", "/", []string{"sh", "-c", "rm -rf /tmp/* && (pkill -9 -u judge || true)"}, 5*time.Second)
-	if cErr != nil && cExit != 137 {
-		slog.Error("failed to cleanup container", "containerId", containerID, "error", cErr, "stdout", cStdout, "stderr", cStderr, "exitCode", cExit)
+	if runEndedBadly(runExit, err) {
+		e.killLeftovers(containerID)
 	}
 
 	return runStdout, runStderr, runExit, err
@@ -685,6 +682,25 @@ func (e *Executor) CompileInContainer(ctx context.Context, containerID string, f
 	}
 
 	return compileStdout, compileStderr, nil
+}
+
+// runEndedBadly reports whether a test's process may still be running after its exec returned:
+// a timeout or watchdog cancel leaves the student's process alive inside the container, and a
+// crash can leave children behind. A clean exit needs no per-test cleanup (JUDGE_FIX_PLAN T5):
+// the reset in finishWithContainer clears /tmp and kills everything once per submission, before
+// the container is reused by anyone else.
+func runEndedBadly(exitCode int, err error) bool {
+	return err != nil || exitCode != 0
+}
+
+// killLeftovers stops whatever a test left running so it cannot eat CPU or memory while the
+// next test of the same submission runs. Since the container's PID 1 runs as root, every process
+// owned by the judge user can be killed without stopping the container.
+func (e *Executor) killLeftovers(containerID string) {
+	stdout, stderr, exitCode, err := e.runExecWithTimeout(context.Background(), containerID, "root", "/", []string{"sh", "-c", "pkill -9 -u judge || true"}, 5*time.Second)
+	if err != nil && exitCode != 137 {
+		slog.Error("failed to kill leftover processes", "containerId", containerID, "error", err, "stdout", stdout, "stderr", stderr, "exitCode", exitCode)
+	}
 }
 
 func getJudgeUser() string {
@@ -763,12 +779,8 @@ func (e *Executor) RunInContainerStream(ctx context.Context, containerID string,
 			}
 		}
 
-		// Clear /tmp and kill leftover processes to prevent contamination between reused containers
-		// Since the container's PID 1 now runs as root, we can safely kill all processes
-		// owned by the 'judge' user without stopping the container.
-		cStdout, cStderr, cExit, cErr := e.runExecWithTimeout(context.Background(), containerID, "root", "/", []string{"sh", "-c", "rm -rf /tmp/* && (pkill -9 -u judge || true)"}, 5*time.Second)
-		if cErr != nil && cExit != 137 {
-			slog.Error("failed to cleanup container", "containerId", containerID, "error", cErr, "stdout", cStdout, "stderr", cStderr, "exitCode", cExit)
+		if runEndedBadly(exitCode, waitErr) {
+			e.killLeftovers(containerID)
 		}
 
 		wrapped.waitCh <- execWaitResult{exitCode: exitCode, err: waitErr}

@@ -71,5 +71,10 @@ func runCertificationTest(t *testing.T, exec *executor.Executor, pc *pool.Pooled
 	if result == nil {
 		t.Fatal("nil result")
 	}
+	// Production resets a container when it is released (finishWithContainer); per-test steps
+	// no longer clean up after a clean exit (JUDGE_FIX_PLAN T5), so do the same between runs here.
+	if err := exec.ResetContainer(ctx, pc.ID); err != nil {
+		t.Fatalf("container reset failed: %v", err)
+	}
 	return result
 }
