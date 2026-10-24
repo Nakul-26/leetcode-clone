@@ -4,10 +4,10 @@ import Editor from '@monaco-editor/react';
 import { Play, Send, ChevronLeft, Info, History, Settings2, Terminal, AlertCircle, ChevronDown, ChevronUp, Loader2, Trash2, CheckCircle2, X, Edit2, Lock } from 'lucide-react';
 import api, { problems } from '../api';
 import SubmissionOutput from '../components/SubmissionOutput';
-import buildTemplate from '../utils/buildTemplate';
+import { starterCode } from '../utils/buildTemplate';
 import { SUPPORTED_LANGUAGES } from '../utils/languages';
 import { defineModernDarkTheme, MONACO_EDITOR_OPTIONS } from '../utils/editorTheme';
-import { buildCustomTests } from '../utils/buildCustomTests';
+import { buildCustomTests, initialTestCases, emptyTestCase, isStdinProblem, MAX_CUSTOM_TESTS } from '../utils/buildCustomTests';
 
 const ProblemPage = ({ user }) => {
   const { _id } = useParams();
@@ -63,12 +63,7 @@ const ProblemPage = ({ user }) => {
         setProblem(fetchedProblem);
         setStats(statsRes.data);
         
-        const samples = (fetchedProblem.testCases || []).filter(tc => tc.isSample);
-        if (samples.length > 0) {
-          setTestCases(samples.map(tc => typeof tc.inputs === 'string' ? tc.inputs : JSON.stringify(tc.inputs)));
-        } else {
-          setTestCases(['[]']);
-        }
+        setTestCases(initialTestCases(fetchedProblem));
         setActiveTestCaseIdx(0);
       } catch (err) {
         console.error(`Error fetching problem ${_id}:`, err);
@@ -83,7 +78,7 @@ const ProblemPage = ({ user }) => {
 
   useEffect(() => {
     if (problem) {
-      setCode(buildTemplate(selectedLanguage, problem.functionName || 'solution', problem.parameters, problem.returnType));
+      setCode(starterCode(selectedLanguage, problem));
     }
   }, [selectedLanguage, problem]);
 
@@ -116,7 +111,7 @@ const ProblemPage = ({ user }) => {
 
     let tests = [];
     try {
-      tests = buildCustomTests(testCases);
+      tests = buildCustomTests(testCases, problem);
     } catch (err) {
       console.error('Invalid JSON in test cases:', err);
       setRunResult({ status: 'Error', error: 'Invalid JSON in one of the test cases.' });
@@ -162,7 +157,8 @@ const ProblemPage = ({ user }) => {
   };
 
   const handleAddTestCase = () => {
-    setTestCases(prev => [...prev, '[]']);
+    if (testCases.length >= MAX_CUSTOM_TESTS) return;
+    setTestCases(prev => [...prev, emptyTestCase(problem)]);
     setActiveTestCaseIdx(testCases.length);
   };
 
@@ -447,6 +443,8 @@ const ProblemPage = ({ user }) => {
                           ))}
                           <button 
                             onClick={handleAddTestCase} 
+                            disabled={testCases.length >= MAX_CUSTOM_TESTS}
+                            title={testCases.length >= MAX_CUSTOM_TESTS ? `At most ${MAX_CUSTOM_TESTS} test cases` : undefined}
                             className="button"
                             style={{ padding: '4px 12px', fontSize: '0.8rem', borderRadius: '100px', background: 'var(--bg)', border: '1px dashed var(--border)', color: 'var(--text-secondary)' }}
                           >
@@ -461,11 +459,11 @@ const ProblemPage = ({ user }) => {
                       </div>
 
                       <div>
-                        <label style={{ fontSize: '0.75rem', fontWeight: '600', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '8px', display: 'block' }}>JSON Input Array</label>
+                        <label style={{ fontSize: '0.75rem', fontWeight: '600', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '8px', display: 'block' }}>{isStdinProblem(problem) ? 'Input (what your program reads)' : 'JSON Input Array'}</label>
                         <textarea
                           value={testCases[activeTestCaseIdx]}
                           onChange={(e) => handleTestCaseChange(activeTestCaseIdx, e.target.value)}
-                          placeholder='e.g., [[2,7,11,15], 9]'
+                          placeholder={isStdinProblem(problem) ? 'e.g.\n3\n1 2 3' : 'e.g., [[2,7,11,15], 9]'}
                           style={{ height: '120px', fontSize: '0.9rem', fontFamily: "'JetBrains Mono', monospace", background: 'var(--bg)', width: '100%', padding: '12px', borderRadius: '8px', border: '1px solid var(--border)', color: 'var(--text)' }}
                         />
                       </div>

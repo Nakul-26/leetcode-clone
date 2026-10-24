@@ -4,10 +4,10 @@ import Editor from '@monaco-editor/react';
 import { Clock, CheckCircle2, ChevronRight, Terminal, Play, Send, Info, Code2, AlertCircle, ChevronDown, ChevronUp, Loader2, Trash2, Megaphone, AlertTriangle } from 'lucide-react';
 import api, { assessments } from '../api';
 import SubmissionOutput from '../components/SubmissionOutput';
-import buildTemplate from '../utils/buildTemplate';
+import { starterCode } from '../utils/buildTemplate';
 import { SUPPORTED_LANGUAGES } from '../utils/languages';
 import { defineModernDarkTheme, MONACO_EDITOR_OPTIONS } from '../utils/editorTheme';
-import { buildCustomTests } from '../utils/buildCustomTests';
+import { buildCustomTests, initialTestCases, emptyTestCase, isStdinProblem, MAX_CUSTOM_TESTS } from '../utils/buildCustomTests';
 
 function loadDraft(attemptId) {
   try {
@@ -171,12 +171,9 @@ const AssessmentWorkspace = () => {
           const lang = assessmentData.allowedLanguages?.[0] || 'python';
           initialLangMap[p._id] = initialLangMap[p._id] || lang;
           initialCodeMap[p._id] = initialCodeMap[p._id]
-            || buildTemplate(initialLangMap[p._id], p.functionName, p.parameters, p.returnType);
+            || starterCode(initialLangMap[p._id], p);
 
-          const samples = (p.testCases || []).filter(tc => tc.isSample);
-          initialTestCasesMap[p._id] = samples.length > 0 
-            ? samples.map(tc => typeof tc.inputs === 'string' ? tc.inputs : JSON.stringify(tc.inputs)) 
-            : ['[]'];
+          initialTestCasesMap[p._id] = initialTestCases(p);
           initialActiveIdxMap[p._id] = 0;
         });
         
@@ -439,7 +436,7 @@ const AssessmentWorkspace = () => {
     setLangMap(prev => ({ ...prev, [problemId]: lang }));
     setCodeMap(prev => ({ 
       ...prev, 
-      [problemId]: buildTemplate(lang, currentProblem.functionName, currentProblem.parameters, currentProblem.returnType) 
+      [problemId]: starterCode(lang, currentProblem) 
     }));
   };
 
@@ -456,7 +453,9 @@ const AssessmentWorkspace = () => {
   };
 
   const handleAddTestCase = (problemId) => {
-    setTestCasesMap(prev => ({ ...prev, [problemId]: [...(prev[problemId] || []), '[]'] }));
+    if ((testCasesMap[problemId] || []).length >= MAX_CUSTOM_TESTS) return;
+    const problem = problems.find(p => p._id === problemId);
+    setTestCasesMap(prev => ({ ...prev, [problemId]: [...(prev[problemId] || []), emptyTestCase(problem)] }));
     setActiveTestCaseIdxMap(prev => ({ ...prev, [problemId]: (testCasesMap[problemId] || []).length }));
   };
 
@@ -1243,6 +1242,8 @@ const AssessmentWorkspace = () => {
                                 ))}
                                 <button 
                                   onClick={() => handleAddTestCase(currentProblem._id)} 
+                                  disabled={currentTestCases.length >= MAX_CUSTOM_TESTS}
+                                  title={currentTestCases.length >= MAX_CUSTOM_TESTS ? `At most ${MAX_CUSTOM_TESTS} test cases` : undefined}
                                   className="button"
                                   style={{ padding: '4px 12px', fontSize: '0.8rem', borderRadius: '100px', background: 'var(--bg)', border: '1px dashed var(--border)', color: 'var(--text-secondary)' }}
                                 >
@@ -1257,11 +1258,11 @@ const AssessmentWorkspace = () => {
                             </div>
 
                             <div>
-                              <label style={{ fontSize: '0.75rem', fontWeight: '600', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '8px', display: 'block' }}>JSON Input Array</label>
+                              <label style={{ fontSize: '0.75rem', fontWeight: '600', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '8px', display: 'block' }}>{isStdinProblem(currentProblem) ? 'Input (what your program reads)' : 'JSON Input Array'}</label>
                               <textarea
                                 value={currentTestCases[currentActiveIdx] || ''}
                                 onChange={(e) => handleTestCaseChange(currentProblem._id, currentActiveIdx, e.target.value)}
-                                placeholder='e.g., [[2,7,11,15], 9]'
+                                placeholder={isStdinProblem(currentProblem) ? 'e.g.\n3\n1 2 3' : 'e.g., [[2,7,11,15], 9]'}
                                 style={{ height: '120px', fontSize: '0.9rem', fontFamily: "'JetBrains Mono', monospace", background: 'var(--bg)', width: '100%', padding: '12px', borderRadius: '8px', border: '1px solid var(--border)', color: 'var(--text)' }}
                               />
                             </div>

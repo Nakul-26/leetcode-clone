@@ -1,5 +1,5 @@
 import React from 'react';
-import { CheckCircle2, XCircle, AlertTriangle, Clock, MinusCircle } from 'lucide-react';
+import { CheckCircle2, XCircle, AlertTriangle, Clock, MinusCircle, Info } from 'lucide-react';
 
 const formatValue = (val) => {
     if (val === undefined || val === null) return 'null';
@@ -129,6 +129,8 @@ const SubmissionOutput = ({ output }) => {
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
                         {normalizedDetails.map((detail, idx) => {
                             const passed = detail.passed ?? detail.ok ?? false;
+                            // A student's own Run test with no known answer: it ran, nothing to judge.
+                            const unjudged = detail.noExpected === true;
                             const isHidden = detail.isHidden === true;
                             const testNumber = detail.test ?? detail.testIndex ?? idx + 1;
 
@@ -150,10 +152,11 @@ const SubmissionOutput = ({ output }) => {
 
                             return (
                                 <div key={idx} className="testcase-box" style={{ background: 'var(--surface)', borderRadius: '8px', border: '1px solid var(--border)', overflow: 'hidden' }}>
-                                    <div className={`testcase-header ${passed ? 'passed' : 'failed'}`} style={{ padding: '10px 16px', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: passed ? 'rgba(34, 197, 94, 0.05)' : 'rgba(239, 68, 68, 0.05)' }}>
-                                        <div className="flex-center gap-2" style={{ fontWeight: '600', color: passed ? 'var(--success)' : 'var(--error)' }}>
-                                            {passed ? <CheckCircle2 size={16} /> : <XCircle size={16} />}
+                                    <div className={`testcase-header ${unjudged ? 'unjudged' : passed ? 'passed' : 'failed'}`} style={{ padding: '10px 16px', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: unjudged ? 'transparent' : passed ? 'rgba(34, 197, 94, 0.05)' : 'rgba(239, 68, 68, 0.05)' }}>
+                                        <div className="flex-center gap-2" style={{ fontWeight: '600', color: unjudged ? 'var(--text-muted)' : passed ? 'var(--success)' : 'var(--error)' }}>
+                                            {unjudged ? <Info size={16} /> : passed ? <CheckCircle2 size={16} /> : <XCircle size={16} />}
                                             <span>{isHidden ? `Hidden Case` : `Case ${testNumber}`}</span>
+                                            {unjudged && <span style={{ fontWeight: 400 }}>· ran, no expected output to compare</span>}
                                         </div>
                                         <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
                                             {detail.timeMs ? `${detail.timeMs} ms` : (detail.time ? `${detail.time} ms` : '')}
@@ -205,8 +208,8 @@ const SubmissionOutput = ({ output }) => {
                                                     padding: '12px', 
                                                     borderRadius: '6px', 
                                                     fontSize: '0.85rem',
-                                                    borderLeft: passed ? '3px solid var(--success)' : '3px solid var(--error)',
-                                                    color: passed ? 'var(--text)' : 'var(--error)'
+                                                    borderLeft: unjudged ? '3px solid var(--border)' : passed ? '3px solid var(--success)' : '3px solid var(--error)',
+                                                    color: unjudged || passed ? 'var(--text)' : 'var(--error)'
                                                 }}>
                                                     {formatValue(detail.output)}
                                                 </pre>

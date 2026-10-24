@@ -81,4 +81,16 @@ describe('SubmissionOutput Component', () => {
     expect(screen.queryAllByText('Not Run')).toHaveLength(0);
     expect(screen.getAllByText('Time Limit Exceeded').length).toBeGreaterThan(0);
   });
+  it('shows a test with no expected output as ran, not failed', () => {
+    const output = {
+      status: 'Finished',
+      passedCount: 0,
+      totalCount: 0,
+      details: [{ test: 1, passed: null, noExpected: true, inputs: ['5\n'], output: '10\n' }]
+    };
+    const { container } = render(<SubmissionOutput output={output} />);
+    expect(screen.getByText(/ran, no expected output/)).toBeDefined();
+    expect(container.querySelectorAll('.testcase-header.unjudged')).toHaveLength(1);
+    expect(container.querySelectorAll('.testcase-header.failed')).toHaveLength(0);
+  });
 });

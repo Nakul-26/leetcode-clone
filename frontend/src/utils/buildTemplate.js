@@ -237,3 +237,30 @@ export default function buildTemplate(language, functionName, parameters = [], r
   out += `// ${functionName}(${params})\n// implement here`;
   return out;
 }
+
+// Starter code for a stdin problem (JUDGE_FIX_PLAN P8): a whole program that reads the input
+// and prints the answer. There is no function signature to build from.
+const STDIN_TEMPLATES = {
+  python: `import sys\n\ndef main():\n    data = sys.stdin.read().split()\n    # Read the input from data and print the answer\n    print()\n\nmain()\n`,
+  javascript: `const data = require('fs').readFileSync(0, 'utf8').trim().split(/\\s+/);\n// Read the input from data and print the answer\nconsole.log();\n`,
+  typescript: `const data: string[] = require('fs').readFileSync(0, 'utf8').trim().split(/\\s+/);\n// Read the input from data and print the answer\nconsole.log();\n`,
+  java: `import java.util.*;\nimport java.io.*;\n\npublic class Main {\n    public static void main(String[] args) throws IOException {\n        BufferedReader in = new BufferedReader(new InputStreamReader(System.in));\n        // Read the input and print the answer\n        System.out.println();\n    }\n}\n`,
+  cpp: `#include <bits/stdc++.h>\nusing namespace std;\n\nint main() {\n    ios::sync_with_stdio(false);\n    cin.tie(nullptr);\n    // Read the input and print the answer\n    return 0;\n}\n`,
+  c: `#include <stdio.h>\n\nint main(void) {\n    // Read the input and print the answer\n    return 0;\n}\n`,
+  go: `package main\n\nimport (\n\t"bufio"\n\t"fmt"\n\t"os"\n)\n\nfunc main() {\n\tin := bufio.NewReader(os.Stdin)\n\t_ = in\n\t// Read the input and print the answer\n\tfmt.Println()\n}\n`,
+  csharp: `using System;\n\nclass Program {\n    static void Main() {\n        // Read the input with Console.ReadLine() and print the answer\n        Console.WriteLine();\n    }\n}\n`,
+  rust: `use std::io::{self, Read};\n\nfn main() {\n    let mut input = String::new();\n    io::stdin().read_to_string(&mut input).unwrap();\n    // Read the input and print the answer\n    println!();\n}\n`,
+  ruby: `data = STDIN.read.split\n# Read the input from data and print the answer\nputs\n`,
+  php: `<?php\n$data = preg_split('/\\s+/', trim(stream_get_contents(STDIN)));\n// Read the input from $data and print the answer\necho PHP_EOL;\n`,
+  kotlin: `fun main() {\n    // Read the input with readLine() and print the answer\n    println()\n}\n`
+};
+
+export function buildStdinTemplate(language) {
+  return STDIN_TEMPLATES[(language || '').toLowerCase()] || '// Read the input and print the answer\n';
+}
+
+// The right starter code for any coding problem.
+export function starterCode(language, problem) {
+  if ((problem?.problemType || 'function') === 'stdin') return buildStdinTemplate(language);
+  return buildTemplate(language, problem?.functionName || 'solution', problem?.parameters, problem?.returnType);
+}
