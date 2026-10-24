@@ -319,18 +319,21 @@ func runSubmissionCentralBatched(ctx context.Context, exec *executor.Executor, p
 	}
 
 	var stderrBuf bytes.Buffer
-	stderrDone := make(chan struct{})
-	go func() {
-		defer close(stderrDone)
-		_, _ = io.Copy(&stderrBuf, stream.Stderr)
-		_ = stream.Stderr.Close()
-	}()
-
-	processed, parseErr := appendBatchedResults(result, stream.Stdout, &stderrBuf, problem)
+	watch := batchWatch{
+		testTimeout:   testTimeout,
+		startup:       batchStartupAllowance,
+		stopOnFailure: submissionMsg.StopOnFirstFailure,
+		cancelRun:     cancel,
+	}
+	processed, timedOut, stoppedEarly, parseErr := streamBatchedResults(result, stream.Stdout, stream.Stderr, &stderrBuf, problem, watch)
 	_ = stream.Stdout.Close()
+	_ = stream.Stderr.Close()
 
 	exitCode, waitErr := stream.Wait()
-	<-stderrDone
+	if timedOut || stoppedEarly {
+		// The watchdog cancelled the run on purpose; the cancellation is not a failure.
+		waitErr, exitCode = nil, 0
+	}
 
 	// If metadata parsing failed, check if there's error info in stderr
 	if parseErr != nil {
@@ -353,6 +356,14 @@ func runSubmissionCentralBatched(ctx context.Context, exec *executor.Executor, p
 
 	remainingReason := ""
 	switch {
+	case stoppedEarly:
+		// Graded submission stopped at its first failure (T1); the rest never ran.
+		appendNotRunTests(result, problem, processed)
+	case timedOut:
+		// The test the watchdog was waiting for ran past its limit (F6). Tests after it never
+		// ran; a graded submission reports them as not run (below), anything else keeps the
+		// earlier behaviour of reporting them as timed out too.
+		remainingReason = models.SubmissionStatusTimeLimitExceeded
 	case errors.Is(parseErr, errBatchedOutputLimitExceeded):
 		remainingReason = "Output Limit Exceeded"
 	case runErr != nil:
@@ -382,9 +393,8 @@ func runSubmissionCentralBatched(ctx context.Context, exec *executor.Executor, p
 		appendMissingBatchedResults(result, problem, processed, remainingReason)
 	}
 	if submissionMsg.StopOnFirstFailure {
-		// The batch has already run every test in one process; this only reports the same
-		// shape as the per-test path. Stopping a batch early needs per-test limits inside
-		// the wrappers (JUDGE_FIX_PLAN F6).
+		// Covers failures the watchdog could not stop on (a crash or bad output ends the run by
+		// itself): everything after the first failure is reported as not run.
 		markNotRunAfterFirstFailure(result)
 	}
 
@@ -396,78 +406,190 @@ func runSubmissionCentralBatched(ctx context.Context, exec *executor.Executor, p
 	return result, nil
 }
 
+// batchWatch bounds a batched run test by test (JUDGE_FIX_PLAN F6). The batch wrappers print one
+// result line per test to stderr as each test finishes, so a test that runs past its limit
+// shows up as a result line that does not arrive. Before this, a batch only had a whole-run
+// timeout of (tests + 1) x the limit: an infinite loop on test 1 held the container for that
+// long, and per-test time was not measured at all.
+type batchWatch struct {
+	testTimeout   time.Duration // 0 disables the watchdog
+	startup       time.Duration // extra time for the first result (process start, JVM, parsing input)
+	stopOnFailure bool          // stop at the first failed test (graded submissions, T1)
+	cancelRun     func()        // stops the run
+}
+
+// The first result also pays for starting the program, which a per-test run pays on every test.
+const batchStartupAllowance = 2 * time.Second
+
+const (
+	maxBatchedLineBytes   = 4 << 20
+	maxBatchedStdoutBytes = 1 << 20
+	maxBatchedStderrCopy  = 64 << 10
+)
+
+type batchedLine struct {
+	text []byte
+	at   time.Time
+	err  error
+}
+
+// appendBatchedResults reads a finished batched run's output with no watchdog.
 func appendBatchedResults(result *models.SubmissionResult, stdout io.Reader, stderr io.Reader, problem models.Problem) (int, error) {
-	stdoutFull, err := io.ReadAll(stdout)
-	if err != nil {
-		return 0, err
-	}
-	stderrFull, err := io.ReadAll(stderr)
-	if err != nil {
-		return 0, err
-	}
+	var discard bytes.Buffer
+	processed, _, _, err := streamBatchedResults(result, stdout, stderr, &discard, problem, batchWatch{})
+	return processed, err
+}
 
-	rawStdout := string(stdoutFull)
-	rawStderr := string(stderrFull)
-	processed := 0
+// streamBatchedResults records each test's result as its line arrives. It returns early, after
+// cancelling the run, when a test runs past its limit (timedOut) or, for a graded submission,
+// when a test fails and more remain (stoppedEarly). stderrCopy receives the start of stderr
+// for logging.
+func streamBatchedResults(result *models.SubmissionResult, stdout io.Reader, stderr io.Reader, stderrCopy *bytes.Buffer, problem models.Problem, watch batchWatch) (processed int, timedOut bool, stoppedEarly bool, err error) {
+	// The student's own prints. Kept whole, as before, up to a bound.
+	var stdoutBuf bytes.Buffer
+	stdoutDone := make(chan struct{})
+	go func() {
+		defer close(stdoutDone)
+		_, _ = io.Copy(&stdoutBuf, io.LimitReader(stdout, maxBatchedStdoutBytes))
+		_, _ = io.Copy(io.Discard, stdout)
+	}()
 
-	// User prints go to stdout. Judge metadata goes to stderr as JSON lines.
-	// We'll parse stderr line by line for JSON objects.
-	lines := strings.Split(rawStderr, "\n")
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if line == "" || !strings.HasPrefix(line, "{") {
-			continue
-		}
-
-		var out batchedTestExecOutput
-		if err := json.Unmarshal([]byte(line), &out); err != nil {
-			continue
-		}
-
-		if out.Fatal != "" {
-			return processed, fmt.Errorf("wrapper fatal error: %s", out.Fatal)
-		}
-		if out.Test <= 0 || out.Test > len(problem.TestCases) {
-			continue
-		}
-
-		tc := problem.TestCases[out.Test-1]
-		testStart := time.Now()
-		tr := models.TestResult{
-			Test:     out.Test,
-			Input:    tc.Input,
-			Expected: tc.Expected,
-			Output:   out.Output,
-			// In batch mode, correlating per-test stdout is harder if it's all in one stream.
-			// However, usually we can just put the whole stdout in if needed, 
-			// or assume students don't print in batch mode.
-			// For now, let's just use the raw stdout if it's the only test, 
-			// or leave it as is if we can't easily split it.
-			Stdout: rawStdout,
-		}
-
-		if out.Error != "" {
-			reason := models.SubmissionStatusRuntimeError
-			if strings.Contains(strings.ToLower(out.Error), "outofmemory") {
-				reason = models.SubmissionStatusMemoryLimitExceeded
+	quit := make(chan struct{})
+	defer close(quit)
+	lines := make(chan batchedLine)
+	go func() {
+		defer close(lines)
+		reader := bufio.NewReaderSize(stderr, 64*1024)
+		for {
+			text, readErr := readBoundedLine(reader, maxBatchedLineBytes)
+			ev := batchedLine{text: text, at: time.Now(), err: readErr}
+			if readErr == io.EOF {
+				return
 			}
-			markTestFailed(&tr, reason)
-			if out.Traceback != "" {
-				tr.Traceback = out.Traceback
+			select {
+			case lines <- ev:
+			case <-quit:
+				return
 			}
-		} else {
-			tr.Passed = comparator.Compare(tc.Expected, out.Output, problem.CompareConfig)
-			tr.Ok = tr.Passed
-			if !tr.Passed {
-				tr.ErrorType = models.ErrorTypeWrongAnswer
+			if readErr != nil {
+				return
 			}
 		}
-		tr.TimeMs = time.Since(testStart).Milliseconds()
-		result.AddTestResult(tr)
-		processed++
+	}()
+
+	var deadline <-chan time.Time
+	var timer *time.Timer
+	if watch.testTimeout > 0 {
+		timer = time.NewTimer(watch.testTimeout + watch.startup)
+		defer timer.Stop()
+		deadline = timer.C
+	}
+	stop := func() {
+		if watch.cancelRun != nil {
+			watch.cancelRun()
+		}
 	}
 
-	return processed, nil
+	last := time.Now()
+loop:
+	for {
+		select {
+		case ev, ok := <-lines:
+			if !ok {
+				break loop
+			}
+			if ev.err != nil {
+				err = ev.err
+				break loop
+			}
+			if stderrCopy.Len() < maxBatchedStderrCopy {
+				stderrCopy.Write(ev.text)
+			}
+			line := strings.TrimSpace(string(ev.text))
+			if line == "" || !strings.HasPrefix(line, "{") {
+				continue
+			}
+			var out batchedTestExecOutput
+			if json.Unmarshal([]byte(line), &out) != nil {
+				continue
+			}
+			if out.Fatal != "" {
+				err = fmt.Errorf("wrapper fatal error: %s", out.Fatal)
+				break loop
+			}
+			if out.Test <= 0 || out.Test > len(problem.TestCases) {
+				continue
+			}
+
+			tr := batchedTestResult(out, problem)
+			tr.TimeMs = ev.at.Sub(last).Milliseconds()
+			last = ev.at
+			result.AddTestResult(tr)
+			processed++
+
+			if watch.stopOnFailure && !tr.Passed && processed < len(problem.TestCases) {
+				stoppedEarly = true
+				stop()
+				break loop
+			}
+			if timer != nil {
+				if !timer.Stop() {
+					select {
+					case <-timer.C:
+					default:
+					}
+				}
+				timer.Reset(watch.testTimeout)
+			}
+		case <-deadline:
+			if processed < len(problem.TestCases) {
+				timedOut = true
+				stop()
+				break loop
+			}
+		}
+	}
+
+	// Once the run has ended or been cancelled the pipes close, so this does not wait long.
+	select {
+	case <-stdoutDone:
+	case <-time.After(5 * time.Second):
+	}
+	rawStdout := stdoutBuf.String()
+	for i := len(result.Details) - processed; i < len(result.Details); i++ {
+		if i >= 0 {
+			result.Details[i].Stdout = rawStdout
+		}
+	}
+	return processed, timedOut, stoppedEarly, err
+}
+
+// batchedTestResult turns one wrapper result line into a test result.
+func batchedTestResult(out batchedTestExecOutput, problem models.Problem) models.TestResult {
+	tc := problem.TestCases[out.Test-1]
+	tr := models.TestResult{
+		Test:     out.Test,
+		Input:    tc.Input,
+		Expected: tc.Expected,
+		Output:   out.Output,
+	}
+	if out.Error != "" {
+		reason := models.SubmissionStatusRuntimeError
+		if strings.Contains(strings.ToLower(out.Error), "outofmemory") {
+			reason = models.SubmissionStatusMemoryLimitExceeded
+		}
+		markTestFailed(&tr, reason)
+		if out.Traceback != "" {
+			tr.Traceback = out.Traceback
+		}
+		return tr
+	}
+	tr.Passed = comparator.Compare(tc.Expected, out.Output, problem.CompareConfig)
+	tr.Ok = tr.Passed
+	if !tr.Passed {
+		tr.ErrorType = models.ErrorTypeWrongAnswer
+	}
+	return tr
 }
 
 func appendMissingBatchedResults(result *models.SubmissionResult, problem models.Problem, processed int, reason string) {

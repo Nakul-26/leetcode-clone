@@ -1,6 +1,6 @@
 # Judge Fix Plan
 
-**Created:** 2026-10-23 · **Last updated:** 2026-10-24 (R1-R9, T1-T3, T7, F1-F4, C1-C3, P1-P10 done)
+**Created:** 2026-10-23 · **Last updated:** 2026-10-24 (R1-R9, T1-T3, T7, F1-F4, F6, C1-C3, P1-P10, P12 done)
 
 The single list of everything found in the 2026-10-23 judge review, plus the open items already recorded in
 [`JUDGE_PERFORMANCE_REVIEW.md`](./JUDGE_PERFORMANCE_REVIEW.md) §5,
@@ -66,7 +66,7 @@ b")` and C++ `cout << "x
 | F3 | [known] Function-mode Java has no heap cap | Add `-Xmx` to `adapters/java.go` run commands | S | done | 2026-10-24 · worse than "no cap": the JVM defaulted to ~half the limit, so a 180 MB program failed with OutOfMemoryError. Now `-XX:MaxRAMPercentage=75` on Java and Kotlin, function and stdin. Verified live (180 MB Accepted, 400 MB MLE) |
 | F4 | Java stdin uses `-Xmx256m` while the default problem memory limit is 256 MB: heap + JVM overhead exceeds the cgroup, reported as MLE | Derive `-Xmx` from the problem limit (e.g. limit minus ~64 MB), or give JVM languages a memory allowance | S | done | 2026-10-24 · same flag (heap = 75% of the limit the judge sets). Java's own OutOfMemoryError exit is now reported as MLE by the executor (was Runtime Error). Measured under 256 MB: `-Xmx256m` was SIGKILLed at 230 MB. Verified live |
 | F5 | Time limits are wall-clock around `docker exec`: they include exec overhead, JVM start and CPU contention, so verdicts depend on server load | Measure CPU time (cgroup `cpu.stat` / `/usr/bin/time` in the runner) and judge on that, with wall-clock as a 2-3x safety cap; keep busy containers <= physical cores | L | todo | |
-| F6 | Batch mode (>= 20 tests) only has a whole-run timeout, so per-test TLE is not enforced; per-test times are ~0 ms. An infinite loop holds the container for (tests + 1) × the limit, and T1 cannot stop a batch early | Per-test timing and limit inside the batch wrappers, or stream per-test result lines and kill the run when one is late (this also gives T1 its time saving in batch mode) | M | todo | |
+| F6 | Batch mode (>= 20 tests) only has a whole-run timeout, so per-test TLE is not enforced; per-test times are ~0 ms. An infinite loop holds the container for (tests + 1) × the limit, and T1 cannot stop a batch early | Per-test timing and limit inside the batch wrappers, or stream per-test result lines and kill the run when one is late (this also gives T1 its time saving in batch mode) | M | done | 2026-10-24 · results are read as each test finishes; a watchdog stops the run when a test passes its limit (the first gets +2 s for process start), and a graded submission stops at its first failed test (T1 now saves time in batch mode too). Per-test times are real. Ungraded callers keep their result labels. Verified live: 25-test Python batch, infinite loop on test 4 with a 1 s limit finished in 1.5 s (was up to 26 s) |
 
 ## Phase 4 — Security hardening (before selling the API widely)
 
@@ -144,3 +144,4 @@ Order: P5, P4, P1+P2 (bugs, small) → P6 + P7 (the core fix) → P3 → P8 + P9
 | 2026-10-24 | Added Phase 6 (four run/submit modes and correct test cases: reference solution as the source of truth for expected output). CI fixed (npm advisories, Playwright on Ubuntu 26) in a37f804 |
 | 2026-10-24 | Done: Phase 6 P1-P10 (reference solution as the source of truth for expected output, stdin problems in the editor, Run fixes). P11 (cross-check with a second solution) left for later |
 | 2026-10-24 | Done: P12 (test-case generate/check on the public API, for platforms that keep their own reference solutions) |
+| 2026-10-24 | Done: F6 (per-test watchdog in batch mode). Browser walkthrough of Phase 6 fixed three stdin display issues (9668f51) |
