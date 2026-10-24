@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Plus, Trash2, Wand2, CheckCircle2, AlertTriangle, ClipboardPaste } from 'lucide-react';
 import api from '../api';
 import { buildReferenceDraft, formatOutput, sameAsOutput, parseBulkTests } from '../utils/problemForm';
@@ -14,6 +14,9 @@ import { buildReferenceDraft, formatOutput, sameAsOutput, parseBulkTests } from 
 const labelStyle = { display: 'block', fontSize: '0.8rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-muted)', marginBottom: '8px', fontWeight: '600' };
 const monoStyle = { fontSize: '0.85rem', fontFamily: "'JetBrains Mono', monospace", resize: 'vertical' };
 
+// A row nobody has filled in: an empty or "[]" input and no expected output.
+const isBlankRow = (tc) => ['', '[]'].includes(String(tc.inputs ?? '').trim()) && !String(tc.expected ?? '').trim();
+
 const TestCasesEditor = ({ formData, onChange, fieldError, fieldClassName }) => {
   const stdin = formData.problemType === 'stdin';
   const testCases = formData.testCases || [];
@@ -23,6 +26,18 @@ const TestCasesEditor = ({ formData, onChange, fieldError, fieldClassName }) => 
   const [generateError, setGenerateError] = useState('');
   const [showBulk, setShowBulk] = useState(false);
   const [bulkText, setBulkText] = useState('');
+
+  // Switching between function and stdin: rows nobody has filled in are swapped for an empty row
+  // of the new kind, so a function problem's "[]" starter does not become a stdin input.
+  const lastType = useRef(formData.problemType);
+  useEffect(() => {
+    if (lastType.current === formData.problemType) return;
+    lastType.current = formData.problemType;
+    setChecks({});
+    if (testCases.every(isBlankRow)) {
+      onChange([{ inputs: stdin ? '' : '[]', expected: '', isSample: true }]);
+    }
+  }, [formData.problemType]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const setRows = (rows, keepChecks = false) => {
     if (!keepChecks) setChecks({});
@@ -93,7 +108,7 @@ const TestCasesEditor = ({ formData, onChange, fieldError, fieldClassName }) => 
     const rows = parseBulkTests(formData.problemType, bulkText);
     if (rows.length === 0) return;
     // Replace a single untouched starter row instead of keeping it.
-    const untouched = testCases.length === 1 && String(testCases[0].inputs).trim() === (stdin ? '' : '[]') && !String(testCases[0].expected).trim();
+    const untouched = testCases.length === 1 && isBlankRow(testCases[0]);
     const base = untouched ? [] : testCases;
     if (base.every((tc) => !tc.isSample) && rows.length > 0) rows[0].isSample = true;
     setRows([...base, ...rows], true);

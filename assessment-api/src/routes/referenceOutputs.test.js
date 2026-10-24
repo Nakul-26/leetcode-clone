@@ -25,7 +25,7 @@ function fakeJudge(_url, init = {}) {
     if (r.error) return { test: i + 1, passed: false, errorType: 'runtime', error: 'Runtime Error', traceback: 'ZeroDivisionError' };
     const hasExpected = t.expected !== null && t.expected !== undefined;
     const passed = hasExpected ? JSON.stringify(r.output) === JSON.stringify(t.expected) : stdin;
-    return { test: i + 1, passed, output: r.output, expected: t.expected, ...(passed ? {} : { errorType: 'wrong_answer' }) };
+    return { test: i + 1, passed, input: t.inputs, output: r.output, expected: t.expected, ...(passed ? {} : { errorType: 'wrong_answer' }) };
   });
   const failed = details.some((d) => !d.passed);
   return { ok: true, json: async () => ({ status: failed ? 'Wrong Answer' : 'Accepted', details, passedCount: details.filter((d) => d.passed).length, totalCount: details.length }) };
@@ -170,7 +170,8 @@ describe('reference solution as the source of truth (Phase 6)', () => {
 
     it('accepts a stdin test as bare text', async () => {
       const res = await run({ code: 'double', customTests: ['5\n'] });
-      expect(res.body.details[0]).toMatchObject({ passed: true, expected: '10\n' });
+      // Shown as the text the program read, not a one-item array.
+      expect(res.body.details[0]).toMatchObject({ passed: true, expected: '10\n', inputs: '5\n' });
     });
 
     it('refuses more than 8 tests (P2)', async () => {

@@ -1061,11 +1061,18 @@ const AssessmentWorkspace = () => {
               
               <div style={{ background: 'var(--surface)', padding: '20px', borderRadius: 'var(--radius-lg)', border: '1px solid var(--border)' }}>
                 <h4 style={{ fontSize: '0.85rem', color: 'var(--text-main)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '1rem' }}>Specs</h4>
+                {isStdinProblem(currentProblem) ? (
+                <div style={{ display: 'grid', gap: '10px', fontSize: '0.9rem' }}>
+                  <p style={{ whiteSpace: 'pre-wrap' }}><strong>Input:</strong> {currentProblem.inputFormat || 'Read the input from standard input.'}</p>
+                  <p style={{ whiteSpace: 'pre-wrap' }}><strong>Output:</strong> {currentProblem.outputFormat || 'Print the answer to standard output.'}</p>
+                </div>
+                ) : (
                 <div style={{ display: 'grid', gap: '10px', fontSize: '0.9rem' }}>
                   <p><strong>Function:</strong> <code style={{ color: 'var(--primary)', background: 'transparent' }}>{currentProblem.functionName}</code></p>
                   <p><strong>Return:</strong> <code style={{ color: 'var(--success)', background: 'transparent' }}>{currentProblem.returnType}</code></p>
                   <p><strong>Params:</strong> {(currentProblem.parameters || []).map(p => `${p.name} (${p.type})`).join(', ')}</p>
                 </div>
+                )}
               </div>
             </div>
 

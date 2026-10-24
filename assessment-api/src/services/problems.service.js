@@ -609,6 +609,8 @@ export async function runProblem(id, payload) {
         traceback: detail.traceback ?? detail.Traceback,
         timeMs: detail.timeMs ?? detail.TimeMs
       };
+      // A stdin test's input is one block of text; show it as that, not as a one-item array.
+      if (problemType === "stdin" && Array.isArray(d.inputs) && d.inputs.length === 1) d.inputs = d.inputs[0];
       // No expected output: the run is shown, but there is nothing to judge it against. Only a
       // real failure (crash, time or memory limit) keeps its verdict.
       if (noExpected.has(d.test) && (d.errorType === "wrong_answer" || d.passed)) {

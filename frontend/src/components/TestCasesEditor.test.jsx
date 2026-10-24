@@ -35,6 +35,7 @@ function Harness({ initial }) {
         fieldClassName={() => ''}
       />
       <pre data-testid="state">{JSON.stringify(formData.testCases)}</pre>
+      <button type="button" onClick={() => setFormData((prev) => ({ ...prev, problemType: prev.problemType === 'stdin' ? 'function' : 'stdin' }))}>switch type</button>
     </>
   );
 }
@@ -89,6 +90,15 @@ describe('TestCasesEditor (JUDGE_FIX_PLAN P6, P10)', () => {
     fireEvent.click(screen.getByTestId('generate-outputs'));
     await waitFor(() => expect(screen.getByText(/does not compile/)).toBeDefined());
     expect(screen.getByText(/SyntaxError/)).toBeDefined();
+  });
+
+  it('switching to stdin replaces an untouched function starter row, but keeps rows with content', () => {
+    render(<Harness initial={{ ...stdinForm([{ inputs: '[]', expected: '', isSample: true }]), problemType: 'function' }} />);
+    fireEvent.click(screen.getByText('switch type'));
+    expect(state()).toEqual([{ inputs: '', expected: '', isSample: true }]);
+    fireEvent.change(screen.getByPlaceholderText(/3/), { target: { value: '5' } });
+    fireEvent.click(screen.getByText('switch type'));
+    expect(state()[0].inputs).toBe('5');
   });
 
   it('adds many pasted inputs at once, replacing the empty starter row', () => {

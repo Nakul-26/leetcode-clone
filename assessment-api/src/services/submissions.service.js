@@ -317,6 +317,18 @@ export function sanitizeSubmissionForStudent(submission, problem) {
     };
   }
 
+  // A stdin test's input is one block of text; show it as that, not as a one-item array.
+  if (problem.problemType === "stdin") {
+    const asText = (details) => details.map((d) => (Array.isArray(d.inputs) && d.inputs.length === 1 ? { ...d, inputs: d.inputs[0] } : d));
+    if (parsedOutput && Array.isArray(parsedOutput.details)) {
+      parsedOutput.details = asText(parsedOutput.details);
+      normalized.output = JSON.stringify(parsedOutput);
+    }
+    if (normalized.testResult && Array.isArray(normalized.testResult.details)) {
+      normalized.testResult = { ...normalized.testResult, details: asText(normalized.testResult.details) };
+    }
+  }
+
   return normalized;
 }
 

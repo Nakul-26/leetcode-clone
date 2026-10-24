@@ -247,6 +247,21 @@ const ProblemPage = ({ user }) => {
                 {problem.description}
               </div>
 
+              {isStdinProblem(problem) ? (
+              <div style={{ background: 'var(--surface)', padding: '20px', borderRadius: 'var(--radius-lg)', border: '1px solid var(--border)' }}>
+                <h4 style={{ fontSize: '0.85rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-muted)', marginBottom: '1rem' }}>Input / Output</h4>
+                <div style={{ display: 'grid', gap: '12px', fontSize: '0.9rem' }}>
+                  <div>
+                    <span className="text-muted">Input</span>
+                    <div style={{ whiteSpace: 'pre-wrap', marginTop: '4px' }}>{problem.inputFormat || 'Read the input from standard input.'}</div>
+                  </div>
+                  <div>
+                    <span className="text-muted">Output</span>
+                    <div style={{ whiteSpace: 'pre-wrap', marginTop: '4px' }}>{problem.outputFormat || 'Print the answer to standard output.'}</div>
+                  </div>
+                </div>
+              </div>
+              ) : (
               <div style={{ background: 'var(--surface)', padding: '20px', borderRadius: 'var(--radius-lg)', border: '1px solid var(--border)' }}>
                 <h4 style={{ fontSize: '0.85rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-muted)', marginBottom: '1rem' }}>Problem Specs</h4>
                 <div style={{ display: 'grid', gap: '12px', fontSize: '0.9rem' }}>
@@ -270,6 +285,7 @@ const ProblemPage = ({ user }) => {
                   </div>
                 </div>
               </div>
+              )}
 
               {stats && (
                 <div className="mt-8 flex-between" style={{ padding: '16px 0', borderTop: '1px solid var(--border)' }}>
