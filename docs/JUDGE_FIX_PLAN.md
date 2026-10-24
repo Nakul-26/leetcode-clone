@@ -1,6 +1,6 @@
 # Judge Fix Plan
 
-**Created:** 2026-10-23 · **Last updated:** 2026-10-24 (R1-R9, T1-T3, T7, F1-F4, C1-C3 done; Phase 6 planned)
+**Created:** 2026-10-23 · **Last updated:** 2026-10-24 (R1-R9, T1-T3, T7, F1-F4, C1-C3, P1-P10 done)
 
 The single list of everything found in the 2026-10-23 judge review, plus the open items already recorded in
 [`JUDGE_PERFORMANCE_REVIEW.md`](./JUDGE_PERFORMANCE_REVIEW.md) §5,
@@ -102,18 +102,19 @@ only kept if the reference solution agrees, so a typo can no longer make a corre
 
 | # | Problem | Fix | Size | Status | Date / commit |
 |---|---|---|---|---|---|
-| P1 | **Run in the exam workspace compares a student's own test against the wrong expected output**: `buildCustomTests.js` takes `expected` from the sample *at the same position*, so editing sample 1's input and pressing Run checks against sample 1's original answer: correct code shows Wrong Answer | Frontend sends inputs only; the API supplies expected (exact sample match, else the reference solution, P3) | S | todo | |
-| P2 | No cap on student tests per Run | API rejects more than 8 custom tests | S | todo | |
-| P3 | A student's own test has no expected output unless it equals a sample exactly | API runs the reference solution on custom inputs to get expected (cached in Redis per problem + input); without a reference solution, show output only, no verdict | M | todo | |
-| P4 | Run's test selection disagrees between API and judge: the judge picks samples by `isSample` only, the API also treats "not hidden" as sample. A problem marked with `isHidden:false` and no `isSample` runs **every test, hidden included**, on each Run | The API always sends the exact sample list to `/run`; the judge's fallback is no longer used | S | todo | |
-| P5 | Problem validation calls a hardcoded `http://judge-service-go:8081` instead of `JUDGE_SERVICE_URL` (prod: `go-judge-engine`); on Dokploy that name can resolve to another project's container | Use `env.JUDGE_SERVICE_URL` | S | todo | |
-| P6 | Authors type expected outputs by hand (or paste from Excel); a wrong one silently fails correct students | "Generate expected outputs" endpoint + button: runs the reference solution on all inputs and fills the column. Where the author typed a different value, both are shown and the author chooses | M | todo | |
-| P7 | Stdin problems are saved with no check at all (function problems must pass the reference solution) | Same save gate for stdin: every expected output must equal the reference solution's output; the error lists each test with expected vs reference output | M | todo | |
-| P8 | The editor cannot create stdin problems | Add the stdin type to Add/Edit Problem: plain-text input/output per test, reference solution required | M | todo | |
-| P9 | Stdin custom tests in Run are typed as JSON (`["5
-"]`) | Plain text boxes for stdin problems | S | todo | |
-| P10 | Bulk test entry is manual | Paste many inputs at once (one test per block, or CSV/Excel with an `input` column; `expected` optional), then generate outputs (P6) | M | todo | |
+| P1 | **Run in the exam workspace compares a student's own test against the wrong expected output**: `buildCustomTests.js` takes `expected` from the sample *at the same position*, so editing sample 1's input and pressing Run checks against sample 1's original answer: correct code shows Wrong Answer | Frontend sends inputs only; the API supplies expected (exact sample match, else the reference solution, P3) | S | done | 2026-10-24 · `860238a`, `06f400f` · the frontend sends inputs only and the API ignores any expected value from the browser. Verified live (a wrong answer stays wrong even when the browser sends a matching expected) |
+| P2 | No cap on student tests per Run | API rejects more than 8 custom tests | S | done | 2026-10-24 · `860238a`, `06f400f` · API returns 400 above 8; Add Case is disabled at 8 |
+| P3 | A student's own test has no expected output unless it equals a sample exactly | API runs the reference solution on custom inputs to get expected (cached in Redis per problem + input); without a reference solution, show output only, no verdict | M | done | 2026-10-24 · `860238a` · cached in Redis per problem version and input for 24 h. Problems saved before this have no stored reference solution (see the note below) until re-saved |
+| P4 | Run's test selection disagrees between API and judge: the judge picks samples by `isSample` only, the API also treats "not hidden" as sample. A problem marked with `isHidden:false` and no `isSample` runs **every test, hidden included**, on each Run | The API always sends the exact sample list to `/run`; the judge's fallback is no longer used | S | done | 2026-10-24 · `860238a` · verified live (a plain Run sent only the sample) |
+| P5 | Problem validation calls a hardcoded `http://judge-service-go:8081` instead of `JUDGE_SERVICE_URL` (prod: `go-judge-engine`); on Dokploy that name can resolve to another project's container | Use `env.JUDGE_SERVICE_URL` | S | done | 2026-10-24 · `860238a` · also fixed: errors were read from `result.testResults`, which the judge never returns, so authors never saw which test failed |
+| P6 | Authors type expected outputs by hand (or paste from Excel); a wrong one silently fails correct students | "Generate expected outputs" endpoint + button: runs the reference solution on all inputs and fills the column. Where the author typed a different value, both are shown and the author chooses | M | done | 2026-10-24 · `860238a`, `b2ab17b` · `POST /api/problems/reference-outputs` and a Generate button: empty fields are filled, disagreeing ones flagged with "Use this". Verified live for stdin and function problems |
+| P7 | Stdin problems are saved with no check at all (function problems must pass the reference solution) | Same save gate for stdin: every expected output must equal the reference solution's output; the error lists each test with expected vs reference output | M | done | 2026-10-24 · `860238a` · verified live: a typo was refused with "Test case 3 (hidden): expected ... but the reference solution gives ...", the corrected problem saved |
+| P8 | The editor cannot create stdin problems | Add the stdin type to Add/Edit Problem: plain-text input/output per test, reference solution required | M | done | 2026-10-24 · `860238a`, `b2ab17b` · API schema and validator, and the editor type "Coding: full program (stdin / stdout)" with input/output format fields; whole-program starter code in every language (`06f400f`) |
+| P9 | Stdin custom tests in Run are typed as JSON (a JSON array holding the input text with escaped newlines) | Plain text boxes for stdin problems | S | done | 2026-10-24 · `06f400f` |
+| P10 | Bulk test entry is manual | Paste many inputs at once (one test per block, or CSV/Excel with an `input` column; `expected` optional), then generate outputs (P6) | M | done | 2026-10-24 · `b2ab17b` · "Paste many inputs": one JSON array per line, or stdin blocks separated by a `---` line; two columns pasted from a spreadsheet (input, expected) also work. No .xlsx file upload yet |
 | P11 | One wrong reference solution still makes every expected output wrong | Optional second solution (e.g. brute force) run on the same inputs; any disagreement blocks saving | M | todo | later |
+
+**Note on existing problems:** until this change the reference solution was never stored (Mongoose dropped the field on save), so every problem saved before it has none. Run still works for them (the samples, and own tests whose input matches a sample), but a student's own new test only shows its output, without a verdict, until an author opens the problem and saves it again with its reference solution.
 
 Order: P5, P4, P1+P2 (bugs, small) → P6 + P7 (the core fix) → P3 → P8 + P9 + P10 (editor and UI) → P11.
 
@@ -140,3 +141,4 @@ Order: P5, P4, P1+P2 (bugs, small) → P6 + P7 (the core fix) → P3 → P8 + P9
 | 2026-10-24 | Done: R8 (stuck-submission reaper). Phase 1 complete |
 | 2026-10-24 | Done: T1 (stop at first failure for students' graded submissions). F6 now also covers stopping batch mode early |
 | 2026-10-24 | Added Phase 6 (four run/submit modes and correct test cases: reference solution as the source of truth for expected output). CI fixed (npm advisories, Playwright on Ubuntu 26) in a37f804 |
+| 2026-10-24 | Done: Phase 6 P1-P10 (reference solution as the source of truth for expected output, stdin problems in the editor, Run fixes). P11 (cross-check with a second solution) left for later |
