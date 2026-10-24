@@ -39,7 +39,7 @@ function buildJudgeTests(problem) {
   }));
 }
 
-function buildJudgeMessageBody({ submissionId, problem, language, code, requestId }) {
+export function buildJudgeMessageBody({ submissionId, problem, language, code, requestId }) {
   const problemType = problem.problemType || "function";
   const body = {
     schemaVersion: "v2",

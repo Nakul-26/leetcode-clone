@@ -1,6 +1,6 @@
 # Judge Fix Plan
 
-**Created:** 2026-10-23 · **Last updated:** 2026-10-24 (R1-R7, R9, T2, T3, T7, F1-F4, C1-C3 done)
+**Created:** 2026-10-23 · **Last updated:** 2026-10-24 (R1-R9, T2, T3, T7, F1-F4, C1-C3 done)
 
 The single list of everything found in the 2026-10-23 judge review, plus the open items already recorded in
 [`JUDGE_PERFORMANCE_REVIEW.md`](./JUDGE_PERFORMANCE_REVIEW.md) §5,
@@ -25,8 +25,19 @@ Line numbers are as of commit `8a24162` and will drift.
 | R5 | A missing/deleted problem or invalid problem id is requeued immediately (`Nack(false,true)`): endless hot loop | `ErrNoDocuments` and a bad hex id are permanent: mark failed + drop. Only real DB errors are retried, and through the TTL retry queue, not an instant requeue | S | done | 2026-10-23 · `a673d13` · `errProblemNotFound` → failed; DB errors via `retryLater`; verified live (one log line, no loop) |
 | R6 | Redelivered submissions write a second usage event (billing) and bump problem counters again | Upsert the usage event keyed on `submissionId` for queue submissions; only `$inc` problem counters when the submission was not already finished | S | done | 2026-10-23 · `a673d13` · `FindOneAndUpdate` returns the prior row; existing testResult = repeat, no usage event or counter bump; rejudge still counts; verified live |
 | R7 | API publishes without publisher confirms; `sendToQueue` returning false is ignored | Use a confirm channel and await the confirm; on failure take the existing 503 + mark-Error + refund path | S | done | 2026-10-24 · confirm channel, publish awaits the broker ack (10 s timeout). Also: the shared channel now reconnects after a broker restart or a channel error (before, the API either crashed on the unhandled `error` event or returned 503 until restarted); `/api/health` triggers a reconnect; admin system-stats reads queue depth on a throwaway channel, not the shared one. Verified live (broker stopped → 503, broker back → same process publishes again) |
-| R8 | No recovery for rows stuck Pending (lost message, crash). Also the rejudge loops (`rejudgeProblemSubmissions`, `rejudgeAssessmentSubmissions`) set rows Pending before publishing, so a publish failure mid-loop leaves the rest Pending | Periodic reaper in the API: Pending older than N minutes is re-published once, then marked Error | M | todo | |
+| R8 | No recovery for rows stuck Pending (lost message, crash). Also the rejudge loops (`rejudgeProblemSubmissions`, `rejudgeAssessmentSubmissions`) set rows Pending before publishing, so a publish failure mid-loop leaves the rest Pending | Periodic reaper in the API: Pending older than N minutes is re-published once, then marked Error | M | done | 2026-10-24 · `stuckSubmissions.service.js`, every 60 s: Pending and unchanged for 15 min → re-queued once (full message incl. collegeId/apiClientId), still Pending 15 min later → Error "Please submit it again". Not while the bulk queues hold > 100 messages (a long wait is normal then). Ad-hoc rows and rows older than 24 h are marked Error, never re-judged (no late score changes). Safe with several API instances (conditional updates). Covers the rejudge loops. 7 unit tests; verified live (lost row re-queued and judged Success). Settings: `STUCK_SUBMISSION_*`. **Before deploying, see the note below** |
 | R9 | DB writes in `processAndStoreResults` use `context.Background()` with no timeout: a Mongo stall blocks a worker forever | Bounded context (e.g. 15 s) for the result writes | S | done | 2026-10-23 · `a673d13` · 15 s bound on result writes and `markSubmissionExecutionFailed` |
+
+**R8 deploy note.** On its first pass in production the reaper also handles every old Pending row.
+Rows from the last 24 h are re-judged; older ones become Error. To see how many that is, run these
+read-only counts on production first:
+
+```js
+db.submissions.countDocuments({ status: "Pending", updatedAt: { $lt: new Date(Date.now() - 15*60e3), $gte: new Date(Date.now() - 864e5) } }) // will be re-judged
+db.submissions.countDocuments({ status: "Pending", updatedAt: { $lt: new Date(Date.now() - 864e5) } })                                       // will become Error
+```
+
+To deploy without it, set `STUCK_SUBMISSION_REAPER_ENABLED=false`.
 
 ## Phase 2 — Throughput (biggest capacity wins)
 
@@ -92,3 +103,4 @@ b")` and C++ `cout << "x
 | 2026-10-24 | Done: F2, F3, F4, T3. JVM heap now follows the problem limit; C/C++ function mode at -O2; student crashes no longer flagged as wrapper errors |
 | 2026-10-24 | Done: T2. Also fixed the C# image: SDK 8.0.426 / runtime 8.0.32 (pulled on rebuild) put named-mutex files under the read-only home dir, so every C# build failed; the judge user's home is now `/tmp`. **Prod will hit this on its next C# image rebuild unless this ships with it** |
 | 2026-10-24 | Done: T7 (PCH). Revised F2: function-mode C++ uses -O1 after measuring -O2 cost +2.6 s per compile. Added T11 (function-mode C++ compile cost) |
+| 2026-10-24 | Done: R8 (stuck-submission reaper). Phase 1 complete |

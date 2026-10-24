@@ -230,6 +230,11 @@ services:
       # Default per-client limits for API keys that have none of their own (0 = unlimited).
       API_CLIENT_DEFAULT_RATE_PER_MIN: ${API_CLIENT_DEFAULT_RATE_PER_MIN:-}
       API_CLIENT_DEFAULT_MONTHLY_QUOTA: ${API_CLIENT_DEFAULT_MONTHLY_QUOTA:-}
+      # Stuck-submission reaper: a row still Pending after this many minutes is re-queued once,
+      # then marked Error (defaults: on, 15 min, checked every 60 s). "false" turns it off.
+      STUCK_SUBMISSION_REAPER_ENABLED: ${STUCK_SUBMISSION_REAPER_ENABLED:-}
+      STUCK_SUBMISSION_AFTER_MINUTES: ${STUCK_SUBMISSION_AFTER_MINUTES:-}
+      STUCK_SUBMISSION_CHECK_SECONDS: ${STUCK_SUBMISSION_CHECK_SECONDS:-}
       # Public URL of the web frontend, used to build links in emails and interview invites.
       # Unset, it falls back to a localhost dev URL, so set it (e.g. https://assess.fortifyhub.net).
       APP_BASE_URL: ${APP_BASE_URL:-}

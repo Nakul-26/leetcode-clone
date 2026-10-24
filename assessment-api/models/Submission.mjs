@@ -64,6 +64,11 @@ const SubmissionSchema = new Schema({
     testResult: {
         type: Object // To store the structured result from the judge service
     },
+    // How many times the stuck-submission reaper re-queued this row (JUDGE_FIX_PLAN R8).
+    // It re-queues once; a row still stuck after that is marked Error.
+    stuckRequeues: {
+        type: Number
+    },
     tests: {
         type: Array
     },

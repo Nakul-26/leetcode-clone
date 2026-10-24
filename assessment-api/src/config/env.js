@@ -40,6 +40,13 @@ export const env = {
   // Counted in test cases, not requests: a batch of six is six.
   API_CLIENT_DEFAULT_RATE_PER_MIN: Number(process.env.API_CLIENT_DEFAULT_RATE_PER_MIN) || 0,
   API_CLIENT_DEFAULT_MONTHLY_QUOTA: Number(process.env.API_CLIENT_DEFAULT_MONTHLY_QUOTA) || 0,
+  // Stuck-submission reaper (JUDGE_FIX_PLAN R8, stuckSubmissions.service.js). A row still
+  // Pending this long after its last change is re-queued once, then marked Error. 15 min is
+  // past the judge's own retry window (~7 min) plus the longest run. Set
+  // STUCK_SUBMISSION_REAPER_ENABLED=false to turn it off.
+  STUCK_SUBMISSION_REAPER_ENABLED: process.env.STUCK_SUBMISSION_REAPER_ENABLED !== "false",
+  STUCK_SUBMISSION_AFTER_MINUTES: Number(process.env.STUCK_SUBMISSION_AFTER_MINUTES) || 15,
+  STUCK_SUBMISSION_CHECK_SECONDS: Number(process.env.STUCK_SUBMISSION_CHECK_SECONDS) || 60,
   // Phase 2 billing (Stripe). Unlike the secrets above, these have no production
   // fail-fast guard on purpose: billing isn't live yet, so a missing key must not crash
   // the whole API. billing.service.js/stripe.js soft-fail (503) at call time instead.
