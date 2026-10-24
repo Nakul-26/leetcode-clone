@@ -147,10 +147,12 @@ func TestCompiledStdinLanguagesOptimise(t *testing.T) {
 			}
 		}
 	}
-	for _, id := range []string{"c", "cpp"} {
+	// Function mode: C at -O2; C++ at -O1 because -O2 makes the json wrapper slow to build
+	// (see adapters/cpp.go).
+	for id, flag := range map[string]string{"c": "-O2", "cpp": "-O1"} {
 		fn, _ := adapters.GetAdapter(id)
-		if !containsArg(fn.(adapters.CompilingLanguageAdapter).CompileCommand(), "-O2") {
-			t.Errorf("%s function-mode compile is not -O2", id)
+		if !containsArg(fn.(adapters.CompilingLanguageAdapter).CompileCommand(), flag) {
+			t.Errorf("%s function-mode compile is not %s", id, flag)
 		}
 	}
 }

@@ -1,6 +1,6 @@
 # Judge Fix Plan
 
-**Created:** 2026-10-23 · **Last updated:** 2026-10-24 (R1-R7, R9, T2, T3, F1-F4, C1-C3 done)
+**Created:** 2026-10-23 · **Last updated:** 2026-10-24 (R1-R7, R9, T2, T3, T7, F1-F4, C1-C3 done)
 
 The single list of everything found in the 2026-10-23 judge review, plus the open items already recorded in
 [`JUDGE_PERFORMANCE_REVIEW.md`](./JUDGE_PERFORMANCE_REVIEW.md) §5,
@@ -38,9 +38,10 @@ Line numbers are as of commit `8a24162` and will drift.
 | T4 | Bulk workers are shared across languages and each blocks up to 30 s waiting for a container: a burst in one language starves the others | Per-language admission: a worker only takes on a message when that language has capacity, otherwise send it straight to the retry queue (or per-language queues) | M | todo | |
 | T5 | ~6 Docker API calls per test case (exec create/start/inspect + a cleanup exec after every test) | Run the cleanup once per submission (the reset already does it); later, one exec for all tests via an in-container runner [known, perf review §5] | M | todo | |
 | T6 | `wait=true` callers poll Mongo every 100 ms each | Redis pub/sub (or a short-lived key) notifying completion; poll as fallback only | M | todo | |
-| T7 | [known] C/C++ precompiled `bits/stdc++.h` not built | Build the PCH in `judge-cpp-env` with the exact submission flags; verify it is used (`-H`/`-Winvalid-pch`) | S | todo | |
+| T7 | [known] C/C++ precompiled `bits/stdc++.h` not built | Build the PCH in `judge-cpp-env` with the exact submission flags; verify it is used (`-H`/`-Winvalid-pch`) | S | done | 2026-10-24 · built with the stdin flags (-O2); the image build fails if a test compile does not use it. Stdin C++ compile 2.8 s → 0.6-0.8 s (one core). No help for function mode: its wrapper does not start with `bits/stdc++.h`, and its cost is the json code (see T11) |
 | T8 | [known] Java: no startup tuning | `-XX:TieredStopAtLevel=1 -XX:+UseSerialGC -Xshare:auto` + AppCDS archive in `judge-java-env`; measure before/after | M | todo | |
 | T9 | [known] Kotlin and C# compile slowly (~10 s) | Warm compiler daemon / `csc` direct. Note: C# build servers can no longer linger between submissions (T2 kills them, as it must), so any warm compiler has to live outside the judge user | L | todo | |
+| T11 | Function-mode C++ still compiles in ~4 s (≈7 s end to end), nearly all of it the wrapper's nlohmann::json code, rebuilt for every submission | Split the wrapper: json conversion in one translation unit (cacheable per problem signature, or a lighter parser) and the student's code in another, compiled at -O2 with the PCH | M | todo | |
 | T10 | The exam portal's legacy synchronous path compiles once per test case | Issue it an API key and move it to the batch endpoint (owner action, see `FRIEND_PORTAL_CHANGES.md`) | S (code) | deferred (owner decision 2026-10-24: later) | |
 
 ## Phase 3 — Fairness and correctness
@@ -50,7 +51,7 @@ Line numbers are as of commit `8a24162` and will drift.
 | F1 | [known] Stored-problem code is "unescaped": `print("a\nb")` becomes a SyntaxError, `cout << "x\n"` does not compile | Run the two read-only queries in `FRIEND_PORTAL_CHANGES.md` §7 on production; if the first is ~0, remove `UnescapeCode` from the adapters and stdin runner | S | done | 2026-10-24 · prod query returned 0; `UnescapeCode` deleted from all six adapters and the stdin runner. Verified live (Python `print("a
 b")` and C++ `cout << "x
 "` both Accepted) |
-| F2 | [known] Function-mode C/C++ compile at `-O0` while stdin mode uses `-O2` | `-O2` in `cpp.go` / `c.go` (same flags as the PCH, T7) | S | done | 2026-10-24 · also `languages.go` (legacy `/run`). Verified live |
+| F2 | [known] Function-mode C/C++ compile at `-O0` while stdin mode uses `-O2` | `-O2` in `cpp.go` / `c.go` (same flags as the PCH, T7) | S | done | 2026-10-24 · C at -O2 (compile 0.14 → 0.42 s). **C++ function mode at -O1, not -O2**: measured compile 4.0 s (-O0) / 4.3 s (-O1) / 6.6 s (-O2) because of the json wrapper, while an STL-heavy solution ran 627 / 212 / 284 ms. -O1 gets the speed for 0.3 s. Also `languages.go` (legacy `/run`). Verified live |
 | F3 | [known] Function-mode Java has no heap cap | Add `-Xmx` to `adapters/java.go` run commands | S | done | 2026-10-24 · worse than "no cap": the JVM defaulted to ~half the limit, so a 180 MB program failed with OutOfMemoryError. Now `-XX:MaxRAMPercentage=75` on Java and Kotlin, function and stdin. Verified live (180 MB Accepted, 400 MB MLE) |
 | F4 | Java stdin uses `-Xmx256m` while the default problem memory limit is 256 MB: heap + JVM overhead exceeds the cgroup, reported as MLE | Derive `-Xmx` from the problem limit (e.g. limit minus ~64 MB), or give JVM languages a memory allowance | S | done | 2026-10-24 · same flag (heap = 75% of the limit the judge sets). Java's own OutOfMemoryError exit is now reported as MLE by the executor (was Runtime Error). Measured under 256 MB: `-Xmx256m` was SIGKILLed at 230 MB. Verified live |
 | F5 | Time limits are wall-clock around `docker exec`: they include exec overhead, JVM start and CPU contention, so verdicts depend on server load | Measure CPU time (cgroup `cpu.stat` / `/usr/bin/time` in the runner) and judge on that, with wall-clock as a 2-3x safety cap; keep busy containers <= physical cores | L | todo | |
@@ -90,3 +91,4 @@ b")` and C++ `cout << "x
 | 2026-10-24 | Done: F1 (owner ran the prod query: 0 pre-escaped submissions) and R7 (confirmed publish + API reconnect). T10 deferred by the owner. API suite 241/241; judge tests pass except the Windows symlink pair |
 | 2026-10-24 | Done: F2, F3, F4, T3. JVM heap now follows the problem limit; C/C++ function mode at -O2; student crashes no longer flagged as wrapper errors |
 | 2026-10-24 | Done: T2. Also fixed the C# image: SDK 8.0.426 / runtime 8.0.32 (pulled on rebuild) put named-mutex files under the read-only home dir, so every C# build failed; the judge user's home is now `/tmp`. **Prod will hit this on its next C# image rebuild unless this ships with it** |
+| 2026-10-24 | Done: T7 (PCH). Revised F2: function-mode C++ uses -O1 after measuring -O2 cost +2.6 s per compile. Added T11 (function-mode C++ compile cost) |
