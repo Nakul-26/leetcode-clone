@@ -1,6 +1,6 @@
 // Uses Node's built-in global fetch (Node 18+) — same convention as
 // problems.service.js / preview.service.js / admin.routes.js. The "node-fetch"
-// package used by judge.service.js is not a listed dependency; don't repeat that.
+// package is not a listed dependency; don't import it.
 import { env } from "../config/env.js";
 
 // Public-API numeric language IDs -> judge-service-go's internal language keys

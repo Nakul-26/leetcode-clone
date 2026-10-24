@@ -202,6 +202,31 @@ var bulkContainerReserve = 1
 
 var MaxExecutionsPerContainer int32 = 500
 
+// consumersHealthy is true while the judge is consuming from RabbitMQ. /health reports it.
+var consumersHealthy atomic.Bool
+
+// shuttingDown is set once a shutdown signal arrives. Cancelling a consumer still hands its
+// workers every message already prefetched for it (up to the QoS prefetch count), so without
+// this a shutdown would keep judging that whole backlog and outlast the stop grace period.
+var shuttingDown atomic.Bool
+
+// returnIfShuttingDown puts a message that has not been started back on its queue during
+// shutdown, for another judge (or this one, restarted) to take. It reports whether it did.
+func returnIfShuttingDown(d amqp.Delivery) bool {
+	if !shuttingDown.Load() {
+		return false
+	}
+	d.Nack(false, true)
+	return true
+}
+
+// Consumer tags, named so that shutdown can cancel each consumer: Cancel matches by tag, and
+// cancelling "" (what an auto-generated tag left us with) matches nothing.
+const (
+	bulkConsumerTag        = "judge-bulk"
+	interactiveConsumerTag = "judge-interactive"
+)
+
 func failOnError(err error, msg string) {
 	if err != nil {
 		slog.Error(msg, "error", err)
@@ -296,15 +321,23 @@ func validateAndDecodeSubmission(d amqp.Delivery) (models.SubmissionMessage, err
 	return msg, nil
 }
 
-// fetchProblemData retrieves the problem details from MongoDB.
+// errProblemNotFound marks a fetchProblemData failure that retrying cannot fix: the id is
+// malformed or no such problem exists (for example it was deleted after the submission).
+var errProblemNotFound = errors.New("problem not found")
+
+// fetchProblemData retrieves the problem details from MongoDB. A failure wrapping
+// errProblemNotFound is permanent; any other error is a database problem worth retrying.
 func fetchProblemData(ctx context.Context, problemsCollection *mongo.Collection, problemID string) (models.Problem, error) {
 	var problem models.Problem
 	objID, err := primitive.ObjectIDFromHex(problemID)
 	if err != nil {
-		return problem, fmt.Errorf("invalid ProblemID: %w", err)
+		return problem, fmt.Errorf("%w: invalid ProblemID %q: %v", errProblemNotFound, problemID, err)
 	}
 
 	err = problemsCollection.FindOne(ctx, bson.M{"_id": objID}).Decode(&problem)
+	if errors.Is(err, mongo.ErrNoDocuments) {
+		return problem, fmt.Errorf("%w: %s", errProblemNotFound, problemID)
+	}
 	if err != nil {
 		return problem, fmt.Errorf("error fetching problem %s: %w", problemID, err)
 	}
@@ -896,7 +929,14 @@ func finishWithContainer(containerPool *pool.ContainerPool, ex *executor.Executo
 	containerPool.Release(container)
 }
 
+// storeResultsTimeout bounds all of processAndStoreResults' database and cache writes, so a
+// stalled Mongo or Redis cannot hold a worker (and the message it has not yet acked) forever.
+const storeResultsTimeout = 15 * time.Second
+
 func processAndStoreResults(ctx context.Context, executionPath string, stdout, stderr string, execErr error, submissionMsg models.SubmissionMessage, submissionsCollection *mongo.Collection, problemsCollection *mongo.Collection, usageEventsCollection *mongo.Collection, redisClient *redis.Client) {
+	ctx, cancel := context.WithTimeout(ctx, storeResultsTimeout)
+	defer cancel()
+
 	var result models.SubmissionResult
 	submissionStatus := models.StatusError
 	submissionOutput := stderr
@@ -955,15 +995,29 @@ func processAndStoreResults(ctx context.Context, executionPath string, stdout, s
 			"updatedAt":  time.Now(),
 		},
 	}
-	_, err = submissionsCollection.UpdateByID(ctx, submissionObjID, update)
+	// One round trip that both writes the result and returns the row as it was before, which
+	// supplies CreatedAt/UserID for the Redis copy and tells us whether this delivery is a
+	// repeat. A row that already has a testResult was judged by an earlier delivery of the
+	// same message (the judge died before its ack, or a shutdown cut it off); a rejudge
+	// clears testResult first, so it still counts as new work.
+	var originalSubmission models.Submission
+	findOpts := options.FindOneAndUpdate().
+		SetReturnDocument(options.Before).
+		SetProjection(bson.M{"userId": 1, "createdAt": 1, "status": 1, "testResult.status": 1})
+	err = submissionsCollection.FindOneAndUpdate(ctx, bson.M{"_id": submissionObjID}, update, findOpts).Decode(&originalSubmission)
 	if err != nil {
 		slog.Error("Error updating submission in MongoDB", "submissionId", submissionMsg.SubmissionID, "error", err)
 		// Not returning error, as we will still try to update Redis
 	}
+	alreadyJudged := err == nil && originalSubmission.TestResult != nil
+	if alreadyJudged {
+		slog.Warn("Submission was already judged by an earlier delivery; not counting it again",
+			"submissionId", submissionMsg.SubmissionID, "previousStatus", originalSubmission.Status)
+	}
 
 	// Update problem analytics
 	problemObjID, err := primitive.ObjectIDFromHex(submissionMsg.ProblemID)
-	if err == nil {
+	if err == nil && !alreadyJudged {
 		inc := bson.M{"submissionCount": 1}
 		if submissionStatus == models.StatusSuccess {
 			inc["acceptedCount"] = 1
@@ -972,14 +1026,6 @@ func processAndStoreResults(ctx context.Context, executionPath string, stdout, s
 		if err != nil {
 			slog.Error("Error updating problem analytics", "problemId", submissionMsg.ProblemID, "error", err)
 		}
-	}
-
-	// Fetch full submission to get CreatedAt and UserID for Redis
-	var originalSubmission models.Submission
-	err = submissionsCollection.FindOne(ctx, bson.M{"_id": submissionObjID}).Decode(&originalSubmission)
-	if err != nil {
-		slog.Warn("Could not fetch original submission for Redis update", "submissionId", submissionMsg.SubmissionID, "error", err)
-		// Continue without full data if necessary
 	}
 
 	// Usage metering (H4): one event per executed submission, carrying the same
@@ -1011,8 +1057,11 @@ func processAndStoreResults(ctx context.Context, executionPath string, stdout, s
 			usageEvent["apiClientId"] = apiClientObjID
 		}
 	}
-	if _, err := usageEventsCollection.InsertOne(ctx, usageEvent); err != nil {
-		slog.Error("Failed to record usage event", "submissionId", submissionMsg.SubmissionID, "error", err)
+	// A repeat delivery was already metered; recording it again would bill the work twice.
+	if !alreadyJudged {
+		if _, err := usageEventsCollection.InsertOne(ctx, usageEvent); err != nil {
+			slog.Error("Failed to record usage event", "submissionId", submissionMsg.SubmissionID, "error", err)
+		}
 	}
 
 	updatedSubmission := models.Submission{
@@ -1041,6 +1090,8 @@ func processAndStoreResults(ctx context.Context, executionPath string, stdout, s
 // reached execution (e.g. it exhausted its retry budget waiting for a pool container),
 // so it surfaces to the user instead of silently vanishing from the queue.
 func markSubmissionExecutionFailed(ctx context.Context, submissionsCollection *mongo.Collection, submissionMsg models.SubmissionMessage, reason string) {
+	ctx, cancel := context.WithTimeout(ctx, storeResultsTimeout)
+	defer cancel()
 	submissionObjID, err := primitive.ObjectIDFromHex(submissionMsg.SubmissionID)
 	if err != nil {
 		slog.Error("Invalid SubmissionID while marking submission failed", "submissionId", submissionMsg.SubmissionID, "error", err)
@@ -1058,14 +1109,63 @@ func markSubmissionExecutionFailed(ctx context.Context, submissionsCollection *m
 	}
 }
 
+// dropSubmission is the permanent-failure exit for a message: it marks the submission
+// failed, so the student sees an error instead of a submission that stays Pending forever,
+// then rejects the message to the dead-letter queue. reason is shown to the student, so it
+// must not carry internal detail; the caller logs the real error.
+func dropSubmission(d amqp.Delivery, submissionsCollection *mongo.Collection, submissionMsg models.SubmissionMessage, reason string) {
+	if submissionMsg.SubmissionID != "" {
+		markSubmissionExecutionFailed(context.Background(), submissionsCollection, submissionMsg, reason)
+	}
+	d.Nack(false, false)
+}
+
+// retryLater sends a message that hit a temporary problem (no free container, database
+// unavailable) through the TTL'd retry queue rather than straight back onto the work queue,
+// which would redeliver it at once in a tight loop. After MaxSubmissionRetries attempts the
+// submission is marked failed with failReason.
+func retryLater(ctx context.Context, d amqp.Delivery, ch *amqp.Channel, retryQueueName string, submissionsCollection *mongo.Collection, submissionMsg models.SubmissionMessage, why string, failReason string) {
+	if submissionMsg.RetryCount >= models.MaxSubmissionRetries {
+		slog.Error("Submission exceeded max retries; marking as failed",
+			"submissionId", submissionMsg.SubmissionID, "why", why, "retryCount", submissionMsg.RetryCount)
+		markSubmissionExecutionFailed(ctx, submissionsCollection, submissionMsg, failReason)
+		d.Ack(false)
+		return
+	}
+
+	submissionMsg.RetryCount++
+	retryBody, err := json.Marshal(submissionMsg)
+	if err != nil {
+		slog.Error("Failed to marshal submission for retry, using original body", "submissionId", submissionMsg.SubmissionID, "error", err)
+		retryBody = d.Body
+	}
+
+	slog.Warn("Routing submission to retry queue",
+		"submissionId", submissionMsg.SubmissionID, "why", why, "retryCount", submissionMsg.RetryCount)
+
+	// To avoid a hot-requeue loop, publish to a retry queue with a TTL.
+	err = ch.PublishWithContext(ctx, "", retryQueueName, false, false, amqp.Publishing{
+		ContentType:  d.ContentType,
+		Body:         retryBody,
+		DeliveryMode: amqp.Persistent,
+	})
+	if err != nil {
+		slog.Error("Failed to publish to retry queue", "submissionId", submissionMsg.SubmissionID, "error", err)
+		d.Nack(false, true) // Fallback to basic requeue
+		return
+	}
+
+	d.Ack(false)
+}
+
 // processSubmission is the main coordinator for handling a submission message.
 func processSubmission(interactive bool, d amqp.Delivery, ch *amqp.Channel, retryQueueName string, problemsCollection *mongo.Collection, submissionsCollection *mongo.Collection, usageEventsCollection *mongo.Collection, redisClient *redis.Client, executor *executor.Executor, containerPool *pool.ContainerPool) {
 	ctx := context.Background()
 
 	submissionMsg, err := validateAndDecodeSubmission(d)
 	if err != nil {
-		slog.Error("Validation failed", "error", err)
-		d.Nack(false, false) // Permanent failure
+		slog.Error("Validation failed", "submissionId", submissionMsg.SubmissionID, "error", err)
+		dropSubmission(d, submissionsCollection, submissionMsg, "The judge could not read this submission.")
 		return
 	}
 
@@ -1081,7 +1181,14 @@ func processSubmission(interactive bool, d amqp.Delivery, ch *amqp.Channel, retr
 		problem, err = fetchProblemData(ctx, problemsCollection, submissionMsg.ProblemID)
 		if err != nil {
 			slog.Error("Failed to fetch problem data", "submissionId", submissionMsg.SubmissionID, "error", err)
-			d.Nack(false, true) // Transient failure (DB might be down)
+			if errors.Is(err, errProblemNotFound) {
+				dropSubmission(d, submissionsCollection, submissionMsg, "The problem for this submission no longer exists.")
+				return
+			}
+			// The database may be briefly unavailable: worth retrying, but through the
+			// delayed retry queue, never an instant requeue.
+			retryLater(ctx, d, ch, retryQueueName, submissionsCollection, submissionMsg, "problem fetch failed",
+				"The judge could not load the problem for this submission. Please try again.")
 			return
 		}
 	}
@@ -1089,14 +1196,14 @@ func processSubmission(interactive bool, d amqp.Delivery, ch *amqp.Channel, retr
 	// Validate the problem data and parse/normalize test cases from the problem doc.
 	if err := problem.ValidateBasic(); err != nil {
 		slog.Error("Invalid problem data", "submissionId", submissionMsg.SubmissionID, "error", err)
-		d.Nack(false, false) // Permanent failure, bad data
+		dropSubmission(d, submissionsCollection, submissionMsg, "This problem's test data is invalid. Please tell your instructor.")
 		return
 	}
 
 	lang := languages.GetLanguage(submissionMsg.Language)
 	if lang == nil {
 		slog.Error("Unsupported language", "submissionId", submissionMsg.SubmissionID, "language", submissionMsg.Language)
-		d.Nack(false, false)
+		dropSubmission(d, submissionsCollection, submissionMsg, fmt.Sprintf("The language %q is not supported.", submissionMsg.Language))
 		return
 	}
 
@@ -1107,7 +1214,7 @@ func processSubmission(interactive bool, d amqp.Delivery, ch *amqp.Channel, retr
 	strategy, hasStrategy := ResolveStrategy(problem.EffectiveType())
 	if !hasStrategy && problem.EffectiveType() != models.FunctionProblem {
 		slog.Error("No execution strategy registered for problem type", "submissionId", submissionMsg.SubmissionID, "problemType", problem.EffectiveType())
-		d.Nack(false, false)
+		dropSubmission(d, submissionsCollection, submissionMsg, "This type of problem cannot be run by the judge.")
 		return
 	}
 
@@ -1125,38 +1232,8 @@ func processSubmission(interactive bool, d amqp.Delivery, ch *amqp.Channel, retr
 		pooledContainer = containerPool.AcquireBulk(acquireCtx, lang.ID, bulkContainerReserve)
 	}
 	if pooledContainer == nil {
-		if submissionMsg.RetryCount >= models.MaxSubmissionRetries {
-			slog.Error("Submission exceeded max retries waiting for a container; marking as failed",
-				"submissionId", submissionMsg.SubmissionID, "language", lang.ID, "retryCount", submissionMsg.RetryCount)
-			markSubmissionExecutionFailed(ctx, submissionsCollection, submissionMsg,
-				fmt.Sprintf("No available %s execution containers after %d retries", lang.ID, submissionMsg.RetryCount))
-			d.Ack(false)
-			return
-		}
-
-		submissionMsg.RetryCount++
-		retryBody, err := json.Marshal(submissionMsg)
-		if err != nil {
-			slog.Error("Failed to marshal submission for retry, using original body", "submissionId", submissionMsg.SubmissionID, "error", err)
-			retryBody = d.Body
-		}
-
-		slog.Warn("No available containers for language, routing to retry queue",
-			"submissionId", submissionMsg.SubmissionID, "language", lang.ID, "retryCount", submissionMsg.RetryCount)
-
-		// To avoid hot-requeue loop, we publish to a retry queue with TTL
-		err = ch.PublishWithContext(ctx, "", retryQueueName, false, false, amqp.Publishing{
-			ContentType:  d.ContentType,
-			Body:         retryBody,
-			DeliveryMode: amqp.Persistent,
-		})
-		if err != nil {
-			slog.Error("Failed to publish to retry queue", "submissionId", submissionMsg.SubmissionID, "error", err)
-			d.Nack(false, true) // Fallback to basic requeue
-			return
-		}
-
-		d.Ack(false)
+		retryLater(ctx, d, ch, retryQueueName, submissionsCollection, submissionMsg, "no free "+lang.ID+" container",
+			fmt.Sprintf("No available %s execution containers after %d retries", lang.ID, submissionMsg.RetryCount))
 		return
 	}
 	discardContainer := false
@@ -1183,7 +1260,7 @@ func processSubmission(interactive bool, d amqp.Delivery, ch *amqp.Channel, retr
 				discardContainer = true
 				discardReason = reason
 			}
-			d.Nack(false, false)
+			dropSubmission(d, submissionsCollection, submissionMsg, "The judge failed while running this submission. Please try again.")
 			return
 		}
 		if discard, reason := shouldDiscardContainer(nil, result, cleanupFailed); discard {
@@ -1194,7 +1271,7 @@ func processSubmission(interactive bool, d amqp.Delivery, ch *amqp.Channel, retr
 		resultBytes, err := result.ToJSON()
 		if err != nil {
 			slog.Error("Failed to marshal central result", "submissionId", submissionMsg.SubmissionID, "error", err)
-			d.Nack(false, false)
+			dropSubmission(d, submissionsCollection, submissionMsg, "The judge failed while saving this submission's result. Please try again.")
 			return
 		}
 		processAndStoreResults(ctx, models.ExecutionPathCentral, string(resultBytes), "", nil, submissionMsg, submissionsCollection, problemsCollection, usageEventsCollection, redisClient)
@@ -1206,7 +1283,8 @@ func processSubmission(interactive bool, d amqp.Delivery, ch *amqp.Channel, retr
 	submissionWorkspace, err := workspace.NewSubmissionWorkspace(pooledContainer.WorkDir, submissionMsg.SubmissionID)
 	if err != nil {
 		slog.Error("Failed to create submission workspace", "submissionId", submissionMsg.SubmissionID, "error", err)
-		d.Nack(false, true)
+		retryLater(ctx, d, ch, retryQueueName, submissionsCollection, submissionMsg, "workspace creation failed",
+			"The judge could not prepare this submission. Please try again.")
 		return
 	}
 	defer func() {
@@ -1220,7 +1298,7 @@ func processSubmission(interactive bool, d amqp.Delivery, ch *amqp.Channel, retr
 	filesToCopy, compileCmd, runCmd, err := prepareSubmissionFiles(submissionMsg, problem, lang, submissionWorkspace.HostPath)
 	if err != nil {
 		slog.Error("Failed to prepare submission files", "submissionId", submissionMsg.SubmissionID, "error", err)
-		d.Nack(false, false)
+		dropSubmission(d, submissionsCollection, submissionMsg, "The judge could not prepare this submission's files.")
 		return
 	}
 
@@ -1288,6 +1366,13 @@ func startHealthServer(ctx context.Context, containerPool *pool.ContainerPool, p
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
+		// Healthy means "taking work off the queues", not merely "process is up": a judge
+		// that lost its RabbitMQ connection still answers HTTP but judges nothing.
+		if !consumersHealthy.Load() {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			json.NewEncoder(w).Encode(map[string]string{"status": "unhealthy", "reason": "not consuming from RabbitMQ"})
+			return
+		}
 		json.NewEncoder(w).Encode(map[string]string{"status": "healthy"})
 	})
 
@@ -1418,7 +1503,8 @@ func startHealthServer(ctx context.Context, containerPool *pool.ContainerPool, p
 		var runErr error
 
 		if adapter, ok := adapters.GetAdapter(lang.ID); ok && isCentralCompareEnabled(lang.ID) && hasStrategy {
-			execCtx, cancel := context.WithTimeout(ctx, 120*time.Second)
+			// The request's context, so a caller that disconnects stops its run.
+			execCtx, cancel := context.WithTimeout(r.Context(), 120*time.Second)
 			defer cancel()
 			var cleanupFailed bool
 			result, cleanupFailed, runErr = strategy.Run(execCtx, executor, pooledContainer, msg, problem, adapter)
@@ -1794,9 +1880,13 @@ func main() {
 	)
 	failOnError(err, "Failed to declare interactive retry queue")
 
+	// Registered before consuming so a connection loss at any point after this is seen.
+	connClosed := conn.NotifyClose(make(chan *amqp.Error, 1))
+	chClosed := ch.NotifyClose(make(chan *amqp.Error, 1))
+
 	msgs, err := ch.Consume(
 		submissionQueueName, // queue
-		"",                  // consumer
+		bulkConsumerTag,     // consumer
 		false,               // auto-ack
 		false,               // exclusive
 		false,               // no-local
@@ -1807,7 +1897,7 @@ func main() {
 
 	interactiveMsgs, err := ch.Consume(
 		interactiveQueueName,
-		"",
+		interactiveConsumerTag,
 		false,
 		false,
 		false,
@@ -1832,6 +1922,9 @@ func main() {
 			defer workerWg.Done()
 			slog.Debug("Worker started", "workerId", workerID)
 			for d := range msgs {
+				if returnIfShuttingDown(d) {
+					continue
+				}
 				processSubmission(false, d, ch, retryQueueName, problemsCollection, submissionsCollection, usageEventsCollection, redisClient, executor, containerPool)
 			}
 			slog.Debug("Worker stopped", "workerId", workerID)
@@ -1850,23 +1943,63 @@ func main() {
 		go func(workerID int) {
 			defer workerWg.Done()
 			for d := range interactiveMsgs {
+				if returnIfShuttingDown(d) {
+					continue
+				}
 				processSubmission(true, d, ch, interactiveRetryQueueName, problemsCollection, submissionsCollection, usageEventsCollection, redisClient, executor, containerPool)
 			}
 		}(i)
 	}
 
-	sig := <-sigChan
-	slog.Info("Received signal, shutting down...", "signal", sig.String())
+	consumersHealthy.Store(true)
 
-	// 1. Stop consuming (closing the channel or cancelling the consumer)
-	err = ch.Cancel("", false)
-	if err != nil {
-		slog.Error("Error cancelling consumer", "error", err)
+	// Every worker loop ends if its delivery channel closes, which happens on a connection
+	// or channel loss, or if the broker cancels a consumer (for example its queue was
+	// deleted). Either way this process is no longer judging anything.
+	workersDone := make(chan struct{})
+	go func() {
+		workerWg.Wait()
+		close(workersDone)
+	}()
+
+	// There is no in-process reconnect. On losing RabbitMQ the judge exits non-zero and the
+	// container restart policy brings up a fresh one; unacked messages are redelivered to it
+	// (processAndStoreResults does not double-count a delivery that had already finished).
+	// Exiting is simpler and safer than rebuilding the channel, consumers and worker loops
+	// in place, and staying up without consumers is the one outcome that must not happen.
+	exitLostBroker := func(reason string, amqpErr *amqp.Error) {
+		consumersHealthy.Store(false)
+		slog.Error("Lost RabbitMQ; exiting so the container restarts", "reason", reason, "error", amqpErr)
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		containerPool.Shutdown(cleanupCtx)
+		cleanupCancel()
+		os.Exit(1)
+	}
+
+	select {
+	case sig := <-sigChan:
+		slog.Info("Received signal, shutting down...", "signal", sig.String())
+	case amqpErr := <-connClosed:
+		exitLostBroker("connection closed", amqpErr)
+	case amqpErr := <-chClosed:
+		exitLostBroker("channel closed", amqpErr)
+	case <-workersDone:
+		exitLostBroker("all consumers stopped", nil)
+	}
+	consumersHealthy.Store(false)
+	shuttingDown.Store(true)
+
+	// 1. Stop consuming. Cancelling a consumer closes its delivery channel once the
+	// deliveries already buffered for it have been handed out, which ends the worker loops.
+	for _, tag := range []string{bulkConsumerTag, interactiveConsumerTag} {
+		if err := ch.Cancel(tag, false); err != nil {
+			slog.Error("Error cancelling consumer", "consumer", tag, "error", err)
+		}
 	}
 
 	// 2. Wait for active workers to finish
 	slog.Info("Waiting for active workers to finish...")
-	workerWg.Wait()
+	<-workersDone
 
 	// 3. Cleanup pool
 	slog.Info("Cleaning up container pool...")

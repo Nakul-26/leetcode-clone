@@ -59,7 +59,9 @@ const (
 	MinSchemaVersion = "1"
 	// MaxSubmissionRetries bounds how many times a submission can bounce through the
 	// retry queue (e.g. waiting for a free pool container) before it's surfaced as a
-	// failure instead of looping forever. At the retry queue's 5s TTL, this is a ~60s window.
+	// failure instead of looping forever. Each attempt first waits up to 30s for a container
+	// (processSubmission's acquire timeout) and then 5s in the retry queue, so a submission
+	// that never gets a container fails after about 12 x 35s = ~7 minutes.
 	MaxSubmissionRetries = 12
 )
 

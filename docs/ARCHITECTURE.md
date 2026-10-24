@@ -154,7 +154,7 @@ submission_queue_fast ---> M interactive   ----+                              co
   `MAX_EXECUTIONS_PER_CONTAINER` or if a run leaves them suspect. An optional autoscaler grows and shrinks
   each language between a min and a max, within a global cap.
 - **Retry.** If no container is free, the message goes to a TTL'd retry queue (5 s) and comes back, up to
-  12 times (about a minute), then the submission is marked failed. Permanent failures (bad message) go to
+  12 times (each attempt first waits up to 30 s for a container, so about 7 minutes), then the submission is marked failed. Permanent failures (bad message) go to
   `submission_dead_letters`.
 - **Persistence.** For every submission the judge updates the `Submission` row, bumps problem counters (for
   stored problems), caches the result in Redis for an hour, and inserts a `usageevent`.
@@ -272,7 +272,7 @@ submissions belong to.
 | RabbitMQ | Publishing fails: `503 Queue Service Unavailable`, the row that was created for it is marked `Error` (not left `Pending`), and quota units are refunded. The legacy synchronous path is unaffected |
 | MongoDB | Everything that needs state fails. The legacy synchronous path's own logic needs no database, but keyed callers cannot be authenticated and nothing is persisted |
 | The judge | Submissions queue up and are processed when it returns (or dead-letter after retries). The API stays up |
-| Docker / the pool | Submissions retry for about a minute, then fail with an explanatory error |
+| Docker / the pool | Submissions retry for about 7 minutes (12 attempts of a 30 s container wait plus 5 s), then fail with an explanatory error |
 | Queue depth over 5000 | Publishing is refused with `503` and a retry hint |
 
 A key principle: **a failure of the *fairness* machinery must not stop the *work***. That is why quotas fail

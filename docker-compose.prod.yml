@@ -333,6 +333,10 @@ services:
       context: ./judge-service-go
       dockerfile: Dockerfile    # multi-stage build → slim alpine runtime image
     restart: unless-stopped
+    # On SIGTERM the judge stops taking work, returns unstarted messages to the queue and
+    # waits for submissions already running. Docker's default 10 s would SIGKILL a C++/Java
+    # submission mid-run, and it would then be judged again after the restart.
+    stop_grace_period: 2m
     volumes:
       - /tmp:/tmp
     environment:

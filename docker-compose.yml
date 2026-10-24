@@ -110,6 +110,8 @@ services:
       # comment in judge-service-go/Dockerfile and docs/LOCAL_TESTING_NOTES.md 5b.
       target: dev
     container_name: codespace_judge_service_go
+    # The judge exits when it loses RabbitMQ and relies on this to come back (as in prod).
+    restart: unless-stopped
     working_dir: /src
     volumes:
       - ./judge-service-go:/src

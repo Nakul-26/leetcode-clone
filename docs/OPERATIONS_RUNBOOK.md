@@ -146,7 +146,7 @@ judge has not started and has not declared that queue yet.
 | Log text | Meaning |
 |---|---|
 | `No available containers for language, routing to retry queue` | The pool is exhausted for that language. Normal in bursts; constant means under-provisioned |
-| `Submission exceeded max retries waiting for a container; marking as failed` | Overload: a submission gave up after about a minute |
+| `Submission exceeded max retries waiting for a container; marking as failed` | Overload: a submission gave up after about 7 minutes |
 | `Validation failed` | A malformed message was dead-lettered |
 | `legacy shared secret used for scope=...` | A caller is still on an unmetered shared secret |
 | `rejected key prefix=... reason=revoked/unknown/scope` | A bad key was presented (the prefix identifies the key without exposing it) |
