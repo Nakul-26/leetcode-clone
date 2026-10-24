@@ -1,5 +1,5 @@
 import React from 'react';
-import { CheckCircle2, XCircle, AlertTriangle, Clock } from 'lucide-react';
+import { CheckCircle2, XCircle, AlertTriangle, Clock, MinusCircle } from 'lucide-react';
 
 const formatValue = (val) => {
     if (val === undefined || val === null) return 'null';
@@ -131,7 +131,23 @@ const SubmissionOutput = ({ output }) => {
                             const passed = detail.passed ?? detail.ok ?? false;
                             const isHidden = detail.isHidden === true;
                             const testNumber = detail.test ?? detail.testIndex ?? idx + 1;
-                            
+
+                            // Graded submissions stop at the first failed test; the rest are
+                            // reported as not run rather than failed.
+                            if (detail.errorType === 'not_run') {
+                                return (
+                                    <div key={idx} className="testcase-box testcase-not-run" style={{ background: 'var(--surface)', borderRadius: '8px', border: '1px solid var(--border)', overflow: 'hidden', opacity: 0.7 }}>
+                                        <div className="testcase-header" style={{ padding: '10px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                            <div className="flex-center gap-2" style={{ fontWeight: '600', color: 'var(--text-muted)' }}>
+                                                <MinusCircle size={16} />
+                                                <span>{isHidden ? 'Hidden Case' : `Case ${testNumber}`}</span>
+                                            </div>
+                                            <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Not run</span>
+                                        </div>
+                                    </div>
+                                );
+                            }
+
                             return (
                                 <div key={idx} className="testcase-box" style={{ background: 'var(--surface)', borderRadius: '8px', border: '1px solid var(--border)', overflow: 'hidden' }}>
                                     <div className={`testcase-header ${passed ? 'passed' : 'failed'}`} style={{ padding: '10px 16px', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: passed ? 'rgba(34, 197, 94, 0.05)' : 'rgba(239, 68, 68, 0.05)' }}>

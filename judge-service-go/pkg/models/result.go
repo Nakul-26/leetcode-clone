@@ -20,6 +20,9 @@ const (
 	ErrorTypeRuntime                    = "runtime"
 	ErrorTypeWrongAnswer                = "wrong_answer"
 	ErrorTypeMemoryLimit                = "memory_limit"
+	// A test skipped because an earlier one failed (SubmissionMessage.StopOnFirstFailure).
+	ErrorTypeNotRun = "not_run"
+	TestNotRun      = "Not Run"
 )
 
 // TestResult represents the result of a single test case.

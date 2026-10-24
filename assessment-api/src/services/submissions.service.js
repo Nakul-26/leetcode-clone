@@ -39,7 +39,7 @@ function buildJudgeTests(problem) {
   }));
 }
 
-export function buildJudgeMessageBody({ submissionId, problem, language, code, requestId }) {
+export function buildJudgeMessageBody({ submissionId, problem, language, code, requestId, stopOnFirstFailure = false }) {
   const problemType = problem.problemType || "function";
   const body = {
     schemaVersion: "v2",
@@ -55,6 +55,8 @@ export function buildJudgeMessageBody({ submissionId, problem, language, code, r
   if (problemType !== "stdin") {
     body.functionName = problem.functionName || "solution";
   }
+  // The judge stops at the first failed test and reports the rest as not run (JUDGE_FIX_PLAN T1).
+  if (stopOnFirstFailure) body.stopOnFirstFailure = true;
   return body;
 }
 
@@ -276,6 +278,12 @@ export function sanitizeResultDetails(details = [], testCases = [], isAssessment
       isHidden: true,
       timeMs: detail.timeMs ?? detail.TimeMs
     };
+    // "Not run" says nothing about the hidden test itself, and without it the case would
+    // look like a failure.
+    if ((detail.errorType ?? detail.ErrorType) === "not_run") {
+      sanitized.errorType = "not_run";
+      sanitized.error = "Not Run";
+    }
 
     // Requirement: For Practice Problems, show Console Logs. For Assessments, hide them.
     if (!isAssessment) {
@@ -312,7 +320,7 @@ export function sanitizeSubmissionForStudent(submission, problem) {
   return normalized;
 }
 
-export async function submitSolution({ problemId, code, language, selectedOptions = null, answerText = null, userId, collegeId = null, assessmentId = null, attemptId = null, requestId = null, externalStudentId = null, externalAssessmentId = null, apiClientId = null }) {
+export async function submitSolution({ problemId, code, language, selectedOptions = null, answerText = null, userId, collegeId = null, assessmentId = null, attemptId = null, requestId = null, externalStudentId = null, externalAssessmentId = null, apiClientId = null, stopOnFirstFailure = false }) {
   await validateAssessmentSubmission({ problemId, language, userId, assessmentId, attemptId });
 
   // Checked before any submission record is created so a rejected request never
@@ -403,6 +411,8 @@ export async function submitSolution({ problemId, code, language, selectedOption
   if (externalStudentId) submissionData.externalStudentId = externalStudentId;
   if (externalAssessmentId) submissionData.externalAssessmentId = externalAssessmentId;
   if (apiClientId) submissionData.apiClientId = apiClientId;
+  // Stored so a rejudge or the stuck-submission reaper re-sends it the same way.
+  if (stopOnFirstFailure) submissionData.stopOnFirstFailure = true;
 
   let submission;
   try {
@@ -415,7 +425,8 @@ export async function submitSolution({ problemId, code, language, selectedOption
       problem,
       language,
       code,
-      requestId
+      requestId,
+      stopOnFirstFailure
     });
 
     // Carried through so judge-service-go can tag the usage_events record it writes
@@ -625,7 +636,8 @@ export async function rejudgeSubmission(submissionId, user) {
     submissionId: submission._id.toString(),
     problem,
     language: submission.language,
-    code: submission.code
+    code: submission.code,
+    stopOnFirstFailure: submission.stopOnFirstFailure === true
   });
 
   if (!validateSubmissionMessage(messageBody)) {
@@ -676,7 +688,8 @@ export async function rejudgeProblemSubmissions(problemId, assessmentId = null, 
       submissionId: submission._id.toString(),
       problem,
       language: submission.language,
-      code: submission.code
+      code: submission.code,
+      stopOnFirstFailure: submission.stopOnFirstFailure === true
     });
 
     await publishSubmissionMessage(messageBody);
@@ -718,7 +731,8 @@ export async function rejudgeAssessmentSubmissions(assessmentId, user) {
       submissionId: submission._id.toString(),
       problem,
       language: submission.language,
-      code: submission.code
+      code: submission.code,
+      stopOnFirstFailure: submission.stopOnFirstFailure === true
     });
 
     await publishSubmissionMessage(messageBody);

@@ -22,7 +22,10 @@ export async function submitSolution(req, res, next) {
       requestId: req.id,
       // Attribution when this came in through an external API key rather than the
       // frontend. Undefined for browser traffic and for legacy shared-secret callers.
-      apiClientId: req.apiClient ? req.apiClient._id : undefined
+      apiClientId: req.apiClient ? req.apiClient._id : undefined,
+      // Set by the students' own submit route only. /integration shares this controller,
+      // and its callers (like Arventiq) may score partial passes, so they get every test.
+      stopOnFirstFailure: req.stopOnFirstFailure === true && !req.apiClient
     });
     if (result.notFound) {
       return res.status(404).json({ msg: "Problem not found" });

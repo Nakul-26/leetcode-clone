@@ -1,6 +1,6 @@
 # Judge Fix Plan
 
-**Created:** 2026-10-23 · **Last updated:** 2026-10-24 (R1-R9, T2, T3, T7, F1-F4, C1-C3 done)
+**Created:** 2026-10-23 · **Last updated:** 2026-10-24 (R1-R9, T1-T3, T7, F1-F4, C1-C3 done)
 
 The single list of everything found in the 2026-10-23 judge review, plus the open items already recorded in
 [`JUDGE_PERFORMANCE_REVIEW.md`](./JUDGE_PERFORMANCE_REVIEW.md) §5,
@@ -43,7 +43,7 @@ To deploy without it, set `STUCK_SUBMISSION_REAPER_ENABLED=false`.
 
 | # | Problem | Fix | Size | Status | Date / commit |
 |---|---|---|---|---|---|
-| T1 | Every test case always runs, even after a failure. Scoring is all-or-nothing, so a TLE on test 1 of 10 wastes ~9x the limit | Stop at the first failed test for graded submissions (remaining tests marked "not run"); keep full runs for Run/sample tests and ad-hoc API calls. Check the UI copes with "x of y" when stopped early | M | todo | |
+| T1 | Every test case always runs, even after a failure. Scoring is all-or-nothing, so a TLE on test 1 of 10 wastes ~9x the limit | Stop at the first failed test for graded submissions (remaining tests marked "not run"); keep full runs for Run/sample tests and ad-hoc API calls. Check the UI copes with "x of y" when stopped early | M | done | 2026-10-24 · owner decision: Submit stops early, Run (samples, max 8) runs all. Opt-in `stopOnFirstFailure` on the message, set only by the students' `POST /api/submissions` (not `/integration` or Arventiq, which scores `passed/total` partial credit; not ad-hoc). Stored on the row so rejudges and the R8 reaper keep it. Frontend shows grey "Not run" cards; hidden not-run tests pass `errorType: not_run` through the sanitizer. **Saves time only on the one-test-at-a-time path** (stdin, and function mode under 20 tests): live, a TLE on test 2 of 6 took 2.2 s instead of 3.6 s. Batch mode (function mode, ≥ 20 tests, py/js/java/cpp) still runs everything and only reports the same shape; stopping it needs F6 |
 | T2 | Containers are discarded after every TLE/MLE, every runtime error on `/raw-run`, and any non-zero exit in function mode | Trust the per-submission reset (kills processes, wipes `/app` + `/tmp`); discard only if the reset fails or Docker reports the container unhealthy | S | done | 2026-10-24 · TLE/MLE/runtime error/compile timeout keep the container. The reset now restores the memory limit *before* running (after an MLE it could be OOM-killed), kills before wiping, verifies no judge process survived, and fails (→ discard) if one did or `pkill` is missing; a killed reset (137) no longer counts as success. Found on the way: **the C# image had no `pkill`**, so leftover C# processes were never killed (procps added). Verified live: 3 TLEs that leave a detached process, then 8 runs see 0 leftovers, 0 discards |
 | T3 | Function mode labels any non-zero exit (e.g. a student's segfault) as a judge "wrapper" error (`central_runner.go` runtime-error branch) | Treat a non-zero exit of the user's program as Runtime Error; keep InternalError only for unparseable wrapper output | S | done | 2026-10-24 · per-test and batch paths; batch also reports MLE instead of Runtime Error on a kill. Fewer discards as a side effect (T2). Verified live (C++ segfault → Runtime Error, no internal error) |
 | T4 | Bulk workers are shared across languages and each blocks up to 30 s waiting for a container: a burst in one language starves the others | Per-language admission: a worker only takes on a message when that language has capacity, otherwise send it straight to the retry queue (or per-language queues) | M | todo | |
@@ -66,7 +66,7 @@ b")` and C++ `cout << "x
 | F3 | [known] Function-mode Java has no heap cap | Add `-Xmx` to `adapters/java.go` run commands | S | done | 2026-10-24 · worse than "no cap": the JVM defaulted to ~half the limit, so a 180 MB program failed with OutOfMemoryError. Now `-XX:MaxRAMPercentage=75` on Java and Kotlin, function and stdin. Verified live (180 MB Accepted, 400 MB MLE) |
 | F4 | Java stdin uses `-Xmx256m` while the default problem memory limit is 256 MB: heap + JVM overhead exceeds the cgroup, reported as MLE | Derive `-Xmx` from the problem limit (e.g. limit minus ~64 MB), or give JVM languages a memory allowance | S | done | 2026-10-24 · same flag (heap = 75% of the limit the judge sets). Java's own OutOfMemoryError exit is now reported as MLE by the executor (was Runtime Error). Measured under 256 MB: `-Xmx256m` was SIGKILLed at 230 MB. Verified live |
 | F5 | Time limits are wall-clock around `docker exec`: they include exec overhead, JVM start and CPU contention, so verdicts depend on server load | Measure CPU time (cgroup `cpu.stat` / `/usr/bin/time` in the runner) and judge on that, with wall-clock as a 2-3x safety cap; keep busy containers <= physical cores | L | todo | |
-| F6 | Batch mode (>= 20 tests) only has a whole-run timeout, so per-test TLE is not enforced; per-test times are ~0 ms | Per-test timing and limit inside the batch wrappers | M | todo | |
+| F6 | Batch mode (>= 20 tests) only has a whole-run timeout, so per-test TLE is not enforced; per-test times are ~0 ms. An infinite loop holds the container for (tests + 1) × the limit, and T1 cannot stop a batch early | Per-test timing and limit inside the batch wrappers, or stream per-test result lines and kill the run when one is late (this also gives T1 its time saving in batch mode) | M | todo | |
 
 ## Phase 4 — Security hardening (before selling the API widely)
 
@@ -104,3 +104,4 @@ b")` and C++ `cout << "x
 | 2026-10-24 | Done: T2. Also fixed the C# image: SDK 8.0.426 / runtime 8.0.32 (pulled on rebuild) put named-mutex files under the read-only home dir, so every C# build failed; the judge user's home is now `/tmp`. **Prod will hit this on its next C# image rebuild unless this ships with it** |
 | 2026-10-24 | Done: T7 (PCH). Revised F2: function-mode C++ uses -O1 after measuring -O2 cost +2.6 s per compile. Added T11 (function-mode C++ compile cost) |
 | 2026-10-24 | Done: R8 (stuck-submission reaper). Phase 1 complete |
+| 2026-10-24 | Done: T1 (stop at first failure for students' graded submissions). F6 now also covers stopping batch mode early |

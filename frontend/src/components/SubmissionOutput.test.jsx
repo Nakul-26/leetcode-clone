@@ -59,4 +59,26 @@ describe('SubmissionOutput Component', () => {
     const { container } = render(<SubmissionOutput output={null} />);
     expect(container.firstChild).toBeNull();
   });
+  it('shows tests after the first failure as not run, not failed', () => {
+    const output = {
+      status: 'Time Limit Exceeded',
+      passedCount: 1,
+      totalCount: 4,
+      details: [
+        { test: 1, passed: true, inputs: [1], output: 1, expected: 1 },
+        { test: 2, passed: false, error: 'Time Limit Exceeded', errorType: 'timeout', inputs: [2], expected: 2 },
+        { test: 3, passed: false, error: 'Not Run', errorType: 'not_run', isHidden: true },
+        { test: 4, passed: false, error: 'Not Run', errorType: 'not_run', isHidden: true }
+      ]
+    };
+
+    const { container } = render(<SubmissionOutput output={output} />);
+
+    expect(screen.getByText('1 / 4')).toBeDefined();
+    expect(screen.getAllByText('Not run')).toHaveLength(2);
+    expect(container.querySelectorAll('.testcase-not-run')).toHaveLength(2);
+    // Only the real failure shows an error box.
+    expect(screen.queryAllByText('Not Run')).toHaveLength(0);
+    expect(screen.getAllByText('Time Limit Exceeded').length).toBeGreaterThan(0);
+  });
 });

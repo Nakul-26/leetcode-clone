@@ -57,7 +57,8 @@ async function requeue(row) {
     submissionId: row._id.toString(),
     problem,
     language: row.language,
-    code: row.code
+    code: row.code,
+    stopOnFirstFailure: row.stopOnFirstFailure === true
   });
   if (row.collegeId) message.collegeId = String(row.collegeId);
   if (row.apiClientId) message.apiClientId = String(row.apiClientId);
@@ -78,7 +79,7 @@ async function requeue(row) {
 export async function reapStuckSubmissions({ now = new Date() } = {}) {
   const cutoff = new Date(now.getTime() - env.STUCK_SUBMISSION_AFTER_MINUTES * 60_000);
   const rows = await Submission.find({ status: "Pending", updatedAt: { $lt: cutoff } })
-    .select("_id kind problemId language code collegeId apiClientId stuckRequeues updatedAt")
+    .select("_id kind problemId language code collegeId apiClientId stuckRequeues stopOnFirstFailure updatedAt")
     .sort({ updatedAt: 1 })
     .limit(BATCH_SIZE)
     .lean();

@@ -143,6 +143,10 @@ func runSubmissionCentralPerTest(ctx context.Context, exec *executor.Executor, p
 	}
 
 	for i, tc := range problem.TestCases {
+		if submissionMsg.StopOnFirstFailure && result.FirstFailedTest != -1 {
+			appendNotRunTests(result, problem, i)
+			break
+		}
 		testStart := time.Now()
 		tr := models.TestResult{
 			Test:     i + 1,
@@ -377,6 +381,12 @@ func runSubmissionCentralBatched(ctx context.Context, exec *executor.Executor, p
 	if remainingReason != "" {
 		appendMissingBatchedResults(result, problem, processed, remainingReason)
 	}
+	if submissionMsg.StopOnFirstFailure {
+		// The batch has already run every test in one process; this only reports the same
+		// shape as the per-test path. Stopping a batch early needs per-test limits inside
+		// the wrappers (JUDGE_FIX_PLAN F6).
+		markNotRunAfterFirstFailure(result)
+	}
 
 	finished := time.Now().UTC()
 	result.FinishedAt = &finished
@@ -469,6 +479,45 @@ func appendMissingBatchedResults(result *models.SubmissionResult, problem models
 		markTestFailed(&tr, reason)
 		result.AddTestResult(tr)
 	}
+}
+
+// appendNotRunTests records tests from index `from` on as skipped after an earlier failure
+// (JUDGE_FIX_PLAN T1). Scoring is all-or-nothing, so running them would only cost time: a
+// TLE on test 1 of 10 used to hold the container for ten time limits.
+func appendNotRunTests(result *models.SubmissionResult, problem models.Problem, from int) {
+	for i := from; i < len(problem.TestCases); i++ {
+		result.AddTestResult(notRunTest(i+1, problem.TestCases[i].Expected))
+	}
+}
+
+func notRunTest(test int, expected interface{}) models.TestResult {
+	return models.TestResult{Test: test, Expected: expected, Error: models.TestNotRun, ErrorType: models.ErrorTypeNotRun}
+}
+
+// markNotRunAfterFirstFailure replaces every result after the first failed one with a
+// not-run entry and recounts.
+func markNotRunAfterFirstFailure(result *models.SubmissionResult) {
+	first := -1
+	for i, d := range result.Details {
+		if !d.Passed {
+			first = i
+			break
+		}
+	}
+	if first < 0 {
+		return
+	}
+	passed := 0
+	for i := range result.Details {
+		if i > first {
+			result.Details[i] = notRunTest(result.Details[i].Test, result.Details[i].Expected)
+		}
+		if result.Details[i].Passed {
+			passed++
+		}
+	}
+	result.Passed, result.PassedCount = passed, passed
+	result.UpdateStatus()
 }
 
 func markTestFailed(tr *models.TestResult, reason string) {

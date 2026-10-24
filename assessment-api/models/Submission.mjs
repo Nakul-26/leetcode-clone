@@ -69,6 +69,11 @@ const SubmissionSchema = new Schema({
     stuckRequeues: {
         type: Number
     },
+    // The judge stops at the first failed test and reports the rest as not run
+    // (JUDGE_FIX_PLAN T1). Set for students' graded submissions only.
+    stopOnFirstFailure: {
+        type: Boolean
+    },
     tests: {
         type: Array
     },

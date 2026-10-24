@@ -40,6 +40,10 @@ type SubmissionMessage struct {
 	// each request and there is no Problem to read them from.
 	TimeLimitMs   int64 `json:"timeLimitMs,omitempty"`
 	MemoryLimitMb int64 `json:"memoryLimitMb,omitempty"`
+	// StopOnFirstFailure stops judging at the first failed test and reports the rest as
+	// not run (JUDGE_FIX_PLAN T1). The API sets it only for students' graded submissions,
+	// where scoring is all-or-nothing; Run, ad-hoc and partner submissions run every test.
+	StopOnFirstFailure bool `json:"stopOnFirstFailure,omitempty"`
 }
 
 // SubmissionKindAdHoc is the Kind value for a submission with no stored problem.

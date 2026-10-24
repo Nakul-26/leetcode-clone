@@ -77,6 +77,10 @@ func runSubmissionStdinDetailed(ctx context.Context, exec *executor.Executor, po
 
 
 	for i, tc := range problem.TestCases {
+		if submissionMsg.StopOnFirstFailure && result.FirstFailedTest != -1 {
+			appendNotRunTests(result, problem, i)
+			break
+		}
 		testStart := time.Now()
 		tr := models.TestResult{
 			Test:     i + 1,

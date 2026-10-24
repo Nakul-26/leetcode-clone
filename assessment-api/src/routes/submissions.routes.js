@@ -12,7 +12,14 @@ import {
 
 const router = express.Router();
 
-router.post("/", verifyToken, validate("submission"), submitSolution);
+// A student's graded submit: scoring is all-or-nothing, so the judge stops at the first
+// failed test (JUDGE_FIX_PLAN T1). "Run" uses /problems/:id/run and still runs every sample.
+const stopOnFirstFailure = (req, _res, next) => {
+  req.stopOnFirstFailure = true;
+  next();
+};
+
+router.post("/", verifyToken, validate("submission"), stopOnFirstFailure, submitSolution);
 router.get("/my", verifyToken, getMySubmissions);
 router.get("/analytics/my", verifyToken, getMyAnalytics);
 router.get(
