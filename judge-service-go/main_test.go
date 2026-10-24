@@ -134,19 +134,19 @@ func TestShouldDiscardContainer(t *testing.T) {
 			wantDiscard:   true,
 		},
 		{
-			name:        "timeout execution error discards",
+			name:        "timeout execution error keeps the container (reset kills leftovers)",
 			execErr:     executor.NewExecutionError(executor.ErrTimeLimitExceeded, "", -1),
-			wantDiscard: true,
+			wantDiscard: false,
 		},
 		{
-			name:        "memory execution error discards",
+			name:        "memory execution error keeps the container",
 			execErr:     executor.NewExecutionError(executor.ErrMemoryLimitExceeded, "", 137),
-			wantDiscard: true,
+			wantDiscard: false,
 		},
 		{
-			name:        "runtime exit error discards",
+			name:        "runtime exit error keeps the container",
 			execErr:     executor.NewExecutionError(executor.ErrRuntimeError, "exit code 2", 2),
-			wantDiscard: true,
+			wantDiscard: false,
 		},
 		{
 			name:        "memory reset failure discards",
@@ -159,8 +159,13 @@ func TestShouldDiscardContainer(t *testing.T) {
 			wantDiscard: false,
 		},
 		{
-			name:        "compile timeout discards",
+			name:        "compile timeout keeps the container",
 			execErr:     executor.NewExecutionError(executor.ErrCompilationFailed, "context deadline exceeded", -1),
+			wantDiscard: false,
+		},
+		{
+			name:        "compile against a stopped container discards",
+			execErr:     executor.NewExecutionError(executor.ErrCompilationFailed, "Container abc is not running", -1),
 			wantDiscard: true,
 		},
 		{
@@ -176,11 +181,11 @@ func TestShouldDiscardContainer(t *testing.T) {
 			wantDiscard: false,
 		},
 		{
-			name: "central timeout result discards",
+			name: "central timeout result keeps the container",
 			result: &models.SubmissionResult{
 				Status: models.SubmissionStatusTimeLimitExceeded,
 			},
-			wantDiscard: true,
+			wantDiscard: false,
 		},
 		{
 			name: "wrapper internal error discards",

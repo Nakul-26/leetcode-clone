@@ -135,24 +135,38 @@ func (e *Executor) CopyFiles(ctx context.Context, containerID string, hostWorkDi
 }
 
 // containerResetScript returns a pooled container to a clean state between submissions:
+//   - any process the submission left running, killed first so nothing can recreate files
+//     after they are removed;
 //   - every submission directory under /app (they are world-readable, so leaving them let a later
 //     submission in the same container read earlier students' source code, and /app is
 //     memory-backed, so they also ate into the container's memory limit);
 //   - everything in /tmp including hidden entries (a plain /tmp/* glob skips dot-files), except
-//     .cache, which holds the Go build cache that makes repeat Go compiles fast;
-//   - any process the submission left running.
-// It always exits 0: a missing path or no process to kill is not a failure.
-const containerResetScript = `rm -rf /app/sub-* 2>/dev/null; find /tmp -mindepth 1 -maxdepth 1 ! -name .cache -exec rm -rf {} \; 2>/dev/null; (pkill -9 -u judge || true); exit 0`
+//     .cache, which holds the Go build cache that makes repeat Go compiles fast.
+//
+// It then checks that no judge-user process survived, and exits non-zero if one did or if
+// pkill is missing, so the caller discards the container instead of reusing it dirty. Because
+// the reset is what makes reuse safe, a TLE, MLE or crash no longer discards the container
+// (JUDGE_FIX_PLAN T2).
+const containerResetScript = `command -v pkill >/dev/null || { echo "pkill missing"; exit 1; }; ` +
+	`pkill -9 -u judge; ` +
+	`rm -rf /app/sub-* 2>/dev/null; find /tmp -mindepth 1 -maxdepth 1 ! -name .cache -exec rm -rf {} \; 2>/dev/null; ` +
+	`i=0; while pgrep -u judge >/dev/null && [ $i -lt 40 ]; do sleep 0.05; i=$((i+1)); done; ` +
+	`if pgrep -u judge >/dev/null; then echo "judge processes survived the reset"; exit 1; fi; exit 0`
 
 // ResetContainer cleans a container after a submission and restores its default memory limit,
 // before it goes back to the pool. Once per submission, so per-test steps can skip both.
 // An error means the container could not be trusted clean; the caller should discard it.
 func (e *Executor) ResetContainer(ctx context.Context, containerID string) error {
+	// Restore the limit first: after an MLE the container is still at the problem's limit with
+	// the student's process holding memory, and the reset shell itself could be OOM-killed.
+	if err := e.UpdateContainerResources(ctx, containerID, 1024); err != nil {
+		return err
+	}
 	stdout, stderr, exitCode, err := e.runExecWithTimeout(ctx, containerID, "root", "/", []string{"sh", "-c", containerResetScript}, 10*time.Second)
-	if err != nil && exitCode != 137 {
+	if err != nil {
 		return fmt.Errorf("container reset failed: %w (exit=%d stdout=%s stderr=%s)", err, exitCode, stdout, stderr)
 	}
-	return e.UpdateContainerResources(ctx, containerID, 1024)
+	return nil
 }
 
 // runExecWithTimeout handles the full lifecycle of creating, running, and waiting for an exec instance.

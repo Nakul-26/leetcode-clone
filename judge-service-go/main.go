@@ -778,9 +778,6 @@ func shouldDiscardContainer(execErr error, result *models.SubmissionResult, clea
 	if result == nil {
 		return false, ""
 	}
-	if result.Status == models.SubmissionStatusTimeLimitExceeded || result.Status == models.SubmissionStatusMemoryLimitExceeded {
-		return true, result.Status
-	}
 	if result.InternalError == models.InternalErrorWrapper {
 		return true, "wrapper/internal runtime failure"
 	}
@@ -791,12 +788,19 @@ func shouldDiscardContainer(execErr error, result *models.SubmissionResult, clea
 	return false, ""
 }
 
+// isPoisonousExecutionError reports whether an execution error means the container itself is
+// broken. A verdict (TLE, MLE, runtime error, a compile that timed out) is the student's
+// program, and the reset in finishWithContainer kills whatever it left behind, discarding the
+// container if that fails. Discarding on every verdict cost a container start per TLE and, in
+// an exam, thrashed the pool exactly when it was busiest (JUDGE_FIX_PLAN T2).
 func isPoisonousExecutionError(err error) bool {
 	var execErr *executor.ExecutionError
 	if errors.As(err, &execErr) {
 		switch execErr.Type {
-		case executor.ErrTimeLimitExceeded, executor.ErrMemoryLimitExceeded, executor.ErrRuntimeError, executor.ErrContainerUnhealthy:
+		case executor.ErrContainerUnhealthy:
 			return true
+		case executor.ErrTimeLimitExceeded, executor.ErrMemoryLimitExceeded, executor.ErrRuntimeError:
+			return false
 		case executor.ErrCompilationFailed:
 			return looksLikeContainerFailure(execErr.Message)
 		}
@@ -806,13 +810,10 @@ func isPoisonousExecutionError(err error) bool {
 
 func looksLikeContainerFailure(message string) bool {
 	msg := strings.ToLower(message)
-	return strings.Contains(msg, "deadline exceeded") ||
-		strings.Contains(msg, "timed out") ||
-		strings.Contains(msg, "memory limit exceeded") ||
-		strings.Contains(msg, "possibly oom") ||
-		strings.Contains(msg, "container unhealthy") ||
+	return strings.Contains(msg, "container unhealthy") ||
 		strings.Contains(msg, "stopped container") ||
-		strings.Contains(msg, "no such container")
+		strings.Contains(msg, "no such container") ||
+		strings.Contains(msg, "is not running")
 }
 
 // cleanupOrphanContainers removes containers left from previous runs that

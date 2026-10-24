@@ -1,6 +1,6 @@
 # Judge Fix Plan
 
-**Created:** 2026-10-23 · **Last updated:** 2026-10-24 (R1-R7, R9, T3, F1-F4, C1-C3 done)
+**Created:** 2026-10-23 · **Last updated:** 2026-10-24 (R1-R7, R9, T2, T3, F1-F4, C1-C3 done)
 
 The single list of everything found in the 2026-10-23 judge review, plus the open items already recorded in
 [`JUDGE_PERFORMANCE_REVIEW.md`](./JUDGE_PERFORMANCE_REVIEW.md) §5,
@@ -33,14 +33,14 @@ Line numbers are as of commit `8a24162` and will drift.
 | # | Problem | Fix | Size | Status | Date / commit |
 |---|---|---|---|---|---|
 | T1 | Every test case always runs, even after a failure. Scoring is all-or-nothing, so a TLE on test 1 of 10 wastes ~9x the limit | Stop at the first failed test for graded submissions (remaining tests marked "not run"); keep full runs for Run/sample tests and ad-hoc API calls. Check the UI copes with "x of y" when stopped early | M | todo | |
-| T2 | Containers are discarded after every TLE/MLE, every runtime error on `/raw-run`, and any non-zero exit in function mode | Trust the per-submission reset (kills processes, wipes `/app` + `/tmp`); discard only if the reset fails or Docker reports the container unhealthy | S | todo | |
+| T2 | Containers are discarded after every TLE/MLE, every runtime error on `/raw-run`, and any non-zero exit in function mode | Trust the per-submission reset (kills processes, wipes `/app` + `/tmp`); discard only if the reset fails or Docker reports the container unhealthy | S | done | 2026-10-24 · TLE/MLE/runtime error/compile timeout keep the container. The reset now restores the memory limit *before* running (after an MLE it could be OOM-killed), kills before wiping, verifies no judge process survived, and fails (→ discard) if one did or `pkill` is missing; a killed reset (137) no longer counts as success. Found on the way: **the C# image had no `pkill`**, so leftover C# processes were never killed (procps added). Verified live: 3 TLEs that leave a detached process, then 8 runs see 0 leftovers, 0 discards |
 | T3 | Function mode labels any non-zero exit (e.g. a student's segfault) as a judge "wrapper" error (`central_runner.go` runtime-error branch) | Treat a non-zero exit of the user's program as Runtime Error; keep InternalError only for unparseable wrapper output | S | done | 2026-10-24 · per-test and batch paths; batch also reports MLE instead of Runtime Error on a kill. Fewer discards as a side effect (T2). Verified live (C++ segfault → Runtime Error, no internal error) |
 | T4 | Bulk workers are shared across languages and each blocks up to 30 s waiting for a container: a burst in one language starves the others | Per-language admission: a worker only takes on a message when that language has capacity, otherwise send it straight to the retry queue (or per-language queues) | M | todo | |
 | T5 | ~6 Docker API calls per test case (exec create/start/inspect + a cleanup exec after every test) | Run the cleanup once per submission (the reset already does it); later, one exec for all tests via an in-container runner [known, perf review §5] | M | todo | |
 | T6 | `wait=true` callers poll Mongo every 100 ms each | Redis pub/sub (or a short-lived key) notifying completion; poll as fallback only | M | todo | |
 | T7 | [known] C/C++ precompiled `bits/stdc++.h` not built | Build the PCH in `judge-cpp-env` with the exact submission flags; verify it is used (`-H`/`-Winvalid-pch`) | S | todo | |
 | T8 | [known] Java: no startup tuning | `-XX:TieredStopAtLevel=1 -XX:+UseSerialGC -Xshare:auto` + AppCDS archive in `judge-java-env`; measure before/after | M | todo | |
-| T9 | [known] Kotlin and C# compile slowly (~10 s) | Warm compiler daemon / `csc` direct | L | todo | |
+| T9 | [known] Kotlin and C# compile slowly (~10 s) | Warm compiler daemon / `csc` direct. Note: C# build servers can no longer linger between submissions (T2 kills them, as it must), so any warm compiler has to live outside the judge user | L | todo | |
 | T10 | The exam portal's legacy synchronous path compiles once per test case | Issue it an API key and move it to the batch endpoint (owner action, see `FRIEND_PORTAL_CHANGES.md`) | S (code) | deferred (owner decision 2026-10-24: later) | |
 
 ## Phase 3 — Fairness and correctness
@@ -89,3 +89,4 @@ b")` and C++ `cout << "x
 | 2026-10-23 | Done: R1, R2, R3, R4, R5, R6, R9, C1, C2, C3. Verified on the local Docker stack (missing problem, unsupported language, redelivery, rejudge, graceful stop, RabbitMQ restart). Judge unit tests pass except the two symlink tests that need admin rights on Windows; API suite passes (3 files flaky only under full parallel run). Dev compose judge now has `restart: unless-stopped` |
 | 2026-10-24 | Done: F1 (owner ran the prod query: 0 pre-escaped submissions) and R7 (confirmed publish + API reconnect). T10 deferred by the owner. API suite 241/241; judge tests pass except the Windows symlink pair |
 | 2026-10-24 | Done: F2, F3, F4, T3. JVM heap now follows the problem limit; C/C++ function mode at -O2; student crashes no longer flagged as wrapper errors |
+| 2026-10-24 | Done: T2. Also fixed the C# image: SDK 8.0.426 / runtime 8.0.32 (pulled on rebuild) put named-mutex files under the read-only home dir, so every C# build failed; the judge user's home is now `/tmp`. **Prod will hit this on its next C# image rebuild unless this ships with it** |
