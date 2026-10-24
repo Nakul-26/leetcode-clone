@@ -2,7 +2,8 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Plus, Save, Trash2, AlertTriangle, CheckCircle2, ChevronLeft, Info, Settings } from 'lucide-react';
 import api from '../api';
-import { buildProblemPayload, buildMcqPayload, buildSubjectivePayload, collectErrorMessages } from '../utils/problemForm';
+import { buildProblemPayload, buildMcqPayload, buildSubjectivePayload, buildStdinPayload, collectErrorMessages, isCodingType } from '../utils/problemForm';
+import TestCasesEditor from '../components/TestCasesEditor';
 import { PROBLEM_TEMPLATES } from '../utils/problemTemplates';
 
 const AddProblemPage = () => {
@@ -30,7 +31,10 @@ const AddProblemPage = () => {
     allowMultipleAnswers: false,
     // subjective-only
     maxWords: '',
-    rubricNotes: ''
+    rubricNotes: '',
+    // stdin-only, shown to students
+    inputFormat: '',
+    outputFormat: ''
   });
   const [apiError, setApiError] = useState('');
   const [apiErrors, setApiErrors] = useState([]);
@@ -48,19 +52,7 @@ const AddProblemPage = () => {
     setIsValidated(false);
   };
 
-  const handleTestCaseChange = (index, e) => {
-    const { name, value, type, checked } = e.target;
-    const next = [...formData.testCases];
-    next[index][name] = type === 'checkbox' ? checked : value;
-    setFormData({ ...formData, testCases: next });
-    setIsValidated(false);
-  };
 
-  const removeTestCase = (index) => {
-    if (formData.testCases.length <= 1) return;
-    setFormData({ ...formData, testCases: formData.testCases.filter((_, i) => i !== index) });
-    setIsValidated(false);
-  };
 
   const handleParamChange = (index, e) => {
     const { name, value } = e.target;
@@ -76,14 +68,6 @@ const AddProblemPage = () => {
     setIsValidated(false);
   };
 
-  const addTestCase = () => {
-    const nextIsSample = formData.testCases.length < 2;
-    setFormData({
-      ...formData,
-      testCases: [...formData.testCases, { inputs: '[]', expected: '', isSample: nextIsSample }]
-    });
-    setIsValidated(false);
-  };
 
   const addParameter = () => {
     setFormData({ ...formData, parameters: [...formData.parameters, { name: '', type: '' }] });
@@ -127,6 +111,7 @@ const AddProblemPage = () => {
   const payloadBuilderFor = (problemType) => {
     if (problemType === 'mcq') return buildMcqPayload;
     if (problemType === 'subjective') return buildSubjectivePayload;
+    if (problemType === 'stdin') return buildStdinPayload;
     return buildProblemPayload;
   };
 
@@ -286,14 +271,16 @@ const AddProblemPage = () => {
             onChange={(e) => { handleChange(e); setValidationReport(null); }}
             style={{ marginTop: '8px' }}
           >
-            <option value="function">Coding (function + test cases)</option>
+            <option value="function">Coding: function (LeetCode style)</option>
+            <option value="stdin">Coding: full program (stdin / stdout)</option>
             <option value="mcq">Multiple Choice</option>
             <option value="subjective">Subjective (free-text, manually graded)</option>
           </select>
           <p className="form-hint">
             {formData.problemType === 'mcq' && 'Auto-graded: correct iff the student picks exactly the marked option(s).'}
             {formData.problemType === 'subjective' && 'Ungraded on submit — a faculty/admin manually scores each answer afterward.'}
-            {formData.problemType === 'function' && 'Executed and graded by the judge against your test cases.'}
+            {formData.problemType === 'function' && 'Students write one function; the judge calls it with the arguments of each test and compares the return value.'}
+            {formData.problemType === 'stdin' && 'Students write a whole program that reads the input and prints the answer; the printed text is compared with the expected output.'}
           </p>
         </div>
       </div>
@@ -418,8 +405,25 @@ const AddProblemPage = () => {
           </label>
         </div>
 
-        <h3 className="mb-4">Reference Solution (Certification)</h3>
-        <p className="form-hint mb-4">Provide a working solution to verify that your test cases are correct and solvable.</p>
+        </>)}
+
+        {formData.problemType === 'stdin' && (<>
+        <h3 className="mb-4">Input & Output Format</h3>
+        <div className="grid grid-cols-2 gap-6 mb-8" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px' }}>
+          <div className="form-group">
+            <label>Input Format (shown to students)</label>
+            <textarea name="inputFormat" value={formData.inputFormat || ''} onChange={handleChange} placeholder="e.g. The first line has n. The second line has n integers." style={{ height: '90px' }} />
+          </div>
+          <div className="form-group">
+            <label>Output Format (shown to students)</label>
+            <textarea name="outputFormat" value={formData.outputFormat || ''} onChange={handleChange} placeholder="e.g. Print their sum." style={{ height: '90px' }} />
+          </div>
+        </div>
+        </>)}
+
+        {isCodingType(formData.problemType) && (<>
+        <h3 className="mb-4">Reference Solution</h3>
+        <p className="form-hint mb-4">A correct solution. It is the source of truth: expected outputs are generated from it, and the problem cannot be saved while any expected output disagrees with it. Students never see it.</p>
         <div className="form-group mb-4">
           <label>Solution Language</label>
           <select name="solutionLanguage" value={formData.solutionLanguage} onChange={handleChange}>
@@ -448,69 +452,12 @@ const AddProblemPage = () => {
           {fieldError('referenceSolution') && <div className="error-text">{fieldError('referenceSolution')}</div>}
         </div>
 
-        <h3 className="mb-2">Test Cases</h3>
-        <p className="form-hint mt-2 mb-6">Mark the first 1-2 test cases as sample so students can see example inputs and outputs.</p>
-        
-        <div>
-          {fieldError('testCases') && <div className="error-text mb-6">{fieldError('testCases')}</div>}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', marginBottom: '24px' }}>
-              {formData.testCases.map((tc, i) => (
-                <div key={i} style={{ background: 'var(--bg)', borderRadius: 'var(--radius-md)', border: '1px solid var(--border)', overflow: 'hidden' }}>
-                  {/* Test Case Header */}
-                  <div className="flex-between" style={{ padding: '12px 16px', background: 'rgba(255,255,255,0.02)', borderBottom: '1px solid var(--border)' }}>
-                    <div className="flex-center gap-4">
-                      <h4 style={{ margin: 0, fontSize: '0.95rem', color: 'var(--text)' }}>Test Case {i + 1}</h4>
-                      <label className="flex-center gap-2" style={{ cursor: 'pointer', margin: 0 }}>
-                        <input type="checkbox" name="isSample" checked={!!tc.isSample} onChange={(e) => handleTestCaseChange(i, e)} style={{ width: 'auto', margin: 0 }} />
-                        <span style={{ fontSize: '0.85rem', color: tc.isSample ? 'var(--success)' : 'var(--text-muted)', fontWeight: tc.isSample ? '600' : '400' }}>
-                          Public Sample
-                        </span>
-                      </label>
-                    </div>
-                    {formData.testCases.length > 1 && (
-                      <button type="button" onClick={() => removeTestCase(i)} className="button button-outline" style={{ padding: '6px', color: 'var(--text-muted)', borderColor: 'transparent' }} title="Delete Test Case">
-                        <Trash2 size={16} />
-                      </button>
-                    )}
-                  </div>
-                  
-                  {/* Test Case Body */}
-                  <div style={{ padding: '16px', display: 'grid', gridTemplateColumns: '1fr', gap: '16px' }}>
-                    <div>
-                      <label style={{ display: 'block', fontSize: '0.8rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-muted)', marginBottom: '8px', fontWeight: '600' }}>Inputs (JSON Array)</label>
-                      <textarea
-                        name="inputs"
-                        placeholder='e.g. [[2,7,11,15], 9]'
-                        value={tc.inputs}
-                        onChange={(e) => handleTestCaseChange(i, e)}
-                        style={{ minHeight: '60px', height: '60px', fontSize: '0.85rem', fontFamily: "'JetBrains Mono', monospace", resize: 'vertical' }}
-                        className={fieldClassName(`testCases.${i}.inputs`) || fieldClassName(`testCases.${i}`)}
-                        required
-                      />
-                      {fieldError(`testCases.${i}.inputs`) && <div className="error-text">{fieldError(`testCases.${i}.inputs`)}</div>}
-                      {fieldError(`testCases.${i}`) && <div className="error-text">{fieldError(`testCases.${i}`)}</div>}
-                    </div>
-                    
-                    <div>
-                      <label style={{ display: 'block', fontSize: '0.8rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-muted)', marginBottom: '8px', fontWeight: '600' }}>Expected Output (JSON)</label>
-                      <input
-                        type="text"
-                        name="expected"
-                        placeholder='e.g. [0, 1]'
-                        value={tc.expected}
-                        onChange={(e) => handleTestCaseChange(i, e)}
-                        style={{ fontSize: '0.85rem', fontFamily: "'JetBrains Mono', monospace" }}
-                        required
-                      />
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-            <button type="button" onClick={addTestCase} className="button button-outline" style={{ width: '100%', padding: '12px' }}>
-              <Plus size={16} /> Add Test Case
-            </button>
-        </div>
+        <TestCasesEditor
+          formData={formData}
+          onChange={(testCases) => { setFormData((prev) => ({ ...prev, testCases })); setIsValidated(false); }}
+          fieldError={fieldError}
+          fieldClassName={fieldClassName}
+        />
         </>)}
 
         {formData.problemType === 'mcq' && (
