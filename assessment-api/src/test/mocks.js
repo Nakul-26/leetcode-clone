@@ -16,13 +16,17 @@ vi.mock('amqplib', () => {
     assertExchange: vi.fn().mockResolvedValue({}),
     assertQueue: vi.fn().mockResolvedValue({}),
     bindQueue: vi.fn().mockResolvedValue({}),
-    sendToQueue: vi.fn(),
-    close: vi.fn(),
+    // Confirm-channel publish: the callback reports the broker ack.
+    sendToQueue: vi.fn((queue, body, options, cb) => { cb?.(null); return true; }),
+    close: vi.fn().mockResolvedValue(undefined),
+    on: vi.fn(),
     connection: {},
   };
   const mockConnection = {
     createChannel: vi.fn().mockResolvedValue(mockChannel),
+    createConfirmChannel: vi.fn().mockResolvedValue(mockChannel),
     close: vi.fn(),
+    on: vi.fn(),
   };
   return {
     default: {

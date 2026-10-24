@@ -1,7 +1,7 @@
 import express from "express";
 import mongoose from "mongoose";
 import { getRedis } from "../config/redis.js";
-import { getChannel } from "../config/rabbit.js";
+import { getChannel, initRabbit } from "../config/rabbit.js";
 import { getIncidentBanner } from "../services/system.service.js";
 import { safeErrorMessage } from "../utils/safeErrorMessage.js";
 import { env } from "../config/env.js";
@@ -63,6 +63,8 @@ router.get("/", async (req, res) => {
     } else {
       health.services.rabbitmq = "disconnected";
       health.status = "unhealthy";
+      // Reconnect in the background so the API recovers without waiting for a publish.
+      initRabbit().catch(() => {});
     }
 
     // Check Judge Service

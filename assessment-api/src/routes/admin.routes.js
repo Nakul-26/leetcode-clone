@@ -5,7 +5,7 @@ import Problem from "../../models/Problem.mjs";
 import Submission from "../../models/Submission.mjs";
 import Assessment from "../../models/Assessment.mjs";
 import User from "../../models/User.mjs";
-import { getChannel } from "../config/rabbit.js";
+import { getConnection } from "../config/rabbit.js";
 import { getRedis } from "../config/redis.js";
 import { verifyToken, authorizeRoles } from "../middleware/auth.mjs";
 import * as authService from "../services/auth.service.js";
@@ -230,17 +230,23 @@ router.get("/system-stats", verifyToken, authorizeRoles("admin", "superadmin"), 
     // 2. Queue Monitoring
     let queueLength = 0;
     let dlqLength = 0;
-    const channel = getChannel();
-    if (channel) {
+    // A throwaway channel: checkQueue on a missing queue closes the channel it ran on, and
+    // the shared one carries every submission publish.
+    const connection = getConnection();
+    if (connection) {
+      let channel;
       try {
+        channel = await connection.createChannel();
         const queueInfo = await channel.checkQueue(process.env.SUBMISSION_QUEUE || "submission_queue");
         queueLength = queueInfo.messageCount;
-        
+
         // Check DLQ as well
         const dlqInfo = await channel.checkQueue("submission_dead_letters");
         dlqLength = dlqInfo.messageCount;
       } catch (err) {
         console.error("Failed to check queues:", err.message);
+      } finally {
+        await channel?.close().catch(() => {});
       }
     }
 
@@ -263,7 +269,7 @@ router.get("/system-stats", verifyToken, authorizeRoles("admin", "superadmin"), 
       api: "healthy",
       mongodb: mongoose.connection.readyState === 1 ? "connected" : "disconnected",
       redis: "disconnected",
-      rabbitmq: (channel && channel.connection) ? "connected" : "disconnected",
+      rabbitmq: connection ? "connected" : "disconnected",
       judge: judgeHealth
     };
 

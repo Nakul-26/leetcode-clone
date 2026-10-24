@@ -265,7 +265,7 @@ Each of these cost real time. They are listed so you do not repeat them.
 | **`channel.connection` in amqplib** | It is the low-level protocol connection and has **no** `createChannel`. Queue-depth reads returned `null` | Use the object returned by `amqp.connect()` (`getConnection()`) |
 | **`checkQueue` on a missing queue** | The broker closes the channel it ran on | Use a throwaway channel, never the shared publishing channel |
 | **Reading the priority queue first** | Did nothing: workers were all blocked waiting for a container, and Go wakes blocked receivers in FIFO order | Dedicated interactive workers and a container reserve |
-| **`UnescapeCode` on raw source** | Rewrote `\n` inside string literals, so valid programs stopped compiling | Public path never unescapes; see the portal-changes doc |
+| **`UnescapeCode` on raw source** | Rewrote `\n` inside string literals, so valid programs stopped compiling Removed from every path on 2026-10-24 (JUDGE_FIX_PLAN F1) |
 | **Exec-form `ENTRYPOINT` + compose `command:`** | `command:` became *arguments* to the entrypoint, so the dev judge was never rebuilt from source | The `dev` Dockerfile stage has no entrypoint |
 | **Go test cache** | `ok (cached)` hid a broken change after an env var changed | `-count=1` |
 | **Port collisions with other local projects** | A wait-for-port loop succeeded against someone else's app | Wait for `/api/health` to say `healthy`; override host ports |

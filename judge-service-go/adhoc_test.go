@@ -278,17 +278,17 @@ func TestSubmissionMessageValidateAdHocRules(t *testing.T) {
 	})
 }
 
-func TestAdHocSourceIsNotUnescaped(t *testing.T) {
+// JUDGE_FIX_PLAN F1: source is written exactly as submitted on every path.
+func TestSourceIsNotUnescaped(t *testing.T) {
 	bs := string(rune(92))
 	src := "std::cout << \"x" + bs + "n\";"
-	adhoc := models.SubmissionMessage{Kind: models.SubmissionKindAdHoc, Code: src}
-	if got := stdinSourceFor(adhoc); got != src {
-		t.Errorf("ad-hoc source was rewritten: %q", got)
-	}
-	// Stored-problem behaviour is deliberately unchanged.
-	stored := models.SubmissionMessage{Code: src}
-	if got := stdinSourceFor(stored); got == src {
-		t.Errorf("stored-problem stdin source should still be unescaped")
+	for _, msg := range []models.SubmissionMessage{
+		{Kind: models.SubmissionKindAdHoc, Code: src},
+		{Code: src}, // stored problem
+	} {
+		if got := stdinSourceFor(msg); got != src {
+			t.Errorf("source was rewritten (kind %q): %q", msg.Kind, got)
+		}
 	}
 }
 

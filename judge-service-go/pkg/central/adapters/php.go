@@ -6,7 +6,6 @@ import (
 
 	"judge-service-go/pkg/languages"
 	"judge-service-go/pkg/models"
-	"judge-service-go/pkg/util"
 	"judge-service-go/pkg/workspace"
 	"judge-service-go/pkg/wrapper"
 )
@@ -38,7 +37,7 @@ func (PHPAdapter) PrepareFiles(workDir string, submissionMsg models.SubmissionMe
 		return nil, err
 	}
 
-	userCode := normalizePHPUserCode(util.UnescapeCode(submissionMsg.Code))
+	userCode := normalizePHPUserCode(submissionMsg.Code)
 	finalCode := strings.Replace(wrapperCode, "// USER_CODE_MARKER", userCode, 1)
 
 	if err := workspace.WriteFile(workDir, "wrapper.php", []byte(finalCode), 0644); err != nil {

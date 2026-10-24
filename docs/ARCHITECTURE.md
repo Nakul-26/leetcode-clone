@@ -298,7 +298,7 @@ Each entry records a decision a future maintainer is likely to want to revisit, 
 | **404, not 403, across tenants** | A 403 confirms the id exists |
 | **Outputs always base64 in responses** | The original synchronous path did this; changing it would break existing callers |
 | **`expected_output` is ignored** | The original path ignored it; callers compare themselves |
-| **Ad-hoc source is not unescaped** | The unescape step corrupts any string literal containing a backslash escape. See the portal-changes doc, section 7 |
+| **Source is never unescaped** | The unescape step corrupted any string literal containing a backslash escape. Removed from every path on 2026-10-24 (JUDGE_FIX_PLAN F1) |
 | **Ad-hoc rows expire after 24 h** | Keeps the submissions collection from growing with every "Run" click. `usageevents` is the durable record |
 | **Per-client fairness inside the queue is not implemented** | Each queue is a single FIFO. A client's rate limit bounds how much it can enqueue, which is the protection today. True per-client queues are future work |
 

@@ -153,6 +153,9 @@ To check the exam's own questions, add their reference solutions and expected ou
 
 ## 7. A separate issue worth deciding on: source "unescaping" (already on production)
 
+> **Resolved 2026-10-24.** The first query below returned 0 on production, so `UnescapeCode` was
+> removed from every path (JUDGE_FIX_PLAN F1). The rest of this section is kept for the record.
+
 **This is not a local-only problem.** It is in the code on `origin/main` today, and a redeploy neither
 introduces nor fixes it for the paths below.
 

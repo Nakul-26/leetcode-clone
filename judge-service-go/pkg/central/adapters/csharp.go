@@ -8,7 +8,6 @@ import (
 	"judge-service-go/pkg/models"
 	"judge-service-go/pkg/workspace"
 	"judge-service-go/pkg/wrapper"
-	"judge-service-go/pkg/util"
 )
 
 type CSharpAdapter struct{}
@@ -24,7 +23,7 @@ func (CSharpAdapter) PrepareFiles(workDir string, submissionMsg models.Submissio
 		return nil, err
 	}
 
-	finalCode := strings.Replace(wrapperCode, "// USER_CODE_MARKER", util.UnescapeCode(submissionMsg.Code), 1)
+	finalCode := strings.Replace(wrapperCode, "// USER_CODE_MARKER", submissionMsg.Code, 1)
 
 	if err := workspace.WriteFile(workDir, "Program.cs", []byte(finalCode), 0644); err != nil {
 		return nil, fmt.Errorf("failed to write Program.cs: %w", err)

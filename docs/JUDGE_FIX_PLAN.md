@@ -1,6 +1,6 @@
 # Judge Fix Plan
 
-**Created:** 2026-10-23 · **Last updated:** 2026-10-23 (R1-R6, R9, C1-C3 done)
+**Created:** 2026-10-23 · **Last updated:** 2026-10-24 (R1-R7, R9, F1, C1-C3 done)
 
 The single list of everything found in the 2026-10-23 judge review, plus the open items already recorded in
 [`JUDGE_PERFORMANCE_REVIEW.md`](./JUDGE_PERFORMANCE_REVIEW.md) §5,
@@ -18,15 +18,15 @@ Line numbers are as of commit `8a24162` and will drift.
 
 | # | Problem | Fix | Size | Status | Date / commit |
 |---|---|---|---|---|---|
-| R1 | No RabbitMQ reconnect: when the connection drops, every worker loop ends, the process stays up and judges nothing (`main.go` consumer setup) | Watch `NotifyClose` on the connection and channel; on loss, exit with a non-zero code so the container restarts (`restart: unless-stopped`) and redelivers unacked work. Later, in-process reconnect if needed | S | done | 2026-10-23 · exits on connection/channel loss or all consumers stopping; verified live (RabbitMQ restart → exit 1 → restarted → judging) |
-| R2 | `/health` always returns healthy | Report unhealthy when the AMQP connection is closed or the consumers have stopped | S | done | 2026-10-23 · `/health` returns 503 while not consuming |
-| R3 | Shutdown never stops consuming: `ch.Cancel("", false)` matches no consumer, so `workerWg.Wait()` hangs until SIGKILL; in-flight work is killed and re-run | Give both consumers explicit tags and cancel each by tag; add `stop_grace_period` in compose long enough for a run to finish | S | done | 2026-10-23 · named consumer tags, unstarted prefetched messages returned, `stop_grace_period: 2m`; verified live (stop in 15 s, exit 0) |
-| R4 | Several drop paths `Nack(false,false)` without updating the row, so the submission stays Pending forever (bad problem data, unsupported language, strategy setup error, file prep error) | Call `markSubmissionExecutionFailed` before every permanent drop where the submission id is known | S | done | 2026-10-23 · `dropSubmission` on every permanent drop; verified live (unsupported language → Error) |
-| R5 | A missing/deleted problem or invalid problem id is requeued immediately (`Nack(false,true)`): endless hot loop | `ErrNoDocuments` and a bad hex id are permanent: mark failed + drop. Only real DB errors are retried, and through the TTL retry queue, not an instant requeue | S | done | 2026-10-23 · `errProblemNotFound` → failed; DB errors via `retryLater`; verified live (one log line, no loop) |
-| R6 | Redelivered submissions write a second usage event (billing) and bump problem counters again | Upsert the usage event keyed on `submissionId` for queue submissions; only `$inc` problem counters when the submission was not already finished | S | done | 2026-10-23 · `FindOneAndUpdate` returns the prior row; existing testResult = repeat, no usage event or counter bump; rejudge still counts; verified live |
-| R7 | API publishes without publisher confirms; `sendToQueue` returning false is ignored | Use a confirm channel and await the confirm; on failure take the existing 503 + mark-Error + refund path | S | todo | |
-| R8 | No recovery for rows stuck Pending (lost message, crash) | Periodic reaper in the API: Pending older than N minutes is re-published once, then marked Error | M | todo | |
-| R9 | DB writes in `processAndStoreResults` use `context.Background()` with no timeout: a Mongo stall blocks a worker forever | Bounded context (e.g. 15 s) for the result writes | S | done | 2026-10-23 · 15 s bound on result writes and `markSubmissionExecutionFailed` |
+| R1 | No RabbitMQ reconnect: when the connection drops, every worker loop ends, the process stays up and judges nothing (`main.go` consumer setup) | Watch `NotifyClose` on the connection and channel; on loss, exit with a non-zero code so the container restarts (`restart: unless-stopped`) and redelivers unacked work. Later, in-process reconnect if needed | S | done | 2026-10-23 · `a673d13` · exits on connection/channel loss or all consumers stopping; verified live (RabbitMQ restart → exit 1 → restarted → judging) |
+| R2 | `/health` always returns healthy | Report unhealthy when the AMQP connection is closed or the consumers have stopped | S | done | 2026-10-23 · `a673d13` · `/health` returns 503 while not consuming |
+| R3 | Shutdown never stops consuming: `ch.Cancel("", false)` matches no consumer, so `workerWg.Wait()` hangs until SIGKILL; in-flight work is killed and re-run | Give both consumers explicit tags and cancel each by tag; add `stop_grace_period` in compose long enough for a run to finish | S | done | 2026-10-23 · `a673d13` · named consumer tags, unstarted prefetched messages returned, `stop_grace_period: 2m`; verified live (stop in 15 s, exit 0) |
+| R4 | Several drop paths `Nack(false,false)` without updating the row, so the submission stays Pending forever (bad problem data, unsupported language, strategy setup error, file prep error) | Call `markSubmissionExecutionFailed` before every permanent drop where the submission id is known | S | done | 2026-10-23 · `a673d13` · `dropSubmission` on every permanent drop; verified live (unsupported language → Error) |
+| R5 | A missing/deleted problem or invalid problem id is requeued immediately (`Nack(false,true)`): endless hot loop | `ErrNoDocuments` and a bad hex id are permanent: mark failed + drop. Only real DB errors are retried, and through the TTL retry queue, not an instant requeue | S | done | 2026-10-23 · `a673d13` · `errProblemNotFound` → failed; DB errors via `retryLater`; verified live (one log line, no loop) |
+| R6 | Redelivered submissions write a second usage event (billing) and bump problem counters again | Upsert the usage event keyed on `submissionId` for queue submissions; only `$inc` problem counters when the submission was not already finished | S | done | 2026-10-23 · `a673d13` · `FindOneAndUpdate` returns the prior row; existing testResult = repeat, no usage event or counter bump; rejudge still counts; verified live |
+| R7 | API publishes without publisher confirms; `sendToQueue` returning false is ignored | Use a confirm channel and await the confirm; on failure take the existing 503 + mark-Error + refund path | S | done | 2026-10-24 · confirm channel, publish awaits the broker ack (10 s timeout). Also: the shared channel now reconnects after a broker restart or a channel error (before, the API either crashed on the unhandled `error` event or returned 503 until restarted); `/api/health` triggers a reconnect; admin system-stats reads queue depth on a throwaway channel, not the shared one. Verified live (broker stopped → 503, broker back → same process publishes again) |
+| R8 | No recovery for rows stuck Pending (lost message, crash). Also the rejudge loops (`rejudgeProblemSubmissions`, `rejudgeAssessmentSubmissions`) set rows Pending before publishing, so a publish failure mid-loop leaves the rest Pending | Periodic reaper in the API: Pending older than N minutes is re-published once, then marked Error | M | todo | |
+| R9 | DB writes in `processAndStoreResults` use `context.Background()` with no timeout: a Mongo stall blocks a worker forever | Bounded context (e.g. 15 s) for the result writes | S | done | 2026-10-23 · `a673d13` · 15 s bound on result writes and `markSubmissionExecutionFailed` |
 
 ## Phase 2 — Throughput (biggest capacity wins)
 
@@ -41,13 +41,15 @@ Line numbers are as of commit `8a24162` and will drift.
 | T7 | [known] C/C++ precompiled `bits/stdc++.h` not built | Build the PCH in `judge-cpp-env` with the exact submission flags; verify it is used (`-H`/`-Winvalid-pch`) | S | todo | |
 | T8 | [known] Java: no startup tuning | `-XX:TieredStopAtLevel=1 -XX:+UseSerialGC -Xshare:auto` + AppCDS archive in `judge-java-env`; measure before/after | M | todo | |
 | T9 | [known] Kotlin and C# compile slowly (~10 s) | Warm compiler daemon / `csc` direct | L | todo | |
-| T10 | The exam portal's legacy synchronous path compiles once per test case | Issue it an API key and move it to the batch endpoint (owner action, see `FRIEND_PORTAL_CHANGES.md`) | S (code) | blocked | |
+| T10 | The exam portal's legacy synchronous path compiles once per test case | Issue it an API key and move it to the batch endpoint (owner action, see `FRIEND_PORTAL_CHANGES.md`) | S (code) | deferred (owner decision 2026-10-24: later) | |
 
 ## Phase 3 — Fairness and correctness
 
 | # | Problem | Fix | Size | Status | Date / commit |
 |---|---|---|---|---|---|
-| F1 | [known] Stored-problem code is "unescaped": `print("a\nb")` becomes a SyntaxError, `cout << "x\n"` does not compile | Run the two read-only queries in `FRIEND_PORTAL_CHANGES.md` §7 on production; if the first is ~0, remove `UnescapeCode` from the adapters and stdin runner | S | blocked (needs prod query) | |
+| F1 | [known] Stored-problem code is "unescaped": `print("a\nb")` becomes a SyntaxError, `cout << "x\n"` does not compile | Run the two read-only queries in `FRIEND_PORTAL_CHANGES.md` §7 on production; if the first is ~0, remove `UnescapeCode` from the adapters and stdin runner | S | done | 2026-10-24 · prod query returned 0; `UnescapeCode` deleted from all six adapters and the stdin runner. Verified live (Python `print("a
+b")` and C++ `cout << "x
+"` both Accepted) |
 | F2 | [known] Function-mode C/C++ compile at `-O0` while stdin mode uses `-O2` | `-O2` in `cpp.go` / `c.go` (same flags as the PCH, T7) | S | todo | |
 | F3 | [known] Function-mode Java has no heap cap | Add `-Xmx` to `adapters/java.go` run commands | S | todo | |
 | F4 | Java stdin uses `-Xmx256m` while the default problem memory limit is 256 MB: heap + JVM overhead exceeds the cgroup, reported as MLE | Derive `-Xmx` from the problem limit (e.g. limit minus ~64 MB), or give JVM languages a memory allowance | S | todo | |
@@ -73,9 +75,9 @@ Line numbers are as of commit `8a24162` and will drift.
 
 | # | Problem | Fix | Size | Status | Date / commit |
 |---|---|---|---|---|---|
-| C1 | `/run` uses the server context, not the request's, so a disconnected client does not cancel its run | Use `r.Context()` | S | done | 2026-10-23 |
-| C2 | `assessment-api/src/services/judge.service.js` is dead code (wrong port, `node-fetch` is not a dependency, no callers) | Delete it | S | done | 2026-10-23 |
-| C3 | `MaxSubmissionRetries` comment says "~60 s"; each attempt first waits 30 s for a container, so it is ~7 min | Fix the comment and `ARCHITECTURE.md` §4 | S | done | 2026-10-23 · also ARCHITECTURE.md §4/§8 and OPERATIONS_RUNBOOK.md |
+| C1 | `/run` uses the server context, not the request's, so a disconnected client does not cancel its run | Use `r.Context()` | S | done | 2026-10-23 · `a673d13` |
+| C2 | `assessment-api/src/services/judge.service.js` is dead code (wrong port, `node-fetch` is not a dependency, no callers) | Delete it | S | done | 2026-10-23 · `a673d13` |
+| C3 | `MaxSubmissionRetries` comment says "~60 s"; each attempt first waits 30 s for a container, so it is ~7 min | Fix the comment and `ARCHITECTURE.md` §4 | S | done | 2026-10-23 · `a673d13` · also ARCHITECTURE.md §4/§8 and OPERATIONS_RUNBOOK.md |
 
 ---
 
@@ -85,3 +87,4 @@ Line numbers are as of commit `8a24162` and will drift.
 |---|---|
 | 2026-10-23 | Plan created from the judge review; known items folded in |
 | 2026-10-23 | Done: R1, R2, R3, R4, R5, R6, R9, C1, C2, C3. Verified on the local Docker stack (missing problem, unsupported language, redelivery, rejudge, graceful stop, RabbitMQ restart). Judge unit tests pass except the two symlink tests that need admin rights on Windows; API suite passes (3 files flaky only under full parallel run). Dev compose judge now has `restart: unless-stopped` |
+| 2026-10-24 | Done: F1 (owner ran the prod query: 0 pre-escaped submissions) and R7 (confirmed publish + API reconnect). T10 deferred by the owner. API suite 241/241; judge tests pass except the Windows symlink pair |

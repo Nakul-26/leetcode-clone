@@ -13,7 +13,6 @@ import (
 	"judge-service-go/pkg/executor"
 	"judge-service-go/pkg/models"
 	"judge-service-go/pkg/pool"
-	"judge-service-go/pkg/util"
 	"judge-service-go/pkg/workspace"
 )
 
@@ -233,14 +232,11 @@ func stdinTestExpected(tc models.TestCase) (text string, hasExpected bool, ok bo
 	return s, true, isString
 }
 
-// stdinSourceFor returns the program text to write for a stdin submission.
-// Ad-hoc source arrives exactly as the caller wrote it, as /raw-run always treated it.
-// UnescapeCode exists for stored-problem submissions whose code can arrive with literal
-// backslash sequences. Applied to raw source it rewrites the escape inside every string
-// literal into a real newline, so a C++ program printing a newline stops compiling.
+// stdinSourceFor returns the program text to write for a stdin submission: exactly what
+// the student wrote. Source used to go through UnescapeCode, which turned the two
+// characters backslash-n into a real newline and broke programs that print one.
+// It was removed on 2026-10-24 after production showed no client sends pre-escaped
+// code (JUDGE_FIX_PLAN F1).
 func stdinSourceFor(msg models.SubmissionMessage) string {
-	if msg.IsAdHoc() {
-		return msg.Code
-	}
-	return util.UnescapeCode(msg.Code)
+	return msg.Code
 }

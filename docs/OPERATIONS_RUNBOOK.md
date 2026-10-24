@@ -348,7 +348,7 @@ fix waiting for its turn.
 |---|---|---|
 | **IP rate limits may be global behind a proxy** | The API never sets `trust proxy`. If production sits behind a reverse proxy, every request appears to come from the proxy's IP, so the per-IP limiters (login: 100 per 15 min) apply to **all users combined**. Audit-log IPs would also all be the proxy's | Verify with a request from two different networks. If confirmed, set Express `trust proxy` to the proxy's hop count. Not changed yet because it alters live behaviour |
 | **Legacy shared secrets are unmetered** | A client on one has no identity: no usage, no quota, no revocation without rotating for everyone | Issue every client a real key; then retire the secrets |
-| **Unescape step corrupts some stored-problem code** | Live today for function-mode Python/JS/TS/Ruby/PHP/C# and all stored stdin problems. See [`FRIEND_PORTAL_CHANGES.md`](./FRIEND_PORTAL_CHANGES.md#7-a-separate-issue-worth-deciding-on-source-unescaping-already-on-production) | Run the two queries there on production, then decide |
+| ~~**Unescape step corrupts some stored-problem code**~~ | **Fixed 2026-10-24** (JUDGE_FIX_PLAN F1): production had 0 pre-escaped submissions, so the step was removed from every path | — |
 | **Fixed-window limits allow up to 2x across a boundary** | Accepted: the aim is to stop a runaway client, not meter exactly | Billing reads the exact `usageevents` record |
 | **No per-client fairness inside a queue** | Each queue is a single FIFO. A rate limit bounds how much one client can enqueue, which is the protection | Future work if one client's burst starts hurting another's latency |
 | **One judge host** | No redundancy; Docker access needs the host's own daemon | Horizontal scale-out is plan Phase 5 |
