@@ -3,6 +3,7 @@ import {
   enqueueAdHoc, enqueueBatch, waitForCompletion, findOwned, findOwnedMany, toApiResponse, MAX_BATCH_SIZE, MAX_SOURCE_BYTES
 } from "../services/adhocExecution.service.js";
 import { admitApiClient } from "../services/apiClientQuota.service.js";
+import { checkTestCases } from "../services/testCaseCheck.service.js";
 
 function b64decode(s) {
   if (!s) return "";
@@ -194,4 +195,62 @@ export async function getBatch(req, res) {
   return res.status(200).json({
     submissions: docs.map((doc, i) => (doc ? toApiResponse(doc, tokens[i]) : null))
   });
+}
+
+// POST /codeAssess/test-cases/generate?base64_encoded=true
+// POST /codeAssess/test-cases/check?base64_encoded=true
+// Body: { language_id, source_code, test_cases: [{ stdin, expected_output? }], cpu_time_limit?, memory_limit? }
+//
+// For a platform that keeps its own questions and reference solutions: runs the reference
+// solution on each input and returns its output (generate), and with check also says whether
+// each expected_output is correct. Nothing is stored. Metered like a run: one unit per test case.
+// See testCaseCheck.service.js and docs/GO_JUDGE_API.md "Check or generate test cases".
+export function testCasesHandler(mode) {
+  return async function handleTestCases(req, res) {
+    const body = req.body || {};
+    const base64 = req.query.base64_encoded !== "false";
+    const decode = (v) => (v === undefined || v === null ? v : base64 ? b64decode(v) : String(v));
+    const encode = (v) => (v === undefined || v === null ? v : base64 ? b64encode(v) : v);
+
+    const sourceCode = decode(body.source_code) || "";
+    if (Buffer.byteLength(sourceCode, "utf8") > MAX_SOURCE_BYTES) {
+      return res.status(413).json({ error: `source_code exceeds the ${MAX_SOURCE_BYTES}-byte limit`, code: "source_too_large" });
+    }
+    const cases = Array.isArray(body.test_cases)
+      ? body.test_cases.map((c) => ({ stdin: decode(c?.stdin) ?? "", expected_output: decode(c?.expected_output) }))
+      : body.test_cases;
+
+    let admission = null;
+    if (req.apiClient && Array.isArray(cases) && cases.length > 0) {
+      admission = await admitApiClient(req.apiClient, cases.length);
+      if (!admission.allowed) return sendQuotaDenied(res, admission);
+    }
+
+    let result;
+    try {
+      result = await checkTestCases({
+        languageId: body.language_id,
+        sourceCode,
+        cases,
+        timeLimitSec: Number(body.wall_time_limit) || Number(body.cpu_time_limit) || undefined,
+        memoryLimitKb: Number(body.memory_limit) || undefined,
+        mode
+      });
+    } catch (err) {
+      await admission?.refund();
+      if (err.status && err.body) return res.status(err.status).json(err.body);
+      throw err;
+    }
+
+    return res.status(200).json({
+      ...result,
+      compile_output: encode(result.compile_output),
+      results: result.results.map((r) => ({
+        ...r,
+        actual_output: encode(r.actual_output),
+        expected_output: encode(r.expected_output),
+        stderr: encode(r.stderr)
+      }))
+    });
+  };
 }

@@ -35,13 +35,13 @@ function errorText(detail) {
 
 /**
  * Runs the problem's reference solution on `testCases` ({ inputs, expected? }).
- * Returns one entry per test, in order: { output, matches, error }.
+ * Returns one entry per test, in order: { output, matches, error, stderr, timeMs }.
  *   output  - what the reference solution returned (function) or printed (stdin)
  *   matches - true/false when the test has an expected value, null when it has none
  *   error   - set when the reference solution itself failed on this test (TLE, crash)
  * Throws HttpError 400 when there is no reference solution or it does not compile.
  */
-export async function runReferenceSolution(problem, testCases) {
+export async function runReferenceSolution(problem, testCases, { timeLimitMs, memoryLimitMb } = {}) {
   if (!problem.referenceSolution || !problem.solutionLanguage) {
     throw new HttpError(400, "A reference solution is required", {
       msg: "Add a reference solution and its language first: expected outputs are computed from it."
@@ -66,6 +66,11 @@ export async function runReferenceSolution(problem, testCases) {
       isHidden: true
     }))
   };
+  // Run under the limits students will get; the judge clamps them.
+  const time = timeLimitMs ?? problem.timeLimitMs;
+  const memory = memoryLimitMb ?? problem.memoryLimitMb;
+  if (time > 0) msg.timeLimitMs = Math.round(time);
+  if (memory > 0) msg.memoryLimitMb = Math.round(memory);
   if (!stdin) {
     msg.functionName = problem.functionName;
     msg.parameters = problem.parameters;
@@ -100,12 +105,14 @@ export async function runReferenceSolution(problem, testCases) {
   const details = Array.isArray(result.details) ? result.details : [];
   return testCases.map((tc, i) => {
     const detail = details.find((d) => d.test === i + 1) || details[i];
-    if (!detail) return { output: null, matches: null, error: "The judge returned no result for this test" };
+    if (!detail) return { output: null, matches: null, error: "The judge returned no result for this test", stderr: "", timeMs: 0 };
     const error = errorText(detail);
     return {
       output: detail.output ?? null,
       matches: error ? false : hasValue(tc.expected) ? !!detail.passed : null,
-      error
+      error,
+      stderr: detail.stderr || detail.traceback || "",
+      timeMs: detail.timeMs ?? 0
     };
   });
 }

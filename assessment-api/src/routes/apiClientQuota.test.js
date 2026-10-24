@@ -318,4 +318,32 @@ describe("Per-API-client admission control (plan Phase 4)", () => {
       expect(res.body.clients[0]).toMatchObject({ testCases: 6, executions: 1 });
     });
   });
+  describe("test-case check (P12)", () => {
+    const check = (key, n) => request(app)
+      .post("/api/codeAssess/test-cases/check?base64_encoded=false")
+      .set("x-rapidapi-key", key)
+      .send({ language_id: 71, source_code: "print(input())", test_cases: Array.from({ length: n }, (_, i) => ({ stdin: `${i}` })) });
+
+    it("is metered per test case, like a run", async () => {
+      const { key, id } = await makeClient();
+      await ApiClient.updateOne({ _id: id }, { rateLimitPerMin: 3 });
+
+      expect((await check(key, 4)).body.code).toBe("exceeds_rate_limit");
+      expect((await check(key, 2)).status).toBe(200);
+      const over = await check(key, 2);
+      expect(over.status).toBe(429);
+      expect(over.body.code).toBe("rate_limited");
+    });
+
+    it("gives the units back when the request is refused before running", async () => {
+      const { key, id } = await makeClient();
+      await ApiClient.updateOne({ _id: id }, { rateLimitPerMin: 3 });
+      const bad = await request(app)
+        .post("/api/codeAssess/test-cases/check?base64_encoded=false")
+        .set("x-rapidapi-key", key)
+        .send({ language_id: 999, source_code: "x", test_cases: [{ stdin: "" }, { stdin: "" }, { stdin: "" }] });
+      expect(bad.status).toBe(400);
+      expect((await check(key, 3)).status).toBe(200);
+    });
+  });
 });

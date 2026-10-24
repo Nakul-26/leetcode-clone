@@ -1,7 +1,7 @@
 import express from "express";
 import { env } from "../config/env.js";
 import { apiClientAuth } from "../middleware/apiClient.mjs";
-import { submitRawExecution, getRawExecution, submitBatch, getBatch } from "../controllers/codeAssessShim.controller.js";
+import { submitRawExecution, getRawExecution, submitBatch, getBatch, testCasesHandler } from "../controllers/codeAssessShim.controller.js";
 
 const router = express.Router();
 
@@ -28,5 +28,11 @@ router.post("/submissions", submitRawExecution);
 router.post("/submissions/batch", submitBatch);
 router.get("/submissions/batch", getBatch);
 router.get("/submissions/:token", getRawExecution);
+
+// Test-case authoring for a platform that stores its own questions and reference solutions:
+// run the reference solution on inputs and return its outputs, or check given expected outputs.
+// Nothing is stored. (JUDGE_FIX_PLAN P12)
+router.post("/test-cases/generate", testCasesHandler("generate"));
+router.post("/test-cases/check", testCasesHandler("check"));
 
 export default router;

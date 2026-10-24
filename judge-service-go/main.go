@@ -357,18 +357,24 @@ const (
 //
 // Title and Description exist only to satisfy Problem.ValidateBasic; nothing renders
 // them, because an ad-hoc submission has no problem page to render them on.
-func adHocProblem(submissionMsg models.SubmissionMessage) models.Problem {
-	// The limits come from an external caller, so they are clamped here rather than trusted.
-	// /raw-run has always done the same; without it a caller could ask for an hour and hold a
-	// container for the whole of the submission budget.
-	timeLimitMs := submissionMsg.TimeLimitMs
+// callerLimits returns the time and memory limits a message asks for. They come from an external
+// caller, so they are clamped here rather than trusted. /raw-run has always done the same;
+// without it a caller could ask for an hour and hold a container for the whole of the
+// submission budget. Zero means "use the default".
+func callerLimits(submissionMsg models.SubmissionMessage) (timeLimitMs int64, memoryLimitMb int64) {
+	timeLimitMs = submissionMsg.TimeLimitMs
 	if timeLimitMs > maxAdHocTimeLimitMs {
 		timeLimitMs = maxAdHocTimeLimitMs
 	}
-	memoryLimitMb := submissionMsg.MemoryLimitMb
+	memoryLimitMb = submissionMsg.MemoryLimitMb
 	if memoryLimitMb > maxAdHocMemoryLimitMb {
 		memoryLimitMb = maxAdHocMemoryLimitMb
 	}
+	return timeLimitMs, memoryLimitMb
+}
+
+func adHocProblem(submissionMsg models.SubmissionMessage) models.Problem {
+	timeLimitMs, memoryLimitMb := callerLimits(submissionMsg)
 	return models.Problem{
 		Title:         "Ad-hoc execution",
 		Description:   "Submitted through the public execution API; no stored problem.",
@@ -1431,6 +1437,9 @@ func startHealthServer(ctx context.Context, containerPool *pool.ContainerPool, p
 					ReturnType:    msg.ReturnType,
 					CompareConfig: msg.CompareConfig,
 				}
+				// A draft can carry its own limits, so a reference solution is checked under the
+				// limits students will get (assessment-api referenceSolution.service.js).
+				problem.TimeLimitMs, problem.MemoryLimitMb = callerLimits(msg)
 				// Default return type if missing to pass ValidateBasic (function-mode only —
 				// stdin problems don't use ReturnType).
 				if problem.EffectiveType() != models.StdinProblem && problem.ReturnType == "" {

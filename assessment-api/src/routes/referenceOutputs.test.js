@@ -62,7 +62,7 @@ describe('reference solution as the source of truth (Phase 6)', () => {
           { inputs: ['7\n'], expected: '15\n' }
         ]));
       expect(res.status).toBe(200);
-      expect(res.body.tests).toEqual([
+      expect(res.body.tests).toMatchObject([
         { output: '6\n', matches: null, error: null },
         { output: '10\n', matches: true, error: null },
         { output: '14\n', matches: false, error: null }

@@ -137,6 +137,26 @@ Full detail and examples: [`GO_JUDGE_API.md`](./GO_JUDGE_API.md).
 
 ---
 
+## 5c. Checking test cases while writing a question (new, optional)
+
+A wrong expected output fails every student who wrote correct code. The portal keeps its questions and
+reference solutions; GO Judge can now run a reference solution on a question's inputs **without storing
+anything**, so the portal can catch those mistakes before students see the question.
+
+- `POST /api/codeAssess/test-cases/generate`: send the reference solution and the inputs, get back what
+  it prints for each input. Store that as the expected output instead of typing it.
+- `POST /api/codeAssess/test-cases/check`: also send the expected outputs; each one comes back marked
+  correct or not, with what the reference solution actually printed. `all_match: true` means every
+  test case is correct.
+
+Same `x-rapidapi-key` header, `language_id` values and base64 rules as `/submissions`; up to 100 test
+cases per call, counted against the quota like runs. Send the question's time and memory limits too, so
+a reference solution that is too slow is caught as well. Full request, response and a Node.js example:
+[`GO_JUDGE_API.md` "Check or generate test cases"](./GO_JUDGE_API.md#check-or-generate-test-cases).
+
+Suggested portal change: on "save question", call `check`; refuse to publish unless `all_match` is
+true, and show each mismatch next to its test case.
+
 ## 6. How to verify before an exam
 
 Local stack only (the script refuses non-local hosts without `--allow-remote`):

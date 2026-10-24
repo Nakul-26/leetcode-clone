@@ -35,7 +35,7 @@ type SubmissionMessage struct {
 	// submission into an unjudged "Accepted", which is exactly the kind of
 	// silent wrong answer an exam cannot tolerate.
 	Kind string `json:"kind,omitempty"`
-	// Per-submission limits, used only by ad-hoc submissions: a stored Problem
+	// Per-submission limits, used by ad-hoc submissions and by /run for a problem that is not saved: a stored Problem
 	// carries its own, but a GO Judge caller sends cpu_time_limit/memory_limit with
 	// each request and there is no Problem to read them from.
 	TimeLimitMs   int64 `json:"timeLimitMs,omitempty"`

@@ -12,6 +12,7 @@ full platform (assessments, student accounts, proctoring, results), see
 - [Authentication](#authentication)
 - [Run one program](#run-one-program)
 - [Run many test cases (batch)](#run-many-test-cases-batch)
+- [Check or generate test cases](#check-or-generate-test-cases)
 - [Reading results](#reading-results)
 - [Languages](#languages)
 - [Limits](#limits)
@@ -182,6 +183,104 @@ in the order you asked. An unknown, expired or foreign token is `null`. Poll unt
   the same `compile_output`.
 - A **timeout or crash** is reported only on the test case that caused it. Its neighbours keep
   their own results.
+
+---
+
+## Check or generate test cases
+
+When you write a question, a wrong expected output fails every correct student. These two endpoints
+take **your reference solution** and the test inputs, run the solution, and tell you what it prints.
+Use them while creating or editing a question, before students see it.
+
+**Nothing is stored.** Your reference solution and test cases are run and then discarded; they stay on
+your platform.
+
+| Endpoint | Use it to |
+|---|---|
+| `POST {BASE}/test-cases/generate?base64_encoded=true` | Get the expected output for each input. Any `expected_output` you send is ignored. |
+| `POST {BASE}/test-cases/check?base64_encoded=true` | Find out whether the expected outputs you already have are correct. |
+
+### Request
+
+```json
+{
+  "language_id": 54,
+  "source_code": "<base64 reference solution>",
+  "test_cases": [
+    { "stdin": "<base64>", "expected_output": "<base64>" },
+    { "stdin": "<base64>" }
+  ],
+  "cpu_time_limit": 2,
+  "memory_limit": 262144
+}
+```
+
+- Same authentication, `language_id` values and base64 rules as `/submissions`. With
+  `base64_encoded=false`, send and receive plain text instead.
+- Up to **100** test cases per request. More is `422`.
+- `expected_output` is optional on `check`: a case without one is just run and its output returned.
+- `cpu_time_limit` (seconds) and `memory_limit` (KB) are optional. **Send the limits your students
+  will get**: a reference solution that is too slow then shows up as a time limit failure here, not
+  as a test case no student can pass.
+- Counted against your quota like a run: one unit per test case.
+
+### Response `200`
+
+```json
+{
+  "compile_error": false,
+  "compile_output": null,
+  "all_match": false,
+  "summary": { "total": 3, "matched": 1, "mismatched": 1, "generated": 1, "failed": 0 },
+  "results": [
+    { "index": 0, "status": { "id": 3, "description": "Accepted" }, "actual_output": "<base64>", "expected_output": "<base64>", "match": true,  "exact_match": false, "error": null, "stderr": "", "time": "0.012" },
+    { "index": 1, "status": { "id": 3, "description": "Accepted" }, "actual_output": "<base64>", "expected_output": "<base64>", "match": false, "exact_match": false, "error": null, "stderr": "", "time": "0.011" },
+    { "index": 2, "status": { "id": 3, "description": "Accepted" }, "actual_output": "<base64>", "expected_output": null,       "match": null,  "exact_match": null,  "error": null, "stderr": "", "time": "0.010" }
+  ]
+}
+```
+
+- `results` are in the same order as `test_cases`; `index` is the position.
+- `actual_output` is what your reference solution printed. On `generate`, this is your expected output.
+- `match` uses the same rule GO Judge uses for stdin problems: the outputs are equal **after trailing
+  spaces, tabs and newlines are removed**. `exact_match` compares byte for byte, for platforms that
+  compare that way. `null` when you sent no expected output.
+- `all_match` is `true` only when every case had an expected output and every one is correct. Use it
+  as the "safe to publish" check.
+- If the reference solution fails on an input, that case has `status` 5 (time limit) or 11 (runtime
+  error), `actual_output: null`, `match: false` when an expected output was sent, and the reason in
+  `error` and `stderr`. Usually the input breaks the problem's constraints, or the solution is wrong.
+- If the reference solution does not compile: `compile_error: true`, `status.id` 6, the compiler
+  message in `compile_output`, and `results` is empty.
+
+### Example: check a question before publishing it (Node.js)
+
+```js
+const b64 = (s) => Buffer.from(s).toString("base64");
+const unb64 = (s) => (s == null ? s : Buffer.from(s, "base64").toString("utf8"));
+
+const res = await fetch(`${BASE}/test-cases/check?base64_encoded=true`, {
+  method: "POST",
+  headers: { "Content-Type": "application/json", "x-rapidapi-key": API_KEY },
+  body: JSON.stringify({
+    language_id: question.referenceLanguageId,
+    source_code: b64(question.referenceSolution),
+    test_cases: question.testCases.map((t) => ({ stdin: b64(t.input), expected_output: b64(t.output) })),
+    cpu_time_limit: question.timeLimitSec,
+    memory_limit: question.memoryLimitKb
+  })
+});
+const report = await res.json();
+if (report.compile_error) throw new Error(unb64(report.compile_output));
+for (const r of report.results.filter((r) => r.match === false)) {
+  console.log(`Test ${r.index + 1}: expected ${JSON.stringify(unb64(r.expected_output))}, ` +
+              `the reference solution prints ${JSON.stringify(unb64(r.actual_output))} ${r.error || ""}`);
+}
+if (!report.all_match) throw new Error("Fix the test cases above before publishing");
+```
+
+To **fill in** outputs instead, call `/test-cases/generate` with only `stdin` in each case and store
+each `actual_output` as that case's expected output.
 
 ---
 
@@ -429,3 +528,5 @@ curl -s "$BASE/submissions/batch?tokens=<id>.0,<id>.1" -H "x-rapidapi-key: $KEY"
 
 This document describes the current behaviour. Fields are only ever **added**; existing fields keep
 their meaning. Operators announce changes that could affect an integration in advance.
+
+- **2026-10-24:** added `POST /test-cases/generate` and `POST /test-cases/check`, for authoring test cases with your own reference solution.
