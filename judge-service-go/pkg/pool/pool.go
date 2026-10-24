@@ -44,6 +44,7 @@ type ContainerPool struct {
 	targets    map[string]int                   // language -> current scaling target (min <= target <= max)
 	globalCap  int                              // max containers across ALL languages combined
 	images     map[string]string                // language -> image name
+	claims     map[string]int                   // language -> bulk workers holding or waiting for one of its containers
 }
 
 // NewPool creates a new container pool. globalCap bounds the total container count summed
@@ -58,7 +59,46 @@ func NewPool(cli *docker.Client, globalCap int) *ContainerPool {
 		targets:    make(map[string]int),
 		globalCap:  globalCap,
 		images:     make(map[string]string),
+		claims:     make(map[string]int),
 	}
+}
+
+// claimsPerContainer is how many bulk workers one language may tie up per container it
+// currently has: one running a submission, one waiting to take the container next.
+const claimsPerContainer = 2
+
+// TryClaim admits one bulk worker to wait for (and then hold) a container of lang, or refuses
+// when that language already has claimsPerContainer workers per container. Without it every
+// worker could end up blocked on one language's burst while messages for idle languages sat
+// unread behind it (JUDGE_FIX_PLAN T4). A refused caller should put the message back on the
+// queue and take other work. The returned func gives the claim back; call it once the
+// container has been released. A language the pool does not serve is always admitted (the
+// acquire that follows fails as before).
+func (p *ContainerPool) TryClaim(lang string) (release func(), ok bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if _, served := p.limits[lang]; !served {
+		return func() {}, true
+	}
+	limit := claimsPerContainer * p.targets[lang]
+	if limit < claimsPerContainer {
+		limit = claimsPerContainer
+	}
+	if p.claims[lang] >= limit {
+		return nil, false
+	}
+	if p.claims == nil {
+		p.claims = make(map[string]int)
+	}
+	p.claims[lang]++
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			p.mu.Lock()
+			p.claims[lang]--
+			p.mu.Unlock()
+		})
+	}, true
 }
 
 // Acquire gets a container from the pool for the given language.

@@ -1165,6 +1165,27 @@ func retryLater(ctx context.Context, d amqp.Delivery, ch *amqp.Channel, retryQue
 	d.Ack(false)
 }
 
+// deferBusy sends a submission back through the delayed retry queue because its language has
+// no room for another waiting worker. Unlike retryLater it does not use up a retry: the
+// submission is fine, the judge is just busy with that language, and a long burst must not
+// turn queued work into failures. It is counted as a timed-out acquire so the autoscaler sees
+// the demand and grows that language's pool.
+func deferBusy(ctx context.Context, d amqp.Delivery, ch *amqp.Channel, retryQueueName string, submissionMsg models.SubmissionMessage, lang string) {
+	metrics.RecordAcquire(lang, 0, true)
+	slog.Info("Language busy; deferring submission", "submissionId", submissionMsg.SubmissionID, "language", lang)
+	err := ch.PublishWithContext(ctx, "", retryQueueName, false, false, amqp.Publishing{
+		ContentType:  d.ContentType,
+		Body:         d.Body,
+		DeliveryMode: amqp.Persistent,
+	})
+	if err != nil {
+		slog.Error("Failed to defer submission", "submissionId", submissionMsg.SubmissionID, "error", err)
+		d.Nack(false, true)
+		return
+	}
+	d.Ack(false)
+}
+
 // processSubmission is the main coordinator for handling a submission message.
 func processSubmission(interactive bool, d amqp.Delivery, ch *amqp.Channel, retryQueueName string, problemsCollection *mongo.Collection, submissionsCollection *mongo.Collection, usageEventsCollection *mongo.Collection, redisClient *redis.Client, executor *executor.Executor, containerPool *pool.ContainerPool) {
 	ctx := context.Background()
@@ -1223,6 +1244,19 @@ func processSubmission(interactive bool, d amqp.Delivery, ch *amqp.Channel, retr
 		slog.Error("No execution strategy registered for problem type", "submissionId", submissionMsg.SubmissionID, "problemType", problem.EffectiveType())
 		dropSubmission(d, submissionsCollection, submissionMsg, "This type of problem cannot be run by the judge.")
 		return
+	}
+
+	// A bulk worker only waits for a container when its language has room for another waiter;
+	// otherwise the message goes back on the queue and this worker takes other work, so one
+	// language's burst cannot block every worker (JUDGE_FIX_PLAN T4). Registered before the
+	// container's own deferred release, so the claim is given back after the container is.
+	if !interactive {
+		releaseClaim, admitted := containerPool.TryClaim(lang.ID)
+		if !admitted {
+			deferBusy(ctx, d, ch, retryQueueName, submissionMsg, lang.ID)
+			return
+		}
+		defer releaseClaim()
 	}
 
 	// Acquire a container from the pool with a timeout
