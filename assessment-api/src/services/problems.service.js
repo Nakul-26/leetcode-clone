@@ -20,50 +20,6 @@ function isSampleTestCase(tc = {}) {
   return false;
 }
 
-function sanitizeResultDetails(details = [], testCases = [], isAssessment = false) {
-  return details.map((detail, idx) => {
-    const testNum = detail.test ?? detail.Test;
-    const testIndexFromPayload = Number.isInteger(testNum) ? testNum - 1 : idx;
-    const tc = testCases[testIndexFromPayload];
-    const hidden = tc ? !isSampleTestCase(tc) : false;
-
-    if (!hidden) {
-      // For sample test cases, ensure all fields are present and correctly named for the frontend.
-      // We check for both lowercase and capitalized versions as the judge might return either depending on BSON tags.
-      return {
-        ...detail,
-        inputs: detail.inputs ?? detail.input ?? detail.Input,
-        expected: detail.expected ?? detail.Expected,
-        output: detail.output ?? detail.Output,
-        passed: detail.passed ?? detail.ok ?? detail.Passed ?? detail.Ok ?? false,
-        ok: detail.passed ?? detail.ok ?? detail.Passed ?? detail.Ok ?? false,
-        stdout: detail.stdout ?? detail.Stdout,
-        stderr: detail.stderr ?? detail.Stderr,
-        traceback: detail.traceback ?? detail.Traceback,
-        timeMs: detail.timeMs ?? detail.TimeMs,
-      };
-    }
-
-    // For hidden test cases
-    const sanitized = {
-      test: detail.test ?? detail.Test,
-      passed: detail.passed ?? detail.ok ?? detail.Passed ?? detail.Ok ?? false,
-      ok: detail.passed ?? detail.ok ?? detail.Passed ?? detail.Ok ?? false,
-      isHidden: true,
-      timeMs: detail.timeMs ?? detail.TimeMs
-    };
-
-    // Requirement: For Practice Problems, show Console Logs. For Assessments, hide them.
-    if (!isAssessment) {
-      sanitized.stdout = detail.stdout ?? detail.Stdout;
-      sanitized.stderr = detail.stderr ?? detail.Stderr;
-      sanitized.traceback = detail.traceback ?? detail.Traceback;
-    }
-
-    return sanitized;
-  });
-}
-
 const IDENTIFIER_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 function normalizeProblemPayload(payload = {}) {
