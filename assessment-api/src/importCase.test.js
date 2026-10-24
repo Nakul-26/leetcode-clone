@@ -24,12 +24,25 @@ function listSources(dir) {
   return out;
 }
 
-// True only if every path segment matches an on-disk name exactly (case included).
+// Directory listings, read once each. Re-reading every ancestor for every import took
+// ~3.6 s on Windows, close to vitest's 5 s limit, so the test timed out under a full run.
+const listings = new Map();
+function namesIn(dir) {
+  if (!listings.has(dir)) {
+    listings.set(dir, fs.existsSync(dir) ? new Set(fs.readdirSync(dir)) : null);
+  }
+  return listings.get(dir);
+}
+
+// True only if every path segment below the repository root matches an on-disk name exactly
+// (case included). Folders above it are the same for every import and are not checked.
+const repoRoot = path.resolve(apiRoot, '..');
 function existsExactCase(target) {
-  const parts = path.relative(path.parse(target).root, target).split(path.sep);
-  let current = path.parse(target).root;
-  for (const part of parts) {
-    if (!fs.existsSync(current) || !fs.readdirSync(current).includes(part)) return false;
+  const rel = path.relative(repoRoot, target);
+  if (rel.startsWith('..')) return fs.existsSync(target);
+  let current = repoRoot;
+  for (const part of rel.split(path.sep)) {
+    if (!namesIn(current)?.has(part)) return false;
     current = path.join(current, part);
   }
   return true;
