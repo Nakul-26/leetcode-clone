@@ -620,7 +620,7 @@ func TestCertificationSuite(t *testing.T) {
 				"cpp":        "class Solution { public: void run(int n) { std::vector<char> a(400*1024*1024, 1); asm volatile(\"\" : : \"r\"(a.data()) : \"memory\"); } };",
 				"csharp":     "public class Solution { public void run(int n) { var a = new byte[400*1024*1024]; for(int i=0; i<a.Length; i++) a[i]=1; } }",
 				"typescript": "function run(n: number): void { const a = new Array(40000000).fill(0.1); }",
-				"c":          "#include <stdlib.h>\n#include <string.h>\nvoid run(int n) { void* p = malloc(400*1024*1024); memset(p, 1, 400*1024*1024); }",
+				"c":          "#include <stdlib.h>\n#include <string.h>\nvoid run(int n) { void* p = malloc(400*1024*1024); memset(p, 1, 400*1024*1024); asm volatile(\"\" : : \"r\"(p) : \"memory\"); }",
 			},
 		},
 		{
@@ -639,7 +639,7 @@ func TestCertificationSuite(t *testing.T) {
 				"cpp":        "class Solution { public: int run(int n) { throw std::runtime_error(\"boom\"); } };",
 				"csharp":     "public class Solution { public int run(int n) { return 1 / n; } }",
 				"typescript": "function run(n: number): number { throw new Error('boom'); }",
-				"c":          "int run(int n) { return 1 / n; }",
+				"c":          "int run(int n) { volatile int one = 1; return one / n; }", // -O2 turns 1/n into a compare, with no divide to trap
 			},
 		},
 		{

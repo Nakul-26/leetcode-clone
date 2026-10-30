@@ -103,20 +103,29 @@ func runSubmissionStdinDetailed(ctx context.Context, exec *executor.Executor, po
 		}
 
 
-		testCtx, cancel := context.WithTimeout(ctx, testTimeout)
-		stdout, stderr, exitCode, runErr := exec.RunInContainerWithStdin(
-			testCtx,
-			pooledContainer.ID,
-			nil, // uploaded once above
-			submissionWorkspace.HostPath,
-			submissionWorkspace.ContainerPath,
-			nil,
-			runCmd,
-			stdinText,
-			testTimeout,
-			0, // limit applied once above
-		)
-		cancel()
+		var stdout, stderr string
+		var exitCode int
+		timing, runErr := runWithCPULimit(ctx, exec, pooledContainer.ID, testTimeout, func(runCtx context.Context, wallTimeout time.Duration) error {
+			testCtx, cancel := context.WithTimeout(runCtx, wallTimeout)
+			defer cancel()
+			var err error
+			stdout, stderr, exitCode, err = exec.RunInContainerWithStdin(
+				testCtx,
+				pooledContainer.ID,
+				nil, // uploaded once above
+				submissionWorkspace.HostPath,
+				submissionWorkspace.ContainerPath,
+				nil,
+				runCmd,
+				stdinText,
+				wallTimeout,
+				0, // limit applied once above
+			)
+			return err
+		})
+		if timing.Exceeded {
+			runErr = executor.NewExecutionError(executor.ErrTimeLimitExceeded, fmt.Sprintf("CPU time limit of %v exceeded", testTimeout), -1)
+		}
 
 		stdoutForResult, stdoutTruncated := truncateString(stdout, maxTestOutputBytes)
 		stderrForLog, stderrTruncated := truncateString(strings.TrimSpace(stderr), maxLogOutputBytes)
@@ -147,7 +156,7 @@ func runSubmissionStdinDetailed(ctx context.Context, exec *executor.Executor, po
 			if stderrForLog != "" {
 				slog.Error("stdin runtime stderr", "submissionId", submissionMsg.SubmissionID, "test", i+1, "stderr", stderrForLog, "truncated", stderrTruncated)
 			}
-			tr.TimeMs = time.Since(testStart).Milliseconds()
+			tr.TimeMs = timing.TimeMs()
 			result.AddTestResult(tr)
 			continue
 		}
@@ -155,7 +164,7 @@ func runSubmissionStdinDetailed(ctx context.Context, exec *executor.Executor, po
 		if stdoutTruncated {
 			markTestFailed(&tr, models.SubmissionStatusWrongAnswer)
 			tr.Error = "Output Limit Exceeded"
-			tr.TimeMs = time.Since(testStart).Milliseconds()
+			tr.TimeMs = timing.TimeMs()
 			result.AddTestResult(tr)
 			continue
 		}
@@ -174,7 +183,7 @@ func runSubmissionStdinDetailed(ctx context.Context, exec *executor.Executor, po
 			tr.Passed = true
 		}
 		tr.Ok = tr.Passed
-		tr.TimeMs = time.Since(testStart).Milliseconds()
+		tr.TimeMs = timing.TimeMs()
 		result.AddTestResult(tr)
 	}
 

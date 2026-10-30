@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"io"
 	"strings"
 	"testing"
@@ -115,5 +116,78 @@ func TestBatchWithoutWatchdogReadsEverything(t *testing.T) {
 	processed, timedOut, stopped, err := streamBatchedResults(result, strings.NewReader(""), r, &stderrCopy, batchProblem(2), batchWatch{testTimeout: time.Second})
 	if err != nil || timedOut || stopped || processed != 2 {
 		t.Fatalf("processed=%d timedOut=%v stopped=%v err=%v", processed, timedOut, stopped, err)
+	}
+}
+
+// JUDGE_FIX_PLAN F5: with a CPU meter, a batched test is judged on CPU time.
+
+func TestBatchCPUTimeGivesAStarvedTestMoreTime(t *testing.T) {
+	r, w := io.Pipe()
+	// Test 2 takes 300 ms of wall time against a 150 ms limit, but the meter says it got
+	// only 30% of a CPU: the server was busy. It passes, and reports its CPU time.
+	fakeBatch(t, w, []string{`{"test":1,"output":0}`, `{"test":2,"output":1}`}, []time.Duration{0, 300 * time.Millisecond})
+	m := newFakeMeter(0.3)
+	start, _ := m.ContainerCPUTime(context.Background(), "")
+
+	result := models.NewSubmissionResult()
+	var stderrCopy bytes.Buffer
+	processed, timedOut, _, err := streamBatchedResults(result, strings.NewReader(""), r, &stderrCopy, batchProblem(2), batchWatch{
+		testTimeout: 150 * time.Millisecond,
+		cancelRun:   func() { _ = w.Close() },
+		cpu:         func() (time.Duration, error) { return m.ContainerCPUTime(context.Background(), "") },
+		cpuStart:    start,
+	})
+	if err != nil || timedOut || processed != 2 {
+		t.Fatalf("processed=%d timedOut=%v err=%v", processed, timedOut, err)
+	}
+	if got := result.Details[1].TimeMs; got < 60 || got > 140 {
+		t.Errorf("test 2 reported %d ms; want its CPU time (~90 ms), not its wall time (~300 ms)", got)
+	}
+}
+
+func TestBatchCPUTimeStopsABusyTest(t *testing.T) {
+	r, w := io.Pipe()
+	fakeBatch(t, w, []string{`{"test":1,"output":0}`, `{"test":2,"output":1}`}, []time.Duration{0, 5 * time.Second})
+	m := newFakeMeter(1)
+	start, _ := m.ContainerCPUTime(context.Background(), "")
+
+	result := models.NewSubmissionResult()
+	var stderrCopy bytes.Buffer
+	began := time.Now()
+	_, timedOut, _, err := streamBatchedResults(result, strings.NewReader(""), r, &stderrCopy, batchProblem(2), batchWatch{
+		testTimeout: 150 * time.Millisecond,
+		cancelRun:   func() { _ = w.Close() },
+		cpu:         func() (time.Duration, error) { return m.ContainerCPUTime(context.Background(), "") },
+		cpuStart:    start,
+	})
+	if err != nil || !timedOut {
+		t.Fatalf("timedOut=%v err=%v", timedOut, err)
+	}
+	if elapsed := time.Since(began); elapsed > 400*time.Millisecond {
+		t.Errorf("a test using a full CPU was stopped after %v; want about the 150 ms limit", elapsed)
+	}
+}
+
+func TestBatchCPUTimeCapsAnIdleTest(t *testing.T) {
+	r, w := io.Pipe()
+	fakeBatch(t, w, []string{`{"test":1,"output":0}`, `{"test":2,"output":1}`}, []time.Duration{0, 5 * time.Second})
+	m := newFakeMeter(0) // sleeping: no CPU at all
+	start, _ := m.ContainerCPUTime(context.Background(), "")
+
+	result := models.NewSubmissionResult()
+	var stderrCopy bytes.Buffer
+	began := time.Now()
+	_, timedOut, _, err := streamBatchedResults(result, strings.NewReader(""), r, &stderrCopy, batchProblem(2), batchWatch{
+		testTimeout: 100 * time.Millisecond,
+		cancelRun:   func() { _ = w.Close() },
+		cpu:         func() (time.Duration, error) { return m.ContainerCPUTime(context.Background(), "") },
+		cpuStart:    start,
+	})
+	elapsed := time.Since(began)
+	if err != nil || !timedOut {
+		t.Fatalf("timedOut=%v err=%v", timedOut, err)
+	}
+	if elapsed < 250*time.Millisecond || elapsed > 600*time.Millisecond {
+		t.Errorf("an idle test was stopped after %v; want the %dx wall-clock cap (~300 ms)", elapsed, wallCapFactor)
 	}
 }

@@ -165,19 +165,27 @@ func runSubmissionCentralPerTest(ctx context.Context, exec *executor.Executor, p
 		}
 
 		inputB64 := base64.StdEncoding.EncodeToString(inputJSON)
-		testCtx, cancel := context.WithTimeout(ctx, testTimeout)
-		stdout, stderr, runErr := exec.RunInContainer(
-			testCtx,
-			pooledContainer.ID,
-			nil, // uploaded once above
-			submissionWorkspace.HostPath,
-			submissionWorkspace.ContainerPath,
-			nil,
-			adapter.RunCommand(inputB64),
-			testTimeout,
-			0, // limit applied once above
-		)
-		cancel()
+		var stdout, stderr string
+		timing, runErr := runWithCPULimit(ctx, exec, pooledContainer.ID, testTimeout, func(runCtx context.Context, wallTimeout time.Duration) error {
+			testCtx, cancel := context.WithTimeout(runCtx, wallTimeout)
+			defer cancel()
+			var err error
+			stdout, stderr, err = exec.RunInContainer(
+				testCtx,
+				pooledContainer.ID,
+				nil, // uploaded once above
+				submissionWorkspace.HostPath,
+				submissionWorkspace.ContainerPath,
+				nil,
+				adapter.RunCommand(inputB64),
+				wallTimeout,
+				0, // limit applied once above
+			)
+			return err
+		})
+		if timing.Exceeded {
+			runErr = executor.NewExecutionError(executor.ErrTimeLimitExceeded, fmt.Sprintf("CPU time limit of %v exceeded", testTimeout), -1)
+		}
 
 		stdoutTrimmed := strings.TrimSpace(stdout)
 		stderrTrimmed := strings.TrimSpace(stderr)
@@ -208,7 +216,7 @@ func runSubmissionCentralPerTest(ctx context.Context, exec *executor.Executor, p
 			if stderrForLog != "" {
 				slog.Error("runtime stderr", "submissionId", submissionMsg.SubmissionID, "test", i+1, "stderr", stderrForLog, "truncated", stderrTruncated)
 			}
-			tr.TimeMs = time.Since(testStart).Milliseconds()
+			tr.TimeMs = timing.TimeMs()
 			result.AddTestResult(tr)
 			continue
 		}
@@ -216,7 +224,7 @@ func runSubmissionCentralPerTest(ctx context.Context, exec *executor.Executor, p
 		if stdoutTruncated {
 			markTestFailed(&tr, models.SubmissionStatusWrongAnswer)
 			tr.Error = "Output Limit Exceeded"
-			tr.TimeMs = time.Since(testStart).Milliseconds()
+			tr.TimeMs = timing.TimeMs()
 			result.AddTestResult(tr)
 			continue
 		}
@@ -225,7 +233,7 @@ func runSubmissionCentralPerTest(ctx context.Context, exec *executor.Executor, p
 		if parseErr != nil {
 			markTestFailed(&tr, models.SubmissionStatusRuntimeError)
 			result.InternalError = models.InternalErrorJudge
-			tr.TimeMs = time.Since(testStart).Milliseconds()
+			tr.TimeMs = timing.TimeMs()
 			tr.Stdout = userLogs
 			tr.Traceback = userLogs
 			if tr.Traceback == "" && stderrForLog != "" {
@@ -249,7 +257,7 @@ func runSubmissionCentralPerTest(ctx context.Context, exec *executor.Executor, p
 				tracebackForLog, tbTruncated := truncateString(out.Traceback, maxLogOutputBytes)
 				slog.Error("wrapper traceback", "submissionId", submissionMsg.SubmissionID, "test", i+1, "traceback", tracebackForLog, "truncated", tbTruncated)
 			}
-			tr.TimeMs = time.Since(testStart).Milliseconds()
+			tr.TimeMs = timing.TimeMs()
 			result.AddTestResult(tr)
 			continue
 		}
@@ -260,7 +268,7 @@ func runSubmissionCentralPerTest(ctx context.Context, exec *executor.Executor, p
 		if !tr.Passed {
 			tr.ErrorType = models.ErrorTypeWrongAnswer
 		}
-		tr.TimeMs = time.Since(testStart).Milliseconds()
+		tr.TimeMs = timing.TimeMs()
 		result.AddTestResult(tr)
 	}
 
@@ -295,6 +303,19 @@ func runSubmissionCentralBatched(ctx context.Context, exec *executor.Executor, p
 
 	testTimeout := perTestTimeout(problem)
 	runTimeout := time.Duration(len(problem.TestCases)+1) * testTimeout
+
+	// Each test is judged on CPU time (F5) when the container's usage can be read. The
+	// per-test watchdog below enforces the limits; the whole-run timeout is only a backstop,
+	// so it allows for the wall-clock cap.
+	var cpuMeter func() (time.Duration, error)
+	cpuStart, cpuErr := exec.ContainerCPUTime(ctx, pooledContainer.ID)
+	if cpuErr == nil {
+		cpuMeter = func() (time.Duration, error) { return exec.ContainerCPUTime(ctx, pooledContainer.ID) }
+		runTimeout *= wallCapFactor
+	} else if !cpuReadFailureLogged.Swap(true) {
+		slog.Warn("cannot read container CPU time; time limits fall back to wall-clock", "containerId", pooledContainer.ID, "error", cpuErr)
+	}
+
 	runCtx, cancel := context.WithTimeout(ctx, runTimeout)
 	defer cancel()
 
@@ -324,6 +345,8 @@ func runSubmissionCentralBatched(ctx context.Context, exec *executor.Executor, p
 		startup:       batchStartupAllowance,
 		stopOnFailure: submissionMsg.StopOnFirstFailure,
 		cancelRun:     cancel,
+		cpu:           cpuMeter,
+		cpuStart:      cpuStart,
 	}
 	processed, timedOut, stoppedEarly, parseErr := streamBatchedResults(result, stream.Stdout, stream.Stderr, &stderrBuf, problem, watch)
 	_ = stream.Stdout.Close()
@@ -416,6 +439,69 @@ type batchWatch struct {
 	startup       time.Duration // extra time for the first result (process start, JVM, parsing input)
 	stopOnFailure bool          // stop at the first failed test (graded submissions, T1)
 	cancelRun     func()        // stops the run
+
+	// CPU time (F5): when cpu is set, a test whose wall-clock time is up but which has used
+	// less CPU than its limit (the server was busy) gets more time, up to wallCapFactor times
+	// the limit, and each test reports the CPU time between its result line and the one
+	// before. nil judges on wall-clock time alone.
+	cpu      func() (time.Duration, error)
+	cpuStart time.Duration // the container's CPU time when the run started
+}
+
+// cpuMark is the container's CPU time read when a batched test's result line arrived. It is
+// read in the background so the line reader never waits for the Docker API.
+type cpuMark struct {
+	v     time.Duration
+	err   error
+	ready chan struct{}
+}
+
+func readCPUMark(read func() (time.Duration, error)) *cpuMark {
+	m := &cpuMark{ready: make(chan struct{})}
+	go func() {
+		m.v, m.err = read()
+		close(m.ready)
+	}()
+	return m
+}
+
+// value waits up to wait for the reading.
+func (m *cpuMark) value(wait time.Duration) (time.Duration, bool) {
+	select {
+	case <-m.ready:
+		return m.v, m.err == nil
+	case <-time.After(wait):
+		return 0, false
+	}
+}
+
+// batchCPUWait decides, when a batched test's wall-clock time is up, whether it may run on
+// because it has used less CPU than its budget, and for how long until the next check.
+func batchCPUWait(watch batchWatch, since *cpuMark, budget time.Duration, wallUsed time.Duration) (time.Duration, bool) {
+	capLeft := budget*wallCapFactor - wallUsed
+	if capLeft <= 0 {
+		return 0, false
+	}
+	base, ok := since.value(time.Second)
+	if !ok {
+		return 0, false
+	}
+	now, err := watch.cpu()
+	if err != nil {
+		return 0, false
+	}
+	used := now - base
+	if used >= budget {
+		return 0, false
+	}
+	wait := budget - used
+	if wait > capLeft {
+		wait = capLeft
+	}
+	if wait < cpuPollMin {
+		wait = cpuPollMin
+	}
+	return wait, true
 }
 
 // The first result also pays for starting the program, which a per-test run pays on every test.
@@ -491,6 +577,13 @@ func streamBatchedResults(result *models.SubmissionResult, stdout io.Reader, std
 	}
 
 	last := time.Now()
+	// marks[k] is the CPU time when the k-th result arrived; marks[0] is the run's start.
+	var marks []*cpuMark
+	if watch.cpu != nil {
+		start := &cpuMark{v: watch.cpuStart, ready: make(chan struct{})}
+		close(start.ready)
+		marks = append(marks, start)
+	}
 loop:
 	for {
 		select {
@@ -526,6 +619,9 @@ loop:
 			last = ev.at
 			result.AddTestResult(tr)
 			processed++
+			if watch.cpu != nil {
+				marks = append(marks, readCPUMark(watch.cpu))
+			}
 
 			if watch.stopOnFailure && !tr.Passed && processed < len(problem.TestCases) {
 				stoppedEarly = true
@@ -543,6 +639,16 @@ loop:
 			}
 		case <-deadline:
 			if processed < len(problem.TestCases) {
+				if watch.cpu != nil {
+					budget := watch.testTimeout
+					if processed == 0 {
+						budget += watch.startup
+					}
+					if wait, ok := batchCPUWait(watch, marks[len(marks)-1], budget, time.Since(last)); ok {
+						timer.Reset(wait)
+						continue
+					}
+				}
 				timedOut = true
 				stop()
 				break loop
@@ -559,6 +665,15 @@ loop:
 	for i := len(result.Details) - processed; i < len(result.Details); i++ {
 		if i >= 0 {
 			result.Details[i].Stdout = rawStdout
+		}
+	}
+	// Report each test's CPU time in place of its wall-clock time where both readings exist.
+	for k := 1; k < len(marks); k++ {
+		i := len(result.Details) - processed + k - 1
+		prev, okPrev := marks[k-1].value(time.Second)
+		cur, okCur := marks[k].value(time.Second)
+		if i >= 0 && okPrev && okCur {
+			result.Details[i].TimeMs = (cur - prev).Milliseconds()
 		}
 	}
 	return processed, timedOut, stoppedEarly, err
