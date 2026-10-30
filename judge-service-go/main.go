@@ -1091,7 +1091,18 @@ func processAndStoreResults(ctx context.Context, executionPath string, stdout, s
 			slog.Error("Error updating submission in Redis", "submissionId", submissionMsg.SubmissionID, "error", err)
 		}
 	}
+
+	// Wakes API callers waiting on this result (wait=true) instead of each polling Mongo
+	// (JUDGE_FIX_PLAN T6). Sent after the Mongo write, so a woken caller reads the result.
+	// Best effort: a lost message only delays a caller until its fallback poll.
+	if err := redisClient.Publish(ctx, submissionDoneChannel, submissionMsg.SubmissionID).Err(); err != nil {
+		slog.Warn("Failed to publish submission completion", "submissionId", submissionMsg.SubmissionID, "error", err)
+	}
 }
+
+// submissionDoneChannel is the Redis pub/sub channel the API listens on for finished
+// submissions; the message is the submission id.
+const submissionDoneChannel = "submission:done"
 
 // markSubmissionExecutionFailed records a terminal failure for a submission that never
 // reached execution (e.g. it exhausted its retry budget waiting for a pool container),

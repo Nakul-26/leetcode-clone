@@ -2,6 +2,7 @@ import mongoose from "mongoose";
 import Submission from "../../models/Submission.mjs";
 import { publishSubmissionMessage, INTERACTIVE_QUEUE_NAME } from "./evaluation.service.js";
 import { mapLanguageId } from "./codeAssessShim.service.js";
+import { watchSubmission } from "./submissionEvents.service.js";
 
 // Queue-backed execution for the GO Judge public API surface (plan Phases 2-3). A keyed
 // caller's request becomes an ordinary stdin submission with no expected output, so it gets
@@ -15,7 +16,6 @@ import { mapLanguageId } from "./codeAssessShim.service.js";
 // How long a wait=true call blocks before returning the token with a Processing status,
 // which is the standard behaviour for a run that outlasts the caller's patience.
 const DEFAULT_WAIT_MS = 25_000;
-const POLL_MS = 100;
 // Ad-hoc rows are transient; the judge's usageevents record is the durable one.
 const ADHOC_TTL_MS = 24 * 60 * 60 * 1000;
 
@@ -186,12 +186,20 @@ export async function enqueueBatch({ apiClient, items }) {
 // ---------------------------------------------------------------------------
 // Read
 // ---------------------------------------------------------------------------
+// Woken by the judge's completion message when the listener is running, with a slow Mongo
+// poll as the fallback; without the listener it polls every 100 ms as before (JUDGE_FIX_PLAN T6).
 export async function waitForCompletion(token, apiClientId, waitMs = DEFAULT_WAIT_MS) {
   const deadline = Date.now() + waitMs;
-  for (;;) {
-    const doc = await findOwned(token, apiClientId);
-    if (!doc || !["Pending", "Running"].includes(doc.status) || Date.now() >= deadline) return doc;
-    await new Promise((r) => setTimeout(r, POLL_MS));
+  const watch = watchSubmission(parseToken(token).id);
+  try {
+    for (;;) {
+      const doc = await findOwned(token, apiClientId);
+      const left = deadline - Date.now();
+      if (!doc || !["Pending", "Running"].includes(doc.status) || left <= 0) return doc;
+      await watch.wait(left);
+    }
+  } finally {
+    watch.cancel();
   }
 }
 
