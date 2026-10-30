@@ -153,10 +153,9 @@ var StdinAdapterRegistry = map[string]StdinLanguageAdapter{
 	"java": compiledStdinAdapter{
 		name: "java", fileName: "Main.java",
 		// gson stays on both paths' classpath because the image ships it and a
-		// submission may import it; jvmHeapFlag sizes the heap from the
-		// problem's memory limit (see java.go).
-		compileCmd: []string{"javac", "-cp", "/usr/share/java/gson.jar:.", "/app/Main.java"},
-		runCmd:     []string{"java", jvmHeapFlag, "-cp", "/usr/share/java/gson.jar:.", "Main"},
+		// submission may import it; see java.go for the heap and startup flags.
+		compileCmd: javacCommand("/app/Main.java"),
+		runCmd:     javaRunCommand("Main"),
 	},
 	"kotlin": compiledStdinAdapter{
 		name: "kotlin", fileName: "Main.kt",

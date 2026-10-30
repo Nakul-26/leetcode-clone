@@ -18,5 +18,23 @@ RUN apt-get update \
 
 ENV CLASSPATH /usr/share/java/gson.jar:.
 
+# Class-data archives (JUDGE_FIX_PLAN T8): the JDK and Gson classes javac and a typical judged
+# program load, pre-parsed once here so every compile and run maps them instead of loading
+# them again. Recorded from cds/Train.java. javac.jsa is used by javac, run.jsa by the
+# program; the judge passes -Xshare:auto, so a missing or unusable archive is silently
+# ignored rather than failing a run. The -Xshare:on checks fail the build if an archive does
+# not load. The run archive is dumped with gson.jar alone on the classpath: at run time the
+# judge's classpath is gson.jar:., which starts with it, as CDS requires.
+COPY cds/Train.java /opt/cds/train/Train.java
+RUN cd /opt/cds/train \
+    && javac -J-XX:DumpLoadedClassList=/opt/cds/javac.lst -cp /usr/share/java/gson.jar:. Train.java \
+    && java -Xshare:dump -XX:SharedClassListFile=/opt/cds/javac.lst -XX:SharedArchiveFile=/opt/cds/javac.jsa \
+    && echo "line" | java -XX:DumpLoadedClassList=/opt/cds/run.lst -cp /usr/share/java/gson.jar:. Train > /dev/null 2>&1 \
+    && java -Xshare:dump -XX:SharedClassListFile=/opt/cds/run.lst -XX:SharedArchiveFile=/opt/cds/run.jsa -cp /usr/share/java/gson.jar \
+    && javac -J-Xshare:on -J-XX:SharedArchiveFile=/opt/cds/javac.jsa -cp /usr/share/java/gson.jar:. Train.java \
+    && echo "line" | java -Xshare:on -XX:SharedArchiveFile=/opt/cds/run.jsa -cp /usr/share/java/gson.jar:. Train > /dev/null \
+    && cd / && rm -rf /opt/cds/train /opt/cds/*.lst \
+    && chmod 0644 /opt/cds/*.jsa
+
 # Set the user
 USER judge

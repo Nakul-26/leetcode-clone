@@ -37,8 +37,8 @@ var Languages = map[string]*Language{
 		FileExt: ".java",
 		Image:   "judge-java-env",
 		// Compile both the user file (Solution.java) and the harness (Main.java)
-		CompileCmd:      []string{"javac", "-cp", "/usr/share/java/gson.jar:.", "/app/Solution.java", "/app/Main.java"},
-		RunCmd:          []string{"java", "-XX:MaxRAMPercentage=75", "-cp", "/usr/share/java/gson.jar:.", "Main"},
+		CompileCmd:      []string{"javac", "-J-XX:TieredStopAtLevel=1", "-J-XX:+UseSerialGC", "-J-Xshare:auto", "-J-XX:SharedArchiveFile=/opt/cds/javac.jsa", "-cp", "/usr/share/java/gson.jar:.", "/app/Solution.java", "/app/Main.java"}, // flags: see adapters/java.go
+		RunCmd:          []string{"java", "-XX:MaxRAMPercentage=75", "-XX:+UseSerialGC", "-Xshare:auto", "-XX:SharedArchiveFile=/opt/cds/run.jsa", "-cp", "/usr/share/java/gson.jar:.", "Main"},
 		WrapperTemplate: "java_single_wrapper.tpl",
 	},
 	"c": {
