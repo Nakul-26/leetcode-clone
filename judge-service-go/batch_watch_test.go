@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"math/rand"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -189,5 +191,41 @@ func TestBatchCPUTimeCapsAnIdleTest(t *testing.T) {
 	}
 	if elapsed < 250*time.Millisecond || elapsed > 600*time.Millisecond {
 		t.Errorf("an idle test was stopped after %v; want the %dx wall-clock cap (~300 ms)", elapsed, wallCapFactor)
+	}
+}
+
+// Readings that finish out of order gave a batched test a negative time (seen as -3 ms).
+// The sampler reads one at a time, so marks taken in order have non-decreasing values.
+func TestCPUSamplerMarksAreInOrder(t *testing.T) {
+	var clock atomic.Int64
+	reads := atomic.Int32{}
+	s := &cpuSampler{read: func() (time.Duration, error) {
+		reads.Add(1)
+		// The counter is read at a random point during a slow call, like a stats request.
+		time.Sleep(time.Duration(rand.Intn(3)) * time.Millisecond)
+		v := clock.Add(1)
+		time.Sleep(time.Duration(rand.Intn(3)) * time.Millisecond)
+		return time.Duration(v), nil
+	}}
+	var marks []*cpuMark
+	for i := 0; i < 200; i++ {
+		marks = append(marks, s.mark())
+		if i%7 == 0 {
+			time.Sleep(time.Millisecond)
+		}
+	}
+	prev := time.Duration(-1)
+	for k, m := range marks {
+		v, ok := m.value(5 * time.Second)
+		if !ok {
+			t.Fatalf("mark %d never got a value", k)
+		}
+		if v < prev {
+			t.Fatalf("mark %d = %v is before mark %d = %v", k, v, k-1, prev)
+		}
+		prev = v
+	}
+	if n := reads.Load(); n >= 200 {
+		t.Errorf("a burst of marks should share reads, got %d reads for 200 marks", n)
 	}
 }

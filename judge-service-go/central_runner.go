@@ -13,6 +13,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"judge-service-go/pkg/central/adapters"
@@ -456,13 +457,42 @@ type cpuMark struct {
 	ready chan struct{}
 }
 
-func readCPUMark(read func() (time.Duration, error)) *cpuMark {
+// cpuSampler takes the readings for one batched run one at a time, so they come back in
+// order: concurrent reads could finish out of order and give a test a negative time. A
+// mark requested while a read is in flight shares the next read, so a burst of quick
+// results costs one read; the tests in that burst before the last then show 0 ms and the
+// last one carries their CPU time.
+type cpuSampler struct {
+	read     func() (time.Duration, error)
+	mu       sync.Mutex
+	inFlight bool
+	pending  *cpuMark // waits for the read in flight to finish
+}
+
+func (s *cpuSampler) mark() *cpuMark {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.inFlight {
+		if s.pending == nil {
+			s.pending = &cpuMark{ready: make(chan struct{})}
+		}
+		return s.pending
+	}
 	m := &cpuMark{ready: make(chan struct{})}
-	go func() {
-		m.v, m.err = read()
-		close(m.ready)
-	}()
+	s.inFlight = true
+	go s.run(m)
 	return m
+}
+
+func (s *cpuSampler) run(m *cpuMark) {
+	for m != nil {
+		m.v, m.err = s.read()
+		close(m.ready)
+		s.mu.Lock()
+		m, s.pending = s.pending, nil
+		s.inFlight = m != nil
+		s.mu.Unlock()
+	}
 }
 
 // value waits up to wait for the reading.
@@ -579,7 +609,9 @@ func streamBatchedResults(result *models.SubmissionResult, stdout io.Reader, std
 	last := time.Now()
 	// marks[k] is the CPU time when the k-th result arrived; marks[0] is the run's start.
 	var marks []*cpuMark
+	var sampler *cpuSampler
 	if watch.cpu != nil {
+		sampler = &cpuSampler{read: watch.cpu}
 		start := &cpuMark{v: watch.cpuStart, ready: make(chan struct{})}
 		close(start.ready)
 		marks = append(marks, start)
@@ -620,7 +652,7 @@ loop:
 			result.AddTestResult(tr)
 			processed++
 			if watch.cpu != nil {
-				marks = append(marks, readCPUMark(watch.cpu))
+				marks = append(marks, sampler.mark())
 			}
 
 			if watch.stopOnFailure && !tr.Passed && processed < len(problem.TestCases) {
