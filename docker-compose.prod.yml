@@ -296,27 +296,23 @@ services:
         aliases:
           - go-judge-api
 
-  # ── 5. Docker Socket Proxy ────────────────────────────────────────────────────
-  # The ONLY thing in this stack that touches the host's real docker.sock. Scopes
-  # judge-service-go's Docker access down to just the endpoints it actually calls
-  # (container create/start/stop/remove/inspect/update, exec create/start, image
-  # inspect/pull — see judge-service-go/pkg/pool/pool.go and pkg/executor/executor.go)
-  # instead of handing it the raw socket, which is full unscoped host/Docker-daemon
-  # admin access. Everything else (networks, volumes, swarm, build, secrets, etc.)
-  # is left at its default of disabled. See docs/CODESPACE_HANDOFF.md item #9 —
-  # verified locally: pool warm-up, orphan cleanup, and real Python/Java submissions
-  # (interpreted + compiled, i.e. exec + resource-update calls) all work through it,
-  # while GET /networks and GET /volumes correctly 403.
+  # ── 5. Docker guard ───────────────────────────────────────────────────────────
+  # The ONLY thing in this stack that touches the host's real docker.sock
+  # (judge-service-go/cmd/docker-guard; service name kept so DOCKER_HOST is unchanged).
+  # It checks what each request asks for, not just its path: containers can only be
+  # created from judge-*-env images with the sandbox settings (no network, read-only root,
+  # every capability dropped but KILL, no-new-privileges, memory and pids limits) and no
+  # host access (no mounts, devices, host namespaces, privileged mode); exec, inspect,
+  # stats, update and remove only work on containers with the judge's label that pass the
+  # same checks; listing only lists those; only judge images can be pulled. Everything
+  # else gets 403. The path-only tecnativa proxy it replaces allowed creating a privileged
+  # container with / mounted, or exec into Mongo or any other project's container: root on
+  # the host for anyone who compromised the judge (JUDGE_FIX_PLAN S2).
   docker-socket-proxy:
-    image: tecnativa/docker-socket-proxy:latest
+    build:
+      context: ./judge-service-go
+      dockerfile: Dockerfile.guard
     restart: unless-stopped
-    environment:
-      LOG_LEVEL: info
-      CONTAINERS: "1"
-      POST: "1"
-      DELETE: "1"
-      EXEC: "1"
-      IMAGES: "1"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     # Internal only — never exposed publicly

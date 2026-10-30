@@ -70,7 +70,7 @@ fairly, and accountably, on a few CPU cores?*
 | MongoDB | | Source of truth: users, problems, submissions, usage |
 | Redis | | Quota counters, caches, submission result cache. **Not** a source of truth |
 | RabbitMQ | | Durable work queues between the API and the judge |
-| `docker-socket-proxy` | | Restricts what the judge may ask the Docker daemon to do |
+| `docker-socket-proxy` | | docker-guard (`judge-service-go/cmd/docker-guard`): lets the judge create and drive only its own locked-down sandboxes; every other Docker request gets 403 |
 | Language images | One per language (12) | The sandboxes: `judge-<lang>-env` |
 | `coturn` | Prod only | TURN relay for WebRTC interview video |
 

@@ -1,0 +1,18 @@
+# docker-guard: the Docker API proxy between the judge and the Docker socket (JUDGE_FIX_PLAN S2).
+# It lets the judge create and drive its own sandboxes and nothing else; see cmd/docker-guard.
+FROM golang:alpine AS builder
+WORKDIR /src
+ENV CGO_ENABLED=0
+ENV GOFLAGS="-mod=mod"
+COPY go.mod go.sum ./
+RUN go mod download
+COPY cmd/docker-guard ./cmd/docker-guard
+RUN --mount=type=cache,target=/root/.cache/go-build \
+    go build -ldflags="-s -w" -o /out/docker-guard ./cmd/docker-guard
+
+# No shell, no tools: only the binary. It runs as root because the Docker socket is root-only;
+# it is reachable only on the stack's internal network.
+FROM scratch
+COPY --from=builder /out/docker-guard /docker-guard
+EXPOSE 2375
+ENTRYPOINT ["/docker-guard"]

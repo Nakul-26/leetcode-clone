@@ -761,6 +761,9 @@ func (p *ContainerPool) createContainer(ctx context.Context, image string, lang 
 		return "", "", fmt.Errorf("failed to chmod container workdir %s: %w", hostWorkDir, err)
 	}
 
+	// docker-guard (cmd/docker-guard) refuses a create that strays from these settings
+	// (any host-side option it does not know, network, mounts, capabilities beyond KILL):
+	// change it together with this.
 	hostCfg := &docker.HostConfig{
 		NetworkMode:    "none",
 		ReadonlyRootfs: true,

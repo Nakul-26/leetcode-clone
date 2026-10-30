@@ -75,23 +75,17 @@ services:
     networks:
       - assessment-net
 
-  # Scopes judge-service-go's Docker access to only the endpoints it actually
-  # calls (container create/start/stop/remove/inspect/update, exec, image
-  # inspect/pull) instead of the raw docker.sock, which is full unscoped admin
-  # access to the host's Docker daemon. See docs/CODESPACE_HANDOFF.md item #9.
+  # docker-guard (judge-service-go/cmd/docker-guard) is the only thing holding the host's
+  # docker.sock. It lets judge-service-go create and drive its own sandboxes and nothing
+  # else: containers only from judge-*-env images with the sandbox settings (no network,
+  # no mounts, no privileges), and exec/inspect/remove only on those. The path-only
+  # tecnativa proxy it replaces let a compromised judge create a privileged container or
+  # exec into any container, i.e. root on the host (JUDGE_FIX_PLAN S2).
   docker-socket-proxy:
-    image: tecnativa/docker-socket-proxy:latest
+    build:
+      context: ./judge-service-go
+      dockerfile: Dockerfile.guard
     container_name: codespace_docker_socket_proxy
-    environment:
-      - LOG_LEVEL=info
-      - CONTAINERS=1
-      - POST=1
-      - DELETE=1
-      - EXEC=1
-      - IMAGES=1
-      # Everything else (NETWORKS, VOLUMES, BUILD, SWARM, SERVICES, NODES,
-      # PLUGINS, SECRETS, CONFIGS, SYSTEM, etc.) stays at its default of 0 —
-      # judge-service-go never calls those endpoints.
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     networks:
