@@ -3,8 +3,8 @@
 package main
 
 import (
-	"testing"
 	"judge-service-go/pkg/models"
+	"testing"
 )
 
 func TestCertificationSuite(t *testing.T) {
@@ -588,7 +588,7 @@ func TestCertificationSuite(t *testing.T) {
 			Problem: models.Problem{
 				Title: "Infinite Loop", FunctionName: "run", ReturnType: "void", TimeLimitMs: 500,
 				Parameters: []models.Parameter{{Name: "n", Type: "number"}},
-				TestCases: []models.TestCase{{Input: []interface{}{float64(0)}, Expected: nil}},
+				TestCases:  []models.TestCase{{Input: []interface{}{float64(0)}, Expected: nil}},
 			},
 			Expected: models.SubmissionStatusTimeLimitExceeded,
 			Solutions: map[string]string{
@@ -607,7 +607,7 @@ func TestCertificationSuite(t *testing.T) {
 			Problem: models.Problem{
 				Title: "Memory Bomb", FunctionName: "run", ReturnType: "void", MemoryLimitMb: 256,
 				Parameters: []models.Parameter{{Name: "n", Type: "number"}},
-				TestCases: []models.TestCase{{Input: []interface{}{float64(0)}, Expected: nil}},
+				TestCases:  []models.TestCase{{Input: []interface{}{float64(0)}, Expected: nil}},
 			},
 			Expected: models.SubmissionStatusMemoryLimitExceeded,
 			Solutions: map[string]string{
@@ -615,7 +615,9 @@ func TestCertificationSuite(t *testing.T) {
 				"javascript": "function run(n) { const a = new Array(40000000).fill(0.1); }",
 				"java":       "import java.util.*;\npublic class Solution { public void run(int n) { long[] a = new long[40000000]; Arrays.fill(a, 1L); } }",
 				"go":         "func run(n int) { a := make([]byte, 400*1024*1024); for i := range a { a[i] = 1 } }",
-				"cpp":        "class Solution { public: void run(int n) { std::vector<char> a(400*1024*1024, 1); } };",
+				// The empty asm keeps the buffer alive: function-mode C++ is built at -O2 (T11),
+				// which may drop an allocation nothing reads.
+				"cpp":        "class Solution { public: void run(int n) { std::vector<char> a(400*1024*1024, 1); asm volatile(\"\" : : \"r\"(a.data()) : \"memory\"); } };",
 				"csharp":     "public class Solution { public void run(int n) { var a = new byte[400*1024*1024]; for(int i=0; i<a.Length; i++) a[i]=1; } }",
 				"typescript": "function run(n: number): void { const a = new Array(40000000).fill(0.1); }",
 				"c":          "#include <stdlib.h>\n#include <string.h>\nvoid run(int n) { void* p = malloc(400*1024*1024); memset(p, 1, 400*1024*1024); }",
@@ -626,7 +628,7 @@ func TestCertificationSuite(t *testing.T) {
 			Problem: models.Problem{
 				Title: "Divide by Zero", FunctionName: "run", ReturnType: "number",
 				Parameters: []models.Parameter{{Name: "n", Type: "number"}},
-				TestCases: []models.TestCase{{Input: []interface{}{float64(0)}, Expected: 0}},
+				TestCases:  []models.TestCase{{Input: []interface{}{float64(0)}, Expected: 0}},
 			},
 			Expected: models.SubmissionStatusRuntimeError,
 			Solutions: map[string]string{
@@ -645,7 +647,7 @@ func TestCertificationSuite(t *testing.T) {
 			Problem: models.Problem{
 				Title: "Syntax Error", FunctionName: "run", ReturnType: "void",
 				Parameters: []models.Parameter{{Name: "n", Type: "number"}},
-				TestCases: []models.TestCase{{Input: []interface{}{float64(0)}, Expected: nil}},
+				TestCases:  []models.TestCase{{Input: []interface{}{float64(0)}, Expected: nil}},
 			},
 			Expected: models.SubmissionStatusCompilationError,
 			Solutions: map[string]string{

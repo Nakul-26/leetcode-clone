@@ -64,7 +64,7 @@ var Languages = map[string]*Language{
 		Name:            "C++",
 		FileExt:         ".cpp",
 		Image:           "judge-cpp-env",
-		CompileCmd:      []string{"g++", "-O1", "-o", "/app/main", "/app/main.cpp"}, // function mode; see adapters/cpp.go
+		CompileCmd:      []string{"g++", "-O2", "-o", "/app/main", "/app/main.cpp"}, // function mode; see adapters/cpp.go
 		RunCmd:          []string{"/app/main"},
 		WrapperTemplate: "cpp_single_wrapper.tpl",
 	},

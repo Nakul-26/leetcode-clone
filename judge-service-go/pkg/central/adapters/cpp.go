@@ -49,13 +49,12 @@ func (CppAdapter) PrepareBatchFiles(workDir string, submissionMsg models.Submiss
 	return []string{"solution.cpp", "main.cpp"}, nil
 }
 
-// -O1, not the -O2 of stdin mode: most of a function-mode compile is the wrapper's
-// nlohmann::json code, which -O2 makes far slower to build. Measured 2026-10-24 on one core
-// (JUDGE_FIX_PLAN F2/T7): compile 4.0 s at -O0, 4.3 s at -O1, 6.6 s at -O2; an STL-heavy
-// solution ran in 627 ms at -O0, 212 ms at -O1, 284 ms at -O2. -O1 gets the inlining that
-// matters for student code without the compile cost.
+// -O2, the same as stdin mode, and nothing else: the image's precompiled <bits/stdc++.h> was
+// built with exactly these flags, and g++ silently skips it when they differ. The wrapper
+// no longer uses nlohmann::json (JUDGE_FIX_PLAN T11), which had made -O2 too slow to build
+// here (-O1 was used instead). Measured 2026-10-30 on one core: 5.4 s -> 1.2 s per compile.
 func (CppAdapter) CompileCommand() []string {
-	return []string{"g++", "-O1", "-o", "/app/main", "/app/main.cpp"}
+	return []string{"g++", "-O2", "-o", "/app/main", "/app/main.cpp"}
 }
 
 func (CppAdapter) RunCommand(inputB64 string) []string {

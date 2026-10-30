@@ -44,6 +44,11 @@ func GenerateWrapper(p models.Problem, lang *languages.Language, submissionFuncN
 	// every other simple-template language.
 	if lang.ID == "cpp" {
 		tpl = strings.ReplaceAll(tpl, "{{FUNCTION_NAME}}", sanitizedFuncName)
+		judgeIO, err := os.ReadFile(filepath.Join("pkg", "wrappers", "cpp_judge_io.inc"))
+		if err != nil {
+			return "", fmt.Errorf("failed to read cpp_judge_io.inc: %w", err)
+		}
+		tpl = strings.ReplaceAll(tpl, "// JUDGE_IO_MARKER", string(judgeIO))
 		cppCall := buildCppCall(p, sanitizedFuncName)
 		tpl = strings.ReplaceAll(tpl, "// GENERATED_CALL_MARKER", cppCall)
 		return tpl, nil
@@ -99,12 +104,12 @@ func GenerateWrapper(p models.Problem, lang *languages.Language, submissionFuncN
 	}
 	tpl = strings.ReplaceAll(tpl, "{{COMPARE_MODE}}", replCompare)
 	// Inject deep-copy flag, using language-appropriate boolean literal
-deepCopyStr := fmt.Sprintf("%t", p.CompareConfig.RequireDeepCopy)
-if lang.ID == "python" {
-// Python booleans are capitalized
-deepCopyStr = strings.Title(deepCopyStr)
-}
-tpl = strings.ReplaceAll(tpl, "{{REQUIRE_DEEP_COPY}}", deepCopyStr)
+	deepCopyStr := fmt.Sprintf("%t", p.CompareConfig.RequireDeepCopy)
+	if lang.ID == "python" {
+		// Python booleans are capitalized
+		deepCopyStr = strings.Title(deepCopyStr)
+	}
+	tpl = strings.ReplaceAll(tpl, "{{REQUIRE_DEEP_COPY}}", deepCopyStr)
 
 	return tpl, nil
 }
@@ -157,49 +162,33 @@ func mapCppType(t types.ParsedType) string {
 	}
 }
 
+// buildCppCall reads each argument, calls the solution and prints the result line, using the
+// judge_io helpers in cpp_judge_io.inc. The templates define inputs, sol and test_no.
 func buildCppCall(p models.Problem, funcName string) string {
 	var sb strings.Builder
 	for i, param := range p.Parameters {
-		sb.WriteString(fmt.Sprintf("        %s arg%d = ", cppType(param.Type), i))
-		switch param.Type {
-		case "linkedlist<number>":
-			sb.WriteString(fmt.Sprintf("list_from_json(inputs[%d]);\n", i))
-		case "tree<number>":
-			sb.WriteString(fmt.Sprintf("tree_from_json(inputs[%d]);\n", i))
-		case "graph<number>":
-			sb.WriteString(fmt.Sprintf("graph_from_json(inputs[%d]);\n", i))
-		default:
-			sb.WriteString(fmt.Sprintf("inputs[%d].get<%s>();\n", i, cppType(param.Type)))
-		}
+		t := cppType(param.Type)
+		sb.WriteString(fmt.Sprintf("        %s arg%d = judge_io::get<%s>(judge_io::at(inputs, %d));\n", t, i, t, i))
 	}
+
+	args := make([]string, len(p.Parameters))
+	for i := range p.Parameters {
+		args[i] = fmt.Sprintf("arg%d", i)
+	}
+	call := fmt.Sprintf("sol.%s(%s)", funcName, strings.Join(args, ", "))
 
 	if p.ReturnType == "void" {
-		sb.WriteString(fmt.Sprintf("        sol.%s(", funcName))
-		for i := range p.Parameters {
-			if i > 0 {
-				sb.WriteString(", ")
-			}
-			sb.WriteString(fmt.Sprintf("arg%d", i))
-		}
-		sb.WriteString(");\n")
-
+		// A void solution changes its first argument in place; that is its output.
+		sb.WriteString(fmt.Sprintf("        %s;\n", call))
 		if len(p.Parameters) > 0 {
-			sb.WriteString("        result[\"output\"] = arg0;\n")
+			sb.WriteString("        judge_io::print_output(test_no, arg0);")
 		} else {
-			sb.WriteString("        result[\"output\"] = nullptr;\n")
+			sb.WriteString("        judge_io::print_output(test_no, nullptr);")
 		}
 	} else {
-		sb.WriteString(fmt.Sprintf("        %s output = sol.%s(", cppType(p.ReturnType), funcName))
-		for i := range p.Parameters {
-			if i > 0 {
-				sb.WriteString(", ")
-			}
-			sb.WriteString(fmt.Sprintf("arg%d", i))
-		}
-		sb.WriteString(");\n")
-		sb.WriteString("        result[\"output\"] = output;\n")
+		sb.WriteString(fmt.Sprintf("        %s output = %s;\n", cppType(p.ReturnType), call))
+		sb.WriteString("        judge_io::print_output(test_no, output);")
 	}
-	sb.WriteString("        std::cerr << result.dump() << std::endl;")
 	return sb.String()
 }
 
@@ -605,4 +594,3 @@ func buildRustCall(p models.Problem, funcName string) string {
 
 	return sb.String()
 }
-

@@ -147,13 +147,20 @@ func TestCompiledStdinLanguagesOptimise(t *testing.T) {
 			}
 		}
 	}
-	// Function mode: C at -O2; C++ at -O1 because -O2 makes the json wrapper slow to build
+	// Function mode: C at -O2.
+	fnC, _ := adapters.GetAdapter("c")
+	if !containsArg(fnC.(adapters.CompilingLanguageAdapter).CompileCommand(), "-O2") {
+		t.Errorf("c function-mode compile is not -O2")
+	}
+	// Function-mode C++ must compile with exactly the stdin-mode flags: the image's
+	// precompiled <bits/stdc++.h> was built with them, and g++ silently skips it otherwise
 	// (see adapters/cpp.go).
-	for id, flag := range map[string]string{"c": "-O2", "cpp": "-O1"} {
-		fn, _ := adapters.GetAdapter(id)
-		if !containsArg(fn.(adapters.CompilingLanguageAdapter).CompileCommand(), flag) {
-			t.Errorf("%s function-mode compile is not %s", id, flag)
-		}
+	fnCpp, _ := adapters.GetAdapter("cpp")
+	stdinCpp, _ := adapters.GetStdinAdapter("cpp")
+	fnFlags := strings.Join(fnCpp.(adapters.CompilingLanguageAdapter).CompileCommand(), " ")
+	stdinFlags := strings.Join(stdinCpp.(interface{ CompileCommand() []string }).CompileCommand(), " ")
+	if fnFlags != stdinFlags {
+		t.Errorf("cpp function-mode compile %q differs from stdin mode %q", fnFlags, stdinFlags)
 	}
 }
 
