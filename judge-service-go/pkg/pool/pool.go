@@ -783,7 +783,10 @@ func (p *ContainerPool) createContainer(ctx context.Context, image string, lang 
 			// engine version despite this string never containing it. Without "exec",
 			// every compiled language's own freshly-built binary 126s with "permission
 			// denied" trying to exec itself from /app.
-			"/app": "rw,exec,nosuid,nodev,size=512m",
+			// mode=1777 (like /tmp): submission files are uploaded as the judge user, so
+			// everything in /app is that user's and the reset can wipe it as that user
+			// (executor.containerWipeScript, JUDGE_FIX_PLAN S1).
+			"/app": "rw,exec,nosuid,nodev,size=512m,mode=1777",
 		},
 	}
 

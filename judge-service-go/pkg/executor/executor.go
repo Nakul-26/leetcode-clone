@@ -134,24 +134,39 @@ func (e *Executor) CopyFiles(ctx context.Context, containerID string, hostWorkDi
 	return e.copyFilesToContainer(ctx, containerID, hostWorkDir, containerWorkDir, files)
 }
 
-// containerResetScript returns a pooled container to a clean state between submissions:
-//   - any process the submission left running, killed first so nothing can recreate files
-//     after they are removed;
-//   - every submission directory under /app (they are world-readable, so leaving them let a later
-//     submission in the same container read earlier students' source code, and /app is
-//     memory-backed, so they also ate into the container's memory limit);
-//   - everything in /tmp including hidden entries (a plain /tmp/* glob skips dot-files), except
-//     .cache, which holds the Go build cache that makes repeat Go compiles fast.
+// The reset returns a pooled container to a clean state between submissions, in two steps.
 //
-// It then checks that no judge-user process survived, and exits non-zero if one did or if
-// pkill is missing, so the caller discards the container instead of reusing it dirty. Because
-// the reset is what makes reuse safe, a TLE, MLE or crash no longer discards the container
-// (JUDGE_FIX_PLAN T2).
-const containerResetScript = `command -v pkill >/dev/null || { echo "pkill missing"; exit 1; }; ` +
+// containerKillScript (as root) kills every process the submission left running, first, so
+// nothing can recreate files after they are removed. It then checks that no judge-user process
+// survived, and exits non-zero if one did or if pkill is missing.
+//
+// containerWipeScript (as the judge user) then empties /app and /tmp completely, hidden entries
+// included: submission directories (world-readable, so leaving them let a later submission read
+// earlier students' code, and memory-backed, so they ate into the memory limit) and everything
+// the submission wrote. It runs as the judge user, not root, because pooled containers drop every
+// capability: root there cannot open or remove a directory the submission made unreadable
+// (chmod 000), so a root wipe silently left such files for the next submission. Everything in
+// /app and /tmp belongs to the judge user (uploads run as it too), and an owner can always make
+// its own files removable again. The Go build cache in /tmp/.cache goes too: the next submission
+// would trust its entries, so one submission could plant compiled code into the next one's
+// program (JUDGE_FIX_PLAN S1). The image's warm-up hook then seeds a clean copy again (~0.1 s,
+// Go only). The wipe exits non-zero if anything is left.
+//
+// A non-zero exit from either makes the caller discard the container instead of reusing it
+// dirty. Because the reset is what makes reuse safe, a TLE, MLE or crash no longer discards the
+// container (JUDGE_FIX_PLAN T2).
+const containerKillScript = `command -v pkill >/dev/null || { echo "pkill missing"; exit 1; }; ` +
 	`pkill -9 -u judge; ` +
-	`rm -rf /app/sub-* 2>/dev/null; find /tmp -mindepth 1 -maxdepth 1 ! -name .cache -exec rm -rf {} \; 2>/dev/null; ` +
 	`i=0; while pgrep -u judge >/dev/null && [ $i -lt 40 ]; do sleep 0.05; i=$((i+1)); done; ` +
 	`if pgrep -u judge >/dev/null; then echo "judge processes survived the reset"; exit 1; fi; exit 0`
+
+const containerWipeScript = `cd /; ` +
+	`find /app /tmp -mindepth 1 -maxdepth 1 -exec chmod -R u+rwx {} + 2>/dev/null; ` +
+	`find /app /tmp -mindepth 1 -maxdepth 1 -exec rm -rf {} + 2>/dev/null; ` +
+	`left=$(find /app /tmp -mindepth 1 2>&1 | head -n 5); ` +
+	`if [ -n "$left" ]; then echo "not removed by the reset: $left"; exit 1; fi; ` +
+	// The same hook the pool runs when it creates a container (pool.warmupHookPath).
+	`if [ -x /usr/local/bin/judge-warmup ]; then /usr/local/bin/judge-warmup; fi; exit 0`
 
 // ResetContainer cleans a container after a submission and restores its default memory limit,
 // before it goes back to the pool. Once per submission, so per-test steps can skip both.
@@ -162,7 +177,10 @@ func (e *Executor) ResetContainer(ctx context.Context, containerID string) error
 	if err := e.UpdateContainerResources(ctx, containerID, 1024); err != nil {
 		return err
 	}
-	stdout, stderr, exitCode, err := e.runExecWithTimeout(ctx, containerID, "root", "/", []string{"sh", "-c", containerResetScript}, 10*time.Second)
+	stdout, stderr, exitCode, err := e.runExecWithTimeout(ctx, containerID, "root", "/", []string{"sh", "-c", containerKillScript}, 10*time.Second)
+	if err == nil {
+		stdout, stderr, exitCode, err = e.runExecWithTimeout(ctx, containerID, getJudgeUser(), "/", []string{"sh", "-c", containerWipeScript}, 10*time.Second)
+	}
 	if err != nil {
 		return fmt.Errorf("container reset failed: %w (exit=%d stdout=%s stderr=%s)", err, exitCode, stdout, stderr)
 	}
@@ -403,13 +421,13 @@ func (e *Executor) copyFilesToContainer(ctx context.Context, containerID string,
 	// So instead of asking the daemon to write the archive for us, extract it ourselves
 	// inside the container via `docker exec` with the tar piped over stdin — a normal
 	// process write to the live tmpfs, not subject to the archive-copy limitation.
-	// chmod -R 0777 after extraction: the dir is created (and the tar extracted) as
-	// root, but compilation/execution runs as the unprivileged "judge" user (see
-	// getJudgeUser) — same world-writable-workspace approach NewSubmissionWorkspace
-	// already uses for the host-side staging dir, just re-applied on the container side
-	// since tar doesn't preserve that across the root-owned mkdir.
+	// Extracted as the judge user (see getJudgeUser), which compiles and runs the code, so
+	// the workspace is its own: the reset wipes /app as that user and must be able to
+	// remove everything in it (see containerWipeScript). /app is world-writable and
+	// sticky (pool.go), so the user can create the directory. chmod -R 0777 keeps the
+	// world-writable workspace the host-side staging dir also uses.
 	extractCmd := []string{"sh", "-c", `mkdir -p "$1" && tar -xf - -C "$1" && chmod -R 0777 "$1"`, "sh", containerWorkDir}
-	if _, stderr, _, err := e.runExecWithStdin(ctx, containerID, "root", "/", extractCmd, 20*time.Second, buf.Bytes()); err != nil {
+	if _, stderr, _, err := e.runExecWithStdin(ctx, containerID, getJudgeUser(), "/", extractCmd, 20*time.Second, buf.Bytes()); err != nil {
 		return fmt.Errorf("failed to extract files into container: %w (stderr=%s)", err, stderr)
 	}
 	return nil

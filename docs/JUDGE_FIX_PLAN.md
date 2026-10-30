@@ -1,6 +1,6 @@
 # Judge Fix Plan
 
-**Created:** 2026-10-23 · **Last updated:** 2026-10-30 (R1-R9, T1-T4, T6-T8, T11, F1-F6, C1-C3, P1-P10, P12 done; T5 part done)
+**Created:** 2026-10-23 · **Last updated:** 2026-10-30 (R1-R9, T1-T4, T6-T8, T11, F1-F6, C1-C3, P1-P10, P12, S1 done; T5 part done)
 
 The single list of everything found in the 2026-10-23 judge review, plus the open items already recorded in
 [`JUDGE_PERFORMANCE_REVIEW.md`](./JUDGE_PERFORMANCE_REVIEW.md) §5,
@@ -72,7 +72,7 @@ b")` and C++ `cout << "x
 
 | # | Problem | Fix | Size | Status | Date / commit |
 |---|---|---|---|---|---|
-| S1 | Go build cache in `/tmp/.cache` survives between submissions and is writable by the sandbox user: cross-submission cache poisoning is possible in principle | Make the seeded cache root-owned read-only and give each submission a fresh writable GOCACHE layered on it (or wipe it in the reset and accept the cost) | M | todo | |
+| S1 | Go build cache in `/tmp/.cache` survives between submissions and is writable by the sandbox user: cross-submission cache poisoning is possible in principle | Make the seeded cache root-owned read-only and give each submission a fresh writable GOCACHE layered on it (or wipe it in the reset and accept the cost) | M | done | 2026-10-30 · wider than the cache: pooled containers drop every capability, so the root reset could not open or remove anything a submission had locked (chmod 000) in /tmp or its workspace, and still reported success; the next submission in the container could read it. Reproduced in Go, Python and Java (locked dirs in /tmp and /app, a planted file in GOCACHE all survived). Now uploads run as the judge user (/app is tmpfs mode=1777), and the reset is two execs: root kills leftover processes, then the judge user chmods and removes everything in /app and /tmp, Go cache included, fails (container discarded) if anything is left, and re-runs the image warm-up hook to seed a clean Go cache (~0.1 s, Go only). Cost: one more exec per reset, after the result is saved. The Go seed now also holds regexp, math/big, encoding/json, slices, maps, container/list etc. (35 -> 43 MB), since a wiped cache would otherwise recompile them on every submission (regexp +0.5 s, math/big +0.8 s). Test: TestResetLeavesNothingBehind. Full integration suite passes apart from the known TestProcessContamination/python. Rebuild judge-go-env on deploy for the wider seed (an old image still works, slower for those imports) |
 | S2 | docker-socket-proxy grants CONTAINERS + POST + EXEC: a compromised judge is effectively root on the host | Accept and document, or move to a narrower runtime API; at minimum keep the judge unexposed | M | todo | |
 | S3 | Sandboxes share the host kernel | Evaluate gVisor (`runsc`) as the sandbox runtime; measure the overhead | L | todo | |
 
@@ -151,3 +151,4 @@ Order: P5, P4, P1+P2 (bugs, small) → P6 + P7 (the core fix) → P3 → P8 + P9
 | 2026-10-30 | Done: T8 (Java class-data archives and javac JIT tuning; Java submissions ~35% faster) |
 | 2026-10-30 | Done: T11 (function-mode C++ without nlohmann::json, at -O2 with the precompiled header; ~4x faster end to end) |
 | 2026-10-30 | Done: F5 (time limits judged on CPU time; a busy server no longer turns passing submissions into TLE) |
+| 2026-10-30 | Done: S1 (the reset now removes everything a submission leaves, locked files and the Go build cache included) |
