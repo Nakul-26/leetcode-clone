@@ -248,9 +248,12 @@ public class Main {
                 throw new IllegalArgumentException("missing batched test payload");
             }
 
+            java.io.PrintStream realOut = System.out;
             for (int i = 0; i < tests.size(); i++) {
                 JsonObject payload = tests.get(i).getAsJsonObject();
                 JsonArray inputs = payload.getAsJsonArray("inputs");
+                CapturedStdout captured = new CapturedStdout();
+                System.setOut(new java.io.PrintStream(captured, true, "UTF-8"));
 
                 try {
                     Method method = resolveMethod(inputs == null ? 0 : inputs.size());
@@ -264,12 +267,18 @@ public class Main {
                     } else {
                         result.add("output", GSON.toJsonTree(output));
                     }
+                    System.setOut(realOut);
+                    result.addProperty("stdout", captured.value());
                     System.err.println(GSON.toJson(result));
                 } catch (InvocationTargetException err) {
+                    System.setOut(realOut);
                     Throwable cause = err.getCause() != null ? err.getCause() : err;
-                    System.err.println(errorPayload(i + 1, cause));
+                    System.err.println(errorPayload(i + 1, cause, captured.value()));
                 } catch (Throwable err) {
-                    System.err.println(errorPayload(i + 1, err));
+                    System.setOut(realOut);
+                    System.err.println(errorPayload(i + 1, err, captured.value()));
+                } finally {
+                    System.setOut(realOut);
                 }
             }
         } catch (Throwable err) {
@@ -312,12 +321,35 @@ public class Main {
         return method.invoke(solution, args);
     }
 
-    private static String errorPayload(int test, Throwable err) {
+    private static String errorPayload(int test, Throwable err, String stdout) {
         JsonObject result = new JsonObject();
         result.addProperty("test", test);
         result.addProperty("error", err.getClass().getSimpleName());
         result.addProperty("traceback", stackTrace(err));
+        result.addProperty("stdout", stdout);
         return GSON.toJson(result);
+    }
+
+    // What a test prints, kept up to just past the judge's output limit (64 KB) so a print
+    // loop cannot fill memory; the judge fails a test that goes over with Output Limit Exceeded.
+    static class CapturedStdout extends java.io.OutputStream {
+        private static final int CAP = 64 * 1024 + 1;
+        private final java.io.ByteArrayOutputStream buf = new java.io.ByteArrayOutputStream();
+
+        @Override
+        public void write(int b) {
+            if (buf.size() < CAP) buf.write(b);
+        }
+
+        @Override
+        public void write(byte[] b, int off, int len) {
+            int room = CAP - buf.size();
+            if (room > 0) buf.write(b, off, Math.min(len, room));
+        }
+
+        String value() {
+            return new String(buf.toByteArray(), StandardCharsets.UTF_8);
+        }
     }
 
     private static String stackTrace(Throwable err) {

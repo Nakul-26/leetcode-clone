@@ -24,11 +24,17 @@ import (
 	"judge-service-go/pkg/workspace"
 )
 
+// Function-mode submissions in these languages run all their tests in one process from the
+// first test (JUDGE_FIX_PLAN T5). It used to take 20 tests: below that each test was its own
+// exec, about 0.2-0.6 s of Docker calls and process start per test. A test that kills the
+// process no longer takes the tests after it down with it (runSubmissionCentralBatched
+// starts a new process after it), which was the cost of batching small Run submissions.
+// JUDGE_BATCH_THRESHOLD_* can still raise them.
 const (
-	defaultPythonBatchThreshold     = 20
-	defaultJavaScriptBatchThreshold = 20
-	defaultJavaBatchThreshold       = 20
-	defaultCppBatchThreshold        = 20
+	defaultPythonBatchThreshold     = 1
+	defaultJavaScriptBatchThreshold = 1
+	defaultJavaBatchThreshold       = 1
+	defaultCppBatchThreshold        = 1
 )
 
 type batchedTestExecOutput struct {
@@ -37,6 +43,15 @@ type batchedTestExecOutput struct {
 	Error     string      `json:"error,omitempty"`
 	Traceback string      `json:"traceback,omitempty"`
 	Fatal     string      `json:"fatal,omitempty"`
+	// What the student's code printed during this test, captured by the batch wrapper (cut
+	// off just past maxTestOutputBytes). A wrapper that does not capture leaves it nil and
+	// the test shows the process's whole stdout instead.
+	Stdout *string `json:"stdout,omitempty"`
+
+	// Stdin mode (stdinRunnerScript): the program's exit code and its stdout and stderr, base64.
+	Exit *int  `json:"exit,omitempty"`
+	Out  string `json:"out,omitempty"`
+	Err  string `json:"err,omitempty"`
 }
 
 var errBatchedOutputLimitExceeded = fmt.Errorf("batched wrapper output exceeded limit")
@@ -290,18 +305,128 @@ func runSubmissionCentralBatched(ctx context.Context, exec *executor.Executor, p
 		return finalizeExecutionFailure(result, err), nil
 	}
 
-	testsPayload := make([]map[string]interface{}, 0, len(problem.TestCases))
-	for _, tc := range problem.TestCases {
-		testsPayload = append(testsPayload, map[string]interface{}{"inputs": tc.Input})
+	upload := []string(nil)
+	if _, ok := adapter.(adapters.CompilingLanguageAdapter); !ok {
+		upload = append([]string{}, baseFiles...)
 	}
-	testsJSON, err := json.Marshal(testsPayload)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal batched tests: %w", err)
+	launch := func(runCtx context.Context, rest models.Problem, _ int, runTimeout time.Duration) (*executor.ExecStream, error) {
+		testsPayload := make([]map[string]interface{}, 0, len(rest.TestCases))
+		for _, tc := range rest.TestCases {
+			testsPayload = append(testsPayload, map[string]interface{}{"inputs": tc.Input})
+		}
+		testsJSON, err := json.Marshal(testsPayload)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal batched tests: %w", err)
+		}
+		if len(testsJSON) > maxTestsBytes {
+			return nil, fmt.Errorf("batched tests JSON too large: %d bytes", len(testsJSON))
+		}
+		files := upload
+		upload = nil // uploaded by the first attempt
+		return exec.RunInContainerStream(runCtx, pooledContainer.ID, files, submissionWorkspace.HostPath, submissionWorkspace.ContainerPath,
+			nil, adapter.BatchRunCommand(base64.StdEncoding.EncodeToString(testsJSON)), runTimeout, problem.MemoryLimitMb)
 	}
-	if len(testsJSON) > maxTestsBytes {
-		return nil, fmt.Errorf("batched tests JSON too large: %d bytes", len(testsJSON))
+	if err := runBatchedTests(ctx, exec, pooledContainer, submissionMsg, problem, result, launch, batchedTestResult, false); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+// batchLauncher starts one process that runs rest's tests (rest is the problem from test
+// offset+1 on) and reports their results as batchWatch expects.
+type batchLauncher func(runCtx context.Context, rest models.Problem, offset int, runTimeout time.Duration) (*executor.ExecStream, error)
+
+// runBatchedTests runs a submission's tests in as few processes as possible (JUDGE_FIX_PLAN
+// T5): one exec for the whole submission instead of three or more Docker calls per test. When
+// the process dies on a test (time or memory limit, a crash, an exit), that test gets the
+// verdict and, unless the submission stops at its first failure, a new process runs the tests
+// after it, so every test still gets its own result as it did with one exec per test.
+func runBatchedTests(ctx context.Context, exec *executor.Executor, pooledContainer *pool.PooledContainer, submissionMsg models.SubmissionMessage, problem models.Problem, result *models.SubmissionResult, launch batchLauncher, toResult func(batchedTestExecOutput, models.Problem) models.TestResult, keepStdout bool) error {
+	lastStartupCrash := noStartupCrash
+	for offset := 0; offset < len(problem.TestCases); {
+		rest := problem
+		rest.TestCases = problem.TestCases[offset:]
+		attempt, err := runBatchAttempt(ctx, exec, pooledContainer, submissionMsg, rest, offset, launch, toResult, keepStdout)
+		if err != nil {
+			if offset == 0 {
+				return err
+			}
+			// A later attempt could not start: report the tests it would have run.
+			slog.Error("batched rerun could not start", "submissionId", submissionMsg.SubmissionID, "offset", offset, "error", err)
+			appendMissingBatchedResults(result, problem, offset, "Runtime Error")
+			result.InternalError = models.InternalErrorJudge
+			break
+		}
+		for _, tr := range attempt.result.Details {
+			tr.Test += offset
+			result.AddTestResult(tr)
+		}
+		if attempt.result.Stderr != "" && result.Stderr == "" {
+			result.Stderr = attempt.result.Stderr
+		}
+		if attempt.internalError != "" {
+			result.InternalError = attempt.internalError
+		}
+		done := offset + attempt.processed
+		switch {
+		case attempt.stoppedEarly:
+			// Graded submission stopped at its first failure (T1); the rest never ran.
+			appendNotRunTests(result, problem, done)
+			offset = len(problem.TestCases)
+		case attempt.remainingReason == "":
+			offset = len(problem.TestCases)
+		case attempt.resumable && !submissionMsg.StopOnFirstFailure && done+1 < len(problem.TestCases) &&
+			!(startupCrash(attempt) && attempt.stderr == lastStartupCrash):
+			// The test the process died on gets the verdict; the next attempt starts after it.
+			// A process that crashes before its first result twice in a row with the same error
+			// output is failing on start (a syntax error, say), not on a test: stop retrying then.
+			appendFailedTest(result, problem, done, attempt.remainingReason)
+			lastStartupCrash = noStartupCrash
+			if startupCrash(attempt) {
+				lastStartupCrash = attempt.stderr
+			}
+			offset = done + 1
+		default:
+			appendMissingBatchedResults(result, problem, done, attempt.remainingReason)
+			offset = len(problem.TestCases)
+		}
+	}
+	if submissionMsg.StopOnFirstFailure {
+		// Covers failures the watchdog could not stop on (a crash or bad output ends the run by
+		// itself): everything after the first failure is reported as not run.
+		markNotRunAfterFirstFailure(result)
 	}
 
+	finished := time.Now().UTC()
+	result.FinishedAt = &finished
+	result.ElapsedMs = finished.Sub(*result.StartedAt).Milliseconds()
+	result.UpdateStatus()
+	return nil
+}
+
+// batchAttempt is the outcome of one process running some of a submission's tests.
+type batchAttempt struct {
+	result          *models.SubmissionResult // the tests it ran, numbered from 1
+	processed       int
+	stoppedEarly    bool
+	remainingReason string // the verdict for the test it died on, "" when every test ran
+	resumable       bool   // the process died on one test; the tests after it can run in a new one
+	internalError   string
+	stderr          string
+}
+
+// noStartupCrash never equals an attempt's stderr (which is trimmed).
+const noStartupCrash = " none "
+
+// startupCrash reports an attempt that crashed before its first result with an error message.
+// Tests that each end the process on purpose (a time or memory limit, an exit with nothing on
+// stderr) are not startup crashes, however many come in a row.
+func startupCrash(a batchAttempt) bool {
+	return a.processed == 0 && a.remainingReason == "Runtime Error" && a.stderr != ""
+}
+
+// runBatchAttempt runs problem's tests in one process and reads their results as they come.
+func runBatchAttempt(ctx context.Context, exec *executor.Executor, pooledContainer *pool.PooledContainer, submissionMsg models.SubmissionMessage, problem models.Problem, offset int, launch batchLauncher, toResult func(batchedTestExecOutput, models.Problem) models.TestResult, keepStdout bool) (batchAttempt, error) {
 	testTimeout := perTestTimeout(problem)
 	runTimeout := time.Duration(len(problem.TestCases)+1) * testTimeout
 
@@ -320,26 +445,12 @@ func runSubmissionCentralBatched(ctx context.Context, exec *executor.Executor, p
 	runCtx, cancel := context.WithTimeout(ctx, runTimeout)
 	defer cancel()
 
-	stream, err := exec.RunInContainerStream(
-		runCtx,
-		pooledContainer.ID,
-		func() []string {
-			if _, ok := adapter.(adapters.CompilingLanguageAdapter); ok {
-				return nil
-			}
-			return append([]string{}, baseFiles...)
-		}(),
-		submissionWorkspace.HostPath,
-		submissionWorkspace.ContainerPath,
-		nil,
-		adapter.BatchRunCommand(base64.StdEncoding.EncodeToString(testsJSON)),
-		runTimeout,
-		problem.MemoryLimitMb,
-	)
+	stream, err := launch(runCtx, problem, offset, runTimeout)
 	if err != nil {
-		return nil, err
+		return batchAttempt{}, err
 	}
 
+	result := models.NewSubmissionResult()
 	var stderrBuf bytes.Buffer
 	watch := batchWatch{
 		testTimeout:   testTimeout,
@@ -348,6 +459,8 @@ func runSubmissionCentralBatched(ctx context.Context, exec *executor.Executor, p
 		cancelRun:     cancel,
 		cpu:           cpuMeter,
 		cpuStart:      cpuStart,
+		toResult:      toResult,
+		keepStdout:    keepStdout,
 	}
 	processed, timedOut, stoppedEarly, parseErr := streamBatchedResults(result, stream.Stdout, stream.Stderr, &stderrBuf, problem, watch)
 	_ = stream.Stdout.Close()
@@ -378,34 +491,31 @@ func runSubmissionCentralBatched(ctx context.Context, exec *executor.Executor, p
 		slog.Error("batched stderr", "submissionId", submissionMsg.SubmissionID, "stderr", stderrForLog, "truncated", stderrTruncated)
 	}
 
-	remainingReason := ""
+	attempt := batchAttempt{result: result, processed: processed, stoppedEarly: stoppedEarly, stderr: stderrTrimmed}
 	switch {
 	case stoppedEarly:
-		// Graded submission stopped at its first failure (T1); the rest never ran.
-		appendNotRunTests(result, problem, processed)
 	case timedOut:
-		// The test the watchdog was waiting for ran past its limit (F6). Tests after it never
-		// ran; a graded submission reports them as not run (below), anything else keeps the
-		// earlier behaviour of reporting them as timed out too.
-		remainingReason = models.SubmissionStatusTimeLimitExceeded
+		// The test the watchdog was waiting for ran past its limit (F6).
+		attempt.remainingReason, attempt.resumable = models.SubmissionStatusTimeLimitExceeded, true
 	case errors.Is(parseErr, errBatchedOutputLimitExceeded):
-		remainingReason = "Output Limit Exceeded"
+		attempt.remainingReason, attempt.resumable = "Output Limit Exceeded", true
 	case runErr != nil:
 		runErrText := strings.ToLower(runErr.Error())
 		if strings.Contains(runErrText, "timed out") || strings.Contains(runErrText, "deadline exceeded") {
-			remainingReason = "Time Limit Exceeded"
+			attempt.remainingReason = "Time Limit Exceeded"
 		} else if errors.Is(runErr, executor.ErrMemoryLimitExceeded) {
-			remainingReason = models.SubmissionStatusMemoryLimitExceeded
+			attempt.remainingReason = models.SubmissionStatusMemoryLimitExceeded
 		} else {
 			// The student's program exited non-zero (see the per-test path, T3).
-			remainingReason = "Runtime Error"
+			attempt.remainingReason = "Runtime Error"
 		}
+		attempt.resumable = true
 	case parseErr != nil:
-		remainingReason = "Runtime Error"
-		result.InternalError = models.InternalErrorJudge
+		attempt.remainingReason = "Runtime Error"
+		attempt.internalError = models.InternalErrorJudge
 	case processed < len(problem.TestCases):
-		remainingReason = "Runtime Error"
-		result.InternalError = models.InternalErrorWrapper
+		attempt.remainingReason = "Runtime Error"
+		attempt.internalError = models.InternalErrorWrapper
 	}
 	if parseErr != nil {
 		slog.Error("batched output parse error", "submissionId", submissionMsg.SubmissionID, "processed", processed, "error", parseErr)
@@ -413,21 +523,7 @@ func runSubmissionCentralBatched(ctx context.Context, exec *executor.Executor, p
 	if runErr != nil {
 		slog.Error("batched execution error", "submissionId", submissionMsg.SubmissionID, "processed", processed, "error", runErr)
 	}
-	if remainingReason != "" {
-		appendMissingBatchedResults(result, problem, processed, remainingReason)
-	}
-	if submissionMsg.StopOnFirstFailure {
-		// Covers failures the watchdog could not stop on (a crash or bad output ends the run by
-		// itself): everything after the first failure is reported as not run.
-		markNotRunAfterFirstFailure(result)
-	}
-
-	finished := time.Now().UTC()
-	result.FinishedAt = &finished
-	result.ElapsedMs = finished.Sub(*result.StartedAt).Milliseconds()
-	result.UpdateStatus()
-
-	return result, nil
+	return attempt, nil
 }
 
 // batchWatch bounds a batched run test by test (JUDGE_FIX_PLAN F6). The batch wrappers print one
@@ -447,6 +543,12 @@ type batchWatch struct {
 	// before. nil judges on wall-clock time alone.
 	cpu      func() (time.Duration, error)
 	cpuStart time.Duration // the container's CPU time when the run started
+
+	// toResult turns a result line into a test result (batchedTestResult when nil). keepStdout
+	// keeps each test's own Stdout instead of the process's whole stdout (stdin mode, where
+	// each test is a program run of its own).
+	toResult   func(batchedTestExecOutput, models.Problem) models.TestResult
+	keepStdout bool
 }
 
 // cpuMark is the container's CPU time read when a batched test's result line arrived. It is
@@ -642,11 +744,17 @@ loop:
 				err = fmt.Errorf("wrapper fatal error: %s", out.Fatal)
 				break loop
 			}
-			if out.Test <= 0 || out.Test > len(problem.TestCases) {
+			// Only the next test's line counts. Student code can write to the same stream, so
+			// a repeated or out-of-order line (a copy of a passing test's) must not count again.
+			if out.Test != processed+1 || out.Test > len(problem.TestCases) {
 				continue
 			}
 
-			tr := batchedTestResult(out, problem)
+			toResult := watch.toResult
+			if toResult == nil {
+				toResult = batchedTestResult
+			}
+			tr := toResult(out, problem)
 			tr.TimeMs = ev.at.Sub(last).Milliseconds()
 			last = ev.at
 			result.AddTestResult(tr)
@@ -694,8 +802,8 @@ loop:
 	case <-time.After(5 * time.Second):
 	}
 	rawStdout := stdoutBuf.String()
-	for i := len(result.Details) - processed; i < len(result.Details); i++ {
-		if i >= 0 {
+	for i := len(result.Details) - processed; i < len(result.Details) && !watch.keepStdout; i++ {
+		if i >= 0 && result.Details[i].Stdout == "" {
 			result.Details[i].Stdout = rawStdout
 		}
 	}
@@ -719,6 +827,17 @@ func batchedTestResult(out batchedTestExecOutput, problem models.Problem) models
 		Input:    tc.Input,
 		Expected: tc.Expected,
 		Output:   out.Output,
+	}
+	if out.Stdout != nil {
+		// As in the per-test path: a test that prints more than maxTestOutputBytes fails with
+		// Output Limit Exceeded, whatever it returned.
+		stdout, truncated := truncateString(strings.TrimSpace(*out.Stdout), maxTestOutputBytes)
+		tr.Stdout = stdout
+		if truncated {
+			markTestFailed(&tr, models.SubmissionStatusWrongAnswer)
+			tr.Error = "Output Limit Exceeded"
+			return tr
+		}
 	}
 	if out.Error != "" {
 		reason := models.SubmissionStatusRuntimeError
@@ -748,6 +867,13 @@ func appendMissingBatchedResults(result *models.SubmissionResult, problem models
 		markTestFailed(&tr, reason)
 		result.AddTestResult(tr)
 	}
+}
+
+// appendFailedTest records test index i (0-based) as failed with reason.
+func appendFailedTest(result *models.SubmissionResult, problem models.Problem, i int, reason string) {
+	tr := models.TestResult{Test: i + 1, Input: problem.TestCases[i].Input, Expected: problem.TestCases[i].Expected}
+	markTestFailed(&tr, reason)
+	result.AddTestResult(tr)
 }
 
 // appendNotRunTests records tests from index `from` on as skipped after an earlier failure

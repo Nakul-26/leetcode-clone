@@ -149,6 +149,28 @@ def emit(payload):
     print(json.dumps(payload), file=sys.stderr)
     sys.stderr.flush()
 
+class CapturedStdout:
+    # What a test prints, kept up to just past the judge's output limit (64 KB) so a print
+    # loop cannot fill memory; the judge fails a test that goes over with Output Limit Exceeded.
+    cap = 64 * 1024 + 1
+
+    def __init__(self):
+        self.parts = []
+        self.size = 0
+
+    def write(self, s):
+        s = str(s)
+        if self.size < self.cap:
+            self.parts.append(s[: self.cap - self.size])
+        self.size += len(s)
+        return len(s)
+
+    def flush(self):
+        pass
+
+    def value(self):
+        return "".join(self.parts)
+
 def run_all():
     if len(sys.argv) < 2:
         emit({"fatal": "missing tests payload"})
@@ -160,7 +182,10 @@ def run_all():
     params = json.loads('''{{PARAMS_JSON}}''') or []
     return_type = '''{{RETURN_TYPE}}'''
 
+    real_stdout = sys.stdout
     for i, test in enumerate(tests):
+        captured = CapturedStdout()
+        sys.stdout = captured
         try:
             raw_inputs = test.get("inputs", [])
             converted_inputs = []
@@ -178,13 +203,18 @@ def run_all():
             else:
                 converted_out = convert_output(out, return_type)
 
-            emit({ "test": i + 1, "output": converted_out })
+            sys.stdout = real_stdout
+            emit({ "test": i + 1, "output": converted_out, "stdout": captured.value() })
         except Exception as exc:
+            sys.stdout = real_stdout
             emit({
                 "test": i + 1,
                 "error": str(exc),
                 "traceback": traceback.format_exc(),
+                "stdout": captured.value(),
             })
+        finally:
+            sys.stdout = real_stdout
 
     return 0
 

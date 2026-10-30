@@ -487,6 +487,36 @@ void write(std::string& o, const std::vector<T>& v) {
     o += ']';
 }
 
+// The batch wrapper points std::cout at this while a test runs, so each test's result line
+// carries what that test printed, kept up to just past the judge's output limit (64 KB) so a
+// print loop cannot fill memory; the judge fails a test that goes over with Output Limit
+// Exceeded. printf bypasses it and still goes to the process's stdout.
+struct CapturedStdout : std::streambuf {
+    static constexpr size_t cap = 64 * 1024 + 1;
+    std::string data;
+    int_type overflow(int_type c) override {
+        if (c == traits_type::eof()) return 0;
+        if (data.size() < cap) data.push_back(static_cast<char>(c));
+        return c;
+    }
+    std::streamsize xsputn(const char* s, std::streamsize n) override {
+        if (data.size() < cap) data.append(s, std::min<size_t>(static_cast<size_t>(n), cap - data.size()));
+        return n;
+    }
+};
+
+inline CapturedStdout*& captured_stdout() {
+    static CapturedStdout* current = nullptr;
+    return current;
+}
+
+inline void add_captured_stdout(std::string& line) {
+    if (CapturedStdout* c = captured_stdout()) {
+        line += ",\"stdout\":";
+        write(line, c->data);
+    }
+}
+
 // One judge result line on stderr: {"test":N,"output":...}, or {"output":...} when test is 0
 // (the single-test wrapper).
 template <class T>
@@ -495,6 +525,7 @@ void print_output(int test, const T& value) {
     if (test > 0) line += "\"test\":" + std::to_string(test) + ",";
     line += "\"output\":";
     write(line, value);
+    add_captured_stdout(line);
     line += "}";
     std::cerr << line << std::endl;
 }
@@ -504,6 +535,7 @@ inline void print_error(int test, const std::string& message) {
     if (test > 0) line += "\"test\":" + std::to_string(test) + ",";
     line += "\"error\":\"Runtime Error\",\"message\":";
     write(line, message);
+    add_captured_stdout(line);
     line += "}";
     std::cerr << line << std::endl;
 }

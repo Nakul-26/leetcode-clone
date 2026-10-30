@@ -2,9 +2,12 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -69,10 +72,37 @@ func runSubmissionStdinDetailed(ctx context.Context, exec *executor.Executor, po
 			slog.Warn("failed to apply execution memory limit", "containerId", pooledContainer.ID, "error", err)
 		}
 	}
+	// All tests in one exec (JUDGE_FIX_PLAN T5) unless switched off or a test is malformed (the
+	// per-test loop below reports those one by one). The inputs go up with the source.
+	batched := stdinBatchEnabled() && stdinTestsWellFormed(problem)
+	var upload []string
 	if !compiled {
-		if err := exec.CopyFiles(ctx, pooledContainer.ID, submissionWorkspace.HostPath, submissionWorkspace.ContainerPath, baseFiles); err != nil {
+		upload = append(upload, baseFiles...)
+	}
+	if batched {
+		inputFiles, err := writeStdinInputs(submissionWorkspace.HostPath, problem)
+		if err != nil {
 			return finalizeExecutionFailure(result, err), cleanupFailed, nil
 		}
+		upload = append(upload, inputFiles...)
+	}
+	if len(upload) > 0 {
+		if err := exec.CopyFiles(ctx, pooledContainer.ID, submissionWorkspace.HostPath, submissionWorkspace.ContainerPath, upload); err != nil {
+			return finalizeExecutionFailure(result, err), cleanupFailed, nil
+		}
+	}
+	if batched {
+		launch := func(runCtx context.Context, rest models.Problem, offset int, runTimeout time.Duration) (*executor.ExecStream, error) {
+			cmd := append([]string{"sh", "-c", stdinRunnerScript, "judge-runner",
+				strconv.Itoa(offset + 1), strconv.Itoa(offset + len(rest.TestCases)),
+				strconv.Itoa(maxTestOutputBytes + 1), strconv.Itoa(maxLogOutputBytes)}, runCmd...)
+			return exec.RunInContainerStream(runCtx, pooledContainer.ID, nil, submissionWorkspace.HostPath, submissionWorkspace.ContainerPath,
+				nil, cmd, runTimeout, 0) // memory limit applied once above
+		}
+		if err := runBatchedTests(ctx, exec, pooledContainer, submissionMsg, problem, result, launch, stdinBatchedResult, true); err != nil {
+			return finalizeExecutionFailure(result, err), cleanupFailed, nil
+		}
+		return result, cleanupFailed, nil
 	}
 
 
@@ -252,4 +282,104 @@ func stdinTestExpected(tc models.TestCase) (text string, hasExpected bool, ok bo
 // code (JUDGE_FIX_PLAN F1).
 func stdinSourceFor(msg models.SubmissionMessage) string {
 	return msg.Code
+}
+
+// stdinRunnerScript runs a stdin program once per test input in a single exec (JUDGE_FIX_PLAN
+// T5), instead of one exec per test. Arguments: first and last test number, the stdout and
+// stderr caps, then the run command. The inputs are files judge-input-N in the workspace.
+// Each run's stdout and stderr go through head, so a program that writes without end is cut
+// off (and gets SIGPIPE) instead of filling memory-backed storage. After each run it writes
+// one line to its own stderr, which the judge reads as it comes (streamBatchedResults):
+// {"test":k,"exit":code,"out":base64,"err":base64}, k counted from 1 within this run.
+const stdinRunnerScript = `first=$1; last=$2; oc=$3; ec=$4; shift 4
+i=$first
+while [ "$i" -le "$last" ]; do
+	( ( "$@" < "judge-input-$i" 2>&3; echo $? > .judge-code ) | head -c "$oc" > .judge-out ) 3>&1 | head -c "$ec" > .judge-err
+	code=$(cat .judge-code 2>/dev/null); [ -n "$code" ] || code=255
+	printf '{"test":%d,"exit":%d,"out":"%s","err":"%s"}\n' $((i - first + 1)) "$code" "$(base64 -w 0 < .judge-out)" "$(base64 -w 0 < .judge-err)" >&2
+	rm -f .judge-code .judge-out .judge-err
+	i=$((i + 1))
+done`
+
+// stdinBatchEnabled is the switch for the single-exec stdin path: JUDGE_STDIN_BATCH=0 goes back
+// to one exec per test.
+func stdinBatchEnabled() bool {
+	return strings.TrimSpace(os.Getenv("JUDGE_STDIN_BATCH")) != "0"
+}
+
+func stdinTestsWellFormed(problem models.Problem) bool {
+	for _, tc := range problem.TestCases {
+		_, inputOk := stdinTestInput(tc)
+		_, _, expectedOk := stdinTestExpected(tc)
+		if !inputOk || !expectedOk {
+			return false
+		}
+	}
+	return len(problem.TestCases) > 0
+}
+
+// writeStdinInputs writes each test's input as judge-input-N in the host workspace.
+func writeStdinInputs(dir string, problem models.Problem) ([]string, error) {
+	files := make([]string, 0, len(problem.TestCases))
+	for i, tc := range problem.TestCases {
+		text, _ := stdinTestInput(tc)
+		name := "judge-input-" + strconv.Itoa(i+1)
+		if err := workspace.WriteFile(dir, name, []byte(text), 0644); err != nil {
+			return nil, fmt.Errorf("failed to write %s: %w", name, err)
+		}
+		files = append(files, name)
+	}
+	return files, nil
+}
+
+// stdinBatchedResult judges one test from a stdinRunnerScript line, the way the per-test loop
+// in runSubmissionStdinDetailed judges one exec.
+func stdinBatchedResult(out batchedTestExecOutput, problem models.Problem) models.TestResult {
+	tc := problem.TestCases[out.Test-1]
+	tr := models.TestResult{Test: out.Test, Input: tc.Input, Expected: tc.Expected}
+	stdoutBytes, err1 := base64.StdEncoding.DecodeString(out.Out)
+	stderrBytes, err2 := base64.StdEncoding.DecodeString(out.Err)
+	if out.Exit == nil || err1 != nil || err2 != nil {
+		markTestFailed(&tr, models.SubmissionStatusRuntimeError)
+		tr.Error = "unreadable result from the stdin runner"
+		return tr
+	}
+	stdout := string(stdoutBytes)
+	stdoutForResult, stdoutTruncated := truncateString(stdout, maxTestOutputBytes)
+	stderrForLog, _ := truncateString(strings.TrimSpace(string(stderrBytes)), maxLogOutputBytes)
+	tr.Stdout = stdoutForResult
+	tr.Stderr = stderrForLog
+	tr.ExitCode = *out.Exit
+
+	switch {
+	case stdoutTruncated:
+		// Checked before the exit code: the runner cuts the output off, so the program's
+		// next write fails with SIGPIPE (exit 141).
+		markTestFailed(&tr, models.SubmissionStatusWrongAnswer)
+		tr.Error = "Output Limit Exceeded"
+		return tr
+	case tr.ExitCode == 137:
+		markTestFailed(&tr, models.SubmissionStatusMemoryLimitExceeded)
+		return tr
+	case tr.ExitCode != 0:
+		markTestFailed(&tr, models.SubmissionStatusRuntimeError)
+		if stderrForLog != "" {
+			tr.Error = "Runtime Error"
+			tr.Traceback = stderrForLog
+		}
+		return tr
+	}
+
+	tr.Output = stdout
+	if expectedText, hasExpected, _ := stdinTestExpected(tc); hasExpected {
+		tr.Passed = comparator.CompareText(stdout, expectedText)
+		if !tr.Passed {
+			tr.ErrorType = models.ErrorTypeWrongAnswer
+		}
+	} else {
+		// No expected output: running to completion is the pass condition (see the per-test loop).
+		tr.Passed = true
+	}
+	tr.Ok = tr.Passed
+	return tr
 }

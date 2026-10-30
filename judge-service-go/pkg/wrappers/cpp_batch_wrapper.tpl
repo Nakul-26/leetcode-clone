@@ -16,11 +16,16 @@ int main(int argc, char** argv) {
         for (size_t i = 0; i < tests.items.size(); ++i) {
             const int test_no = static_cast<int>(i) + 1;
             const judge_io::Value& inputs = judge_io::field(tests.items[i], "inputs");
+            judge_io::CapturedStdout captured;
+            std::streambuf* real_stdout = std::cout.rdbuf(&captured);
+            judge_io::captured_stdout() = &captured;
             try {
                 // GENERATED_CALL_MARKER
             } catch (const std::exception& e) {
                 judge_io::print_error(test_no, e.what());
             }
+            judge_io::captured_stdout() = nullptr;
+            std::cout.rdbuf(real_stdout);
         }
     } catch (const std::exception& e) {
         judge_io::print_fatal(e.what());

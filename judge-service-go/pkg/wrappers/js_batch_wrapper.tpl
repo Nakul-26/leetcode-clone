@@ -177,6 +177,28 @@ function emit(payload) {
   process.stderr.write(JSON.stringify(payload) + "\n");
 }
 
+// What a test prints (console.log goes through process.stdout.write), kept up to just past the
+// judge's output limit (64 KB) so a print loop cannot fill memory; the judge fails a test that
+// goes over with Output Limit Exceeded.
+const realStdoutWrite = process.stdout.write.bind(process.stdout);
+const STDOUT_CAP = 64 * 1024 + 1;
+function captureStdout() {
+  const parts = [];
+  let size = 0;
+  process.stdout.write = (chunk, encoding, cb) => {
+    const s = typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8");
+    if (size < STDOUT_CAP) parts.push(s.slice(0, STDOUT_CAP - size));
+    size += s.length;
+    const done = typeof encoding === "function" ? encoding : cb;
+    if (typeof done === "function") done();
+    return true;
+  };
+  return () => {
+    process.stdout.write = realStdoutWrite;
+    return parts.join("");
+  };
+}
+
 async function runAll() {
   try {
     let tests;
@@ -192,6 +214,7 @@ async function runAll() {
 
     for (let i = 0; i < tests.length; i++) {
       const test = tests[i];
+      const endCapture = captureStdout();
       try {
         const testInput = test.inputs;
         const rawInputs = Array.isArray(testInput) ? testInput : [testInput];
@@ -207,12 +230,13 @@ async function runAll() {
         } else {
           convertedOut = convertOutput(out, returnType);
         }
-        emit({ test: i + 1, output: convertedOut });
+        emit({ test: i + 1, output: convertedOut, stdout: endCapture() });
       } catch (exc) {
         emit({
           test: i + 1,
           error: String(exc.message || exc),
           traceback: String(exc.stack || ""),
+          stdout: endCapture(),
         });
       }
     }
