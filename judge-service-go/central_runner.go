@@ -986,6 +986,9 @@ func shouldUseBatchedExecution(language string, testCount int) bool {
 				threshold = parsed
 			}
 		}
+	case "c", "go":
+		// Batch wrappers added with T5 step 2; no threshold override.
+		threshold = 1
 	default:
 		return false
 	}

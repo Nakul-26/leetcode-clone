@@ -32,6 +32,26 @@ func (CAdapter) PrepareFiles(workDir string, submissionMsg models.SubmissionMess
 	return []string{"solution.c", "main.c"}, nil
 }
 
+// PrepareBatchFiles writes the wrapper that runs every test in one process (JUDGE_FIX_PLAN T5).
+func (CAdapter) PrepareBatchFiles(workDir string, submissionMsg models.SubmissionMessage, problem models.Problem) ([]string, error) {
+	lang := languages.GetLanguage("c")
+	wrapperCode, err := wrapper.GenerateWrapper(problem, lang, submissionMsg.FunctionName, "c_batch_wrapper.tpl")
+	if err != nil {
+		return nil, err
+	}
+	if err := workspace.WriteFile(workDir, "solution.c", []byte(submissionMsg.Code), 0644); err != nil {
+		return nil, fmt.Errorf("failed to write solution.c: %w", err)
+	}
+	if err := workspace.WriteFile(workDir, "main.c", []byte(wrapperCode), 0644); err != nil {
+		return nil, fmt.Errorf("failed to write main.c: %w", err)
+	}
+	return []string{"solution.c", "main.c"}, nil
+}
+
+func (CAdapter) BatchRunCommand(testsB64 string) []string {
+	return []string{"/app/main", testsB64}
+}
+
 func (CAdapter) CompileCommand() []string {
 	return []string{"gcc", "-O2", "-o", "/app/main", "/app/main.c", "-ljson-c", "-lm"}
 }

@@ -17,8 +17,21 @@ func (GoAdapter) Name() string {
 }
 
 func (GoAdapter) PrepareFiles(workDir string, submissionMsg models.SubmissionMessage, problem models.Problem) ([]string, error) {
+	return prepareGoFiles(workDir, submissionMsg, problem, "")
+}
+
+// PrepareBatchFiles writes the wrapper that runs every test in one process (JUDGE_FIX_PLAN T5).
+func (GoAdapter) PrepareBatchFiles(workDir string, submissionMsg models.SubmissionMessage, problem models.Problem) ([]string, error) {
+	return prepareGoFiles(workDir, submissionMsg, problem, "go_batch_wrapper.tpl")
+}
+
+func (GoAdapter) BatchRunCommand(testsB64 string) []string {
+	return []string{"./main", testsB64}
+}
+
+func prepareGoFiles(workDir string, submissionMsg models.SubmissionMessage, problem models.Problem, template string) ([]string, error) {
 	lang := languages.GetLanguage("go")
-	wrapperCode, err := wrapper.GenerateWrapper(problem, lang, submissionMsg.FunctionName, "")
+	wrapperCode, err := wrapper.GenerateWrapper(problem, lang, submissionMsg.FunctionName, template)
 	if err != nil {
 		return nil, err
 	}

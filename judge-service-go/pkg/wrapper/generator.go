@@ -56,6 +56,11 @@ func GenerateWrapper(p models.Problem, lang *languages.Language, submissionFuncN
 
 	if lang.ID == "c" {
 		tpl = strings.ReplaceAll(tpl, "{{FUNCTION_NAME}}", sanitizedFuncName)
+		judgeIO, err := os.ReadFile(filepath.Join("pkg", "wrappers", "c_judge_io.inc"))
+		if err != nil {
+			return "", fmt.Errorf("failed to read c_judge_io.inc: %w", err)
+		}
+		tpl = strings.ReplaceAll(tpl, "// JUDGE_IO_MARKER", string(judgeIO))
 		cCall := buildCCall(p, sanitizedFuncName)
 		tpl = strings.ReplaceAll(tpl, "// GENERATED_CALL_MARKER", cCall)
 		return tpl, nil
@@ -63,6 +68,11 @@ func GenerateWrapper(p models.Problem, lang *languages.Language, submissionFuncN
 
 	if lang.ID == "go" {
 		tpl = strings.ReplaceAll(tpl, "{{FUNCTION_NAME}}", sanitizedFuncName)
+		judgeIO, err := os.ReadFile(filepath.Join("pkg", "wrappers", "go_judge_io.inc"))
+		if err != nil {
+			return "", fmt.Errorf("failed to read go_judge_io.inc: %w", err)
+		}
+		tpl = strings.ReplaceAll(tpl, "// JUDGE_IO_MARKER", string(judgeIO))
 		goCall := buildGoCall(p, sanitizedFuncName)
 		tpl = strings.ReplaceAll(tpl, "// GENERATED_CALL_MARKER", goCall)
 		return tpl, nil
@@ -272,6 +282,8 @@ func buildGoCall(p models.Problem, funcName string) string {
 		sb.WriteString("\tresult.Output = output\n")
 	}
 
+	// Defined by both Go templates; the batch one returns the test's captured stdout (T5).
+	sb.WriteString("\tresult.Stdout = judgeStdout()\n")
 	sb.WriteString("\tjsonRes, _ := json.Marshal(result)\n")
 	sb.WriteString("\tfmt.Fprintln(os.Stderr, string(jsonRes))\n")
 	return sb.String()
@@ -421,6 +433,8 @@ func buildCCall(p models.Problem, funcName string) string {
 		// Add output to result based on type
 		jsonAddOutput(&sb, p.ReturnType, "output")
 	}
+	// Defined by both C templates; the batch one adds the test's captured stdout (T5).
+	sb.WriteString("        judge_before_print(result);\n")
 	sb.WriteString("        fprintf(stderr, \"%s\\n\", json_object_to_json_string(result));")
 	return sb.String()
 }
