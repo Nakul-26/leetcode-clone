@@ -276,6 +276,7 @@ judge. The affected submission rows stay `Pending` until deleted or re-queued.
 
 ### The judge is unhealthy or containers are not coming up
 
+- Run, reference-solution checks and the exam portal's raw runs go to the judge over the RabbitMQ queue `judge_rpc` (any judge consuming it answers), and over HTTP to `JUDGE_SERVICE_URL` when no judge consumes it. `rabbitmqctl list_queues name messages consumers` shows it; a judge logs `Judge RPC consumer started` at start-up. `JUDGE_RPC=off` on the API (or the judge) forces HTTP.
 - Is Docker healthy on the host? Is `docker-socket-proxy` (docker-guard) running? The judge talks to Docker only through it. Its log names every refused request and why (`refused ... reason=`); a refusal of something the judge needs means the judge's sandbox settings changed without updating `cmd/docker-guard/guard.go`.
 - Are the language images present (`judge-<lang>-env`)? A missing image means that language fails.
 - Check disk space on the Docker host: images and workspaces fill disks.

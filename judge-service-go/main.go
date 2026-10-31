@@ -1414,7 +1414,9 @@ func isCentralCompareEnabled(language string) bool {
 	}
 }
 
-func startHealthServer(ctx context.Context, containerPool *pool.ContainerPool, port string, problemsCollection *mongo.Collection, usageEventsCollection *mongo.Collection, executor *executor.Executor) {
+// startHealthServer serves the judge's HTTP endpoints and returns their handler, which the
+// RabbitMQ request/reply consumer also uses (rpc.go).
+func startHealthServer(ctx context.Context, containerPool *pool.ContainerPool, port string, problemsCollection *mongo.Collection, usageEventsCollection *mongo.Collection, executor *executor.Executor) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -1614,6 +1616,7 @@ func startHealthServer(ctx context.Context, containerPool *pool.ContainerPool, p
 		defer cancel()
 		server.Shutdown(shutdownCtx)
 	}()
+	return mux
 }
 
 func main() {
@@ -1813,7 +1816,7 @@ func main() {
 	if healthPort == "" {
 		healthPort = "8081"
 	}
-	startHealthServer(ctx, containerPool, healthPort, problemsCollection, usageEventsCollection, executor)
+	httpHandler := startHealthServer(ctx, containerPool, healthPort, problemsCollection, usageEventsCollection, executor)
 
 	// Initialize Redis Client
 	redisPass := os.Getenv("REDIS_PASS")
@@ -1962,6 +1965,9 @@ func main() {
 	failOnError(err, "Failed to register the interactive consumer")
 
 	slog.Info("Waiting for messages", "queue", submissionQueueName, "interactiveQueue", interactiveQueueName)
+
+	// /run and /raw-run over the queue too, so they spread across judges (JUDGE_FIX_PLAN M1).
+	startJudgeRPC(ctx, conn, httpHandler)
 
 	// Graceful Shutdown implementation
 	sigChan := make(chan os.Signal, 1)

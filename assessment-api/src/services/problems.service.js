@@ -3,7 +3,7 @@ import Submission from "../../models/Submission.mjs";
 import { HttpError } from "../utils/httpError.js";
 import { validateProblemDefinition, checkTestsAgainstReference } from "./preview.service.js";
 import { referenceOutputsFor, runReferenceSolution } from "./referenceSolution.service.js";
-import { env } from "../config/env.js";
+import { judgeFetch } from "./judgeClient.service.js";
 import { collegeAllowsPremium } from "./billing.service.js";
 import { escapeRegex } from "../utils/escapeRegex.js";
 
@@ -534,11 +534,7 @@ export async function runProblem(id, payload) {
 
   let judgeResult;
   try {
-    const response = await fetch(`${env.JUDGE_SERVICE_URL}/run`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(judgeMsg)
-    });
+    const response = await judgeFetch("/run", { body: JSON.stringify(judgeMsg) });
     if (!response.ok) {
       const errorText = await response.text();
       throw new HttpError(response.status, "Judge service error: " + errorText);

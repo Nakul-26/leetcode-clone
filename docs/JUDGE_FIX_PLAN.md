@@ -1,6 +1,6 @@
 # Judge Fix Plan
 
-**Created:** 2026-10-23 · **Last updated:** 2026-10-31 (R1-R9, T1-T9, T11, F1-F6, C1-C3, P1-P10, P12, S1-S2 done)
+**Created:** 2026-10-23 · **Last updated:** 2026-10-31 (R1-R9, T1-T9, T11, F1-F6, C1-C3, P1-P10, P12, S1-S2, M1 done)
 
 The single list of everything found in the 2026-10-23 judge review, plus the open items already recorded in
 [`JUDGE_PERFORMANCE_REVIEW.md`](./JUDGE_PERFORMANCE_REVIEW.md) §5,
@@ -80,7 +80,7 @@ b")` and C++ `cout << "x
 
 | # | Problem | Fix | Size | Status | Date / commit |
 |---|---|---|---|---|---|
-| M1 | `/run` and `/raw-run` are reached by one hostname, so synchronous work cannot spread across judges | Move them onto the queue (the interactive queue already exists), or put a load balancer in front | M | todo | |
+| M1 | `/run` and `/raw-run` are reached by one hostname, so synchronous work cannot spread across judges | Move them onto the queue (the interactive queue already exists), or put a load balancer in front | M | done | 2026-10-31 · /run and /raw-run now go over RabbitMQ request/reply: the API (judgeClient.service.js, judgeFetch) publishes to the durable queue judge_rpc with replyTo amq.rabbitmq.reply-to, a correlation id and the caller's timeout as expiration; any judge consuming it (rpc.go) runs the request through the same HTTP handler in process and replies with its status and body, so callers see exactly what HTTP returned. HTTP stays as the fallback, so either side deploys first: no consumer on the queue (an older judge, checked every 10 s), RabbitMQ unreachable, JUDGE_RPC=off, or a 503 (that judge had no free container). Requests are acked on receipt, so a run is never repeated on another judge; JUDGE_RPC_CONCURRENCY (default 16) caps queued runs per judge. Verified live: queue and HTTP give the same /run and /raw-run results, judge errors (400) pass through; unit tests on both sides |
 | M2 | Second judge server consuming the same queues (perf review §5 / plan Phase 5) | After R1-R6 (redelivery becomes routine with more hosts) | M | todo | |
 
 ## Phase 6 — Run / Submit modes and correct test cases (added 2026-10-24)
@@ -158,3 +158,5 @@ Order: P5, P4, P1+P2 (bugs, small) → P6 + P7 (the core fix) → P3 → P8 + P9
 | 2026-10-30 | T5 follow-up: C and Go function mode batched too (15 tests: C 3.04 -> 0.89 s, Go 2.66 -> 1.11 s); TS, Ruby, PHP, Rust, Kotlin, C# still one exec per test |
 | 2026-10-31 | T5 follow-up: every function-mode language now batched. 15 tests: TypeScript 17.5 -> 0.77 s (tsx start-up once; a ready line keeps test 1 on its normal limit), PHP 2.49 -> 0.37 s, Ruby 2.78 -> 0.72 s, Rust 4.90 -> 2.55 s, C# 10.8 -> 6.4 s, Kotlin 20.7 -> 18.9 s (its compile dominates, see T9). C# out-of-memory now reads as Memory Limit Exceeded |
 | 2026-10-31 | Done: T9 (Kotlin compiles only the student's file with a prebuilt harness; C# compiles with csc directly. Kotlin 18.9 -> 7.0 s, C# 6.4 -> 4.4 s for 15 tests) |
+| 2026-10-31 | Done: M1 (/run and /raw-run over RabbitMQ request/reply, so any judge can serve them; HTTP fallback) |
+| 2026-10-31 | CI fix: follow-redirects 1.16.2 (high advisory) in both lockfiles, and a test that failed on the 31st of a month |

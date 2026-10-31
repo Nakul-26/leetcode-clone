@@ -1,7 +1,7 @@
 // Uses Node's built-in global fetch (Node 18+) — same convention as
 // problems.service.js / preview.service.js / admin.routes.js. The "node-fetch"
 // package is not a listed dependency; don't import it.
-import { env } from "../config/env.js";
+import { judgeFetch } from "./judgeClient.service.js";
 
 // Public-API numeric language IDs -> judge-service-go's internal language keys
 // (pkg/languages/languages.go). 51 matches the conventional id for C# (Mono) so callers
@@ -63,9 +63,7 @@ export async function runRawCodeAssess({ languageId, sourceCode, stdin, wallTime
 
   let raw;
   try {
-    const resp = await fetch(`${env.JUDGE_SERVICE_URL}/raw-run`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
+    const resp = await judgeFetch("/raw-run", {
       body: JSON.stringify({
         language,
         code: sourceCode,

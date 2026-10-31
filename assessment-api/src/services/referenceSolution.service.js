@@ -1,5 +1,5 @@
 import crypto from "crypto";
-import { env } from "../config/env.js";
+import { judgeFetch } from "./judgeClient.service.js";
 import { HttpError } from "../utils/httpError.js";
 import { getCacheJSON, setCacheJSON } from "./cache.service.js";
 
@@ -79,12 +79,7 @@ export async function runReferenceSolution(problem, testCases, { timeLimitMs, me
 
   let result;
   try {
-    const response = await fetch(`${env.JUDGE_SERVICE_URL}/run`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(msg),
-      signal: AbortSignal.timeout(REFERENCE_RUN_TIMEOUT_MS)
-    });
+    const response = await judgeFetch("/run", { body: JSON.stringify(msg), timeoutMs: REFERENCE_RUN_TIMEOUT_MS });
     if (!response.ok) {
       const text = await response.text();
       throw new HttpError(response.status >= 500 ? 502 : 400, "Judge rejected the reference run", { msg: `Judge error: ${text}` });

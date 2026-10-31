@@ -2,7 +2,7 @@ import * as problemsRepo from "../repositories/problems.repo.js";
 import * as submissionsService from "./submissions.service.js";
 import { HttpError } from "../utils/httpError.js";
 import { resolveArventiqLanguage } from "../config/arventiqLanguages.js";
-import { env } from "../config/env.js";
+import { judgeFetch } from "./judgeClient.service.js";
 
 // Translates Arventiq's native `questions` + `test_cases` schema (see
 // docs/arventiq-integration/history/04-arventiq-real-schema-and-payload.md)
@@ -287,11 +287,7 @@ export async function runArventiqCode({ questionId, code, codeLanguage, customIn
 
   let response;
   try {
-    response = await fetch(`${env.JUDGE_SERVICE_URL}/run`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(judgeMsg)
-    });
+    response = await judgeFetch("/run", { body: JSON.stringify(judgeMsg) });
   } catch (err) {
     throw new HttpError(503, "Failed to connect to judge service: " + err.message);
   }
