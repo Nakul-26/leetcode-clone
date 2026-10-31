@@ -233,7 +233,7 @@ fun main(args: Array<String>) {
         val decoded = String(Base64.getDecoder().decode(args[0]), Charsets.UTF_8)
         val tests = GSON.fromJson(decoded, JsonArray::class.java)
             ?: throw IllegalArgumentException("missing batched test payload")
-        val funcName = "{{FUNCTION_NAME}}"
+        val funcName = judgeFunctionName()
         val solutionClass = Class.forName("Solution")
         val realOut = System.out
 
@@ -292,4 +292,13 @@ private fun errorPayload(test: Int, err: Throwable, stdout: String): String {
     result.addProperty("traceback", err.stackTraceToString())
     result.addProperty("stdout", stdout)
     return GSON.toJson(result)
+}
+
+// The function to call, from the file judge-function the judge writes next to the source. Not
+// pasted into this file: the harness is compiled once, into the image (JUDGE_FIX_PLAN T9), so
+// a submission compiles only its own Solution.kt.
+private fun judgeFunctionName(): String {
+    val f = java.io.File("judge-function")
+    if (!f.exists()) throw IllegalStateException("judge-function file missing")
+    return f.readText().trim()
 }

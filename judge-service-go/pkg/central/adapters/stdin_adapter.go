@@ -161,7 +161,7 @@ var StdinAdapterRegistry = map[string]StdinLanguageAdapter{
 		name: "kotlin", fileName: "Main.kt",
 		// Unlike the wrapper flow (Solution.kt + Harness.kt), a stdin submission is
 		// a single self-contained file whose own top-level main() is the entry point.
-		compileCmd: []string{"kotlinc", "-cp", "/usr/share/java/gson.jar", "-d", "/app/out", "/app/Main.kt"},
+		compileCmd: append([]string{"kotlinc", "-cp", "/usr/share/java/gson.jar", "-d", "/app/out", "/app/Main.kt"}, kotlincJVMFlags...),
 		runCmd:     []string{"java", jvmHeapFlag, "-cp", "/app/out:/opt/kotlinc/lib/kotlin-stdlib.jar:/usr/share/java/gson.jar", "MainKt"},
 	},
 	"csharp": compiledStdinAdapter{

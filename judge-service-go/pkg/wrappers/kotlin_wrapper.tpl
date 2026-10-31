@@ -221,7 +221,7 @@ fun main(args: Array<String>) {
         val payload = GSON.fromJson(decoded, JsonObject::class.java)
         val inputs: JsonArray? = if (payload != null && payload.has("inputs")) payload.getAsJsonArray("inputs") else null
 
-        val funcName = "{{FUNCTION_NAME}}"
+        val funcName = judgeFunctionName()
         val argCount = inputs?.size() ?: 0
 
         val solutionClass = Class.forName("Solution")
@@ -268,4 +268,13 @@ private fun errorPayload(err: Throwable): String {
     result.addProperty("error", err.javaClass.simpleName)
     result.addProperty("traceback", err.stackTraceToString())
     return GSON.toJson(result)
+}
+
+// The function to call, from the file judge-function the judge writes next to the source. Not
+// pasted into this file: the harness is compiled once, into the image (JUDGE_FIX_PLAN T9), so
+// a submission compiles only its own Solution.kt.
+private fun judgeFunctionName(): String {
+    val f = java.io.File("judge-function")
+    if (!f.exists()) throw IllegalStateException("judge-function file missing")
+    return f.readText().trim()
 }

@@ -39,6 +39,12 @@ func TestStdinBatchedVerdicts(t *testing.T) {
 			" if (n == 5) { System.out.print(\"x\".repeat(100000)); return; }\n" +
 			" System.out.println(n * 2); } }\n",
 	}
+	programs["kotlin"] = "fun main() {\n" +
+		" val n = readLine()!!.trim().toInt()\n" +
+		" if (n == 3) { System.err.print(\"boom\"); kotlin.system.exitProcess(3) }\n" +
+		" if (n == 4) { var x = 0L; while (true) x++ }\n" +
+		" if (n == 5) { print(\"x\".repeat(100000)); return }\n" +
+		" println(n * 2) }\n"
 	problem := models.Problem{
 		Title: "stdin-batch", Type: models.StdinProblem, TimeLimitMs: 1000,
 		TestCases: []models.TestCase{
@@ -53,7 +59,7 @@ func TestStdinBatchedVerdicts(t *testing.T) {
 	}
 	wantRun := []string{"ok", models.ErrorTypeWrongAnswer, models.ErrorTypeRuntime, models.ErrorTypeTimeout, models.ErrorTypeWrongAnswer, "ok", "ok"}
 
-	for _, langID := range []string{"python", "cpp", "go", "java"} {
+	for _, langID := range []string{"python", "cpp", "go", "java", "kotlin"} {
 		t.Run(langID, func(t *testing.T) {
 			exec, p, pc, _ := setupIntegration(t, langID)
 			defer p.Release(pc)
