@@ -44,6 +44,16 @@ func TestBatchedCompiledLanguages(t *testing.T) {
 				"  fmt.Printf(\"hi %d\", n); return n\n}\n",
 		},
 	}
+	programs["typescript"] = program{
+		resume: "function f(n: number): number {\n" +
+			"  if (n === 2) { while (true) {} }\n" +
+			"  if (n === 3) { process.exit(3); }\n" +
+			"  if (n === 4) { const b = Buffer.alloc(1 << 30, 1); return b[5]; }\n" +
+			"  return n;\n}\n",
+		prints: "function f(n: number): number {\n" +
+			"  if (n === 1) { console.log('x'.repeat(100000)); return 1; }\n" +
+			"  process.stdout.write('hi ' + n); return n;\n}\n",
+	}
 	resumeProblem := models.Problem{
 		Title: "resume", FunctionName: "f", ReturnType: "number", TimeLimitMs: 1000, MemoryLimitMb: 256,
 		Parameters: []models.Parameter{{Name: "n", Type: "number"}},
@@ -77,7 +87,7 @@ func TestBatchedCompiledLanguages(t *testing.T) {
 		return v
 	}
 
-	for _, langID := range []string{"c", "go"} {
+	for _, langID := range []string{"c", "go", "typescript"} {
 		t.Run(langID, func(t *testing.T) {
 			if !shouldUseBatchedExecution(langID, 1) {
 				t.Fatalf("%s is not batched", langID)

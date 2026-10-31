@@ -32,6 +32,24 @@ func (TypeScriptAdapter) PrepareFiles(workDir string, submissionMsg models.Submi
 	return []string{"wrapper.ts"}, nil
 }
 
+// PrepareBatchFiles writes the wrapper that runs every test in one process (JUDGE_FIX_PLAN T5).
+func (TypeScriptAdapter) PrepareBatchFiles(workDir string, submissionMsg models.SubmissionMessage, problem models.Problem) ([]string, error) {
+	lang := languages.GetLanguage("typescript")
+	wrapperCode, err := wrapper.GenerateWrapper(problem, lang, submissionMsg.FunctionName, "ts_batch_wrapper.tpl")
+	if err != nil {
+		return nil, err
+	}
+	finalCode := strings.Replace(wrapperCode, "// USER_CODE_MARKER", submissionMsg.Code, 1)
+	if err := workspace.WriteFile(workDir, "wrapper.ts", []byte(finalCode), 0644); err != nil {
+		return nil, fmt.Errorf("failed to write wrapper.ts: %w", err)
+	}
+	return []string{"wrapper.ts"}, nil
+}
+
+func (TypeScriptAdapter) BatchRunCommand(testsB64 string) []string {
+	return []string{"tsx", "/app/wrapper.ts", testsB64}
+}
+
 func (TypeScriptAdapter) RunCommand(inputB64 string) []string {
 	return []string{"tsx", "/app/wrapper.ts", inputB64}
 }

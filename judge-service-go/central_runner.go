@@ -43,6 +43,7 @@ type batchedTestExecOutput struct {
 	Error     string      `json:"error,omitempty"`
 	Traceback string      `json:"traceback,omitempty"`
 	Fatal     string      `json:"fatal,omitempty"`
+	Ready     bool        `json:"ready,omitempty"` // start-up is over (see batchStartupAllowanceFor)
 	// What the student's code printed during this test, captured by the batch wrapper (cut
 	// off just past maxTestOutputBytes). A wrapper that does not capture leaves it nil and
 	// the test shows the process's whole stdout instead.
@@ -454,7 +455,7 @@ func runBatchAttempt(ctx context.Context, exec *executor.Executor, pooledContain
 	var stderrBuf bytes.Buffer
 	watch := batchWatch{
 		testTimeout:   testTimeout,
-		startup:       batchStartupAllowance,
+		startup:       batchStartupAllowanceFor(submissionMsg.Language),
 		stopOnFailure: submissionMsg.StopOnFirstFailure,
 		cancelRun:     cancel,
 		cpu:           cpuMeter,
@@ -639,6 +640,17 @@ func batchCPUWait(watch batchWatch, since *cpuMark, budget time.Duration, wallUs
 // The first result also pays for starting the program, which a per-test run pays on every test.
 const batchStartupAllowance = 2 * time.Second
 
+// batchStartupAllowanceFor is the start-up allowance for a language. tsx compiles the
+// TypeScript before anything runs, 2-3.5 s on one core. A wrapper that prints {"ready":true}
+// once it has started has the first test's limit counted from that line, so a long allowance
+// does not give test 1 extra time.
+func batchStartupAllowanceFor(language string) time.Duration {
+	if language == "typescript" {
+		return 10 * time.Second
+	}
+	return batchStartupAllowance
+}
+
 const (
 	maxBatchedLineBytes   = 4 << 20
 	maxBatchedStdoutBytes = 1 << 20
@@ -709,6 +721,7 @@ func streamBatchedResults(result *models.SubmissionResult, stdout io.Reader, std
 	}
 
 	last := time.Now()
+	ready := false // the program said it has started (out.Ready)
 	// marks[k] is the CPU time when the k-th result arrived; marks[0] is the run's start.
 	var marks []*cpuMark
 	var sampler *cpuSampler
@@ -743,6 +756,26 @@ loop:
 			if out.Fatal != "" {
 				err = fmt.Errorf("wrapper fatal error: %s", out.Fatal)
 				break loop
+			}
+			if out.Ready {
+				// Start-up is over: the first test's limit and CPU time start now.
+				if processed == 0 && !ready {
+					ready = true
+					last = ev.at
+					if watch.cpu != nil {
+						marks[0] = sampler.mark()
+					}
+					if timer != nil {
+						if !timer.Stop() {
+							select {
+							case <-timer.C:
+							default:
+							}
+						}
+						timer.Reset(watch.testTimeout)
+					}
+				}
+				continue
 			}
 			// Only the next test's line counts. Student code can write to the same stream, so
 			// a repeated or out-of-order line (a copy of a passing test's) must not count again.
@@ -781,7 +814,7 @@ loop:
 			if processed < len(problem.TestCases) {
 				if watch.cpu != nil {
 					budget := watch.testTimeout
-					if processed == 0 {
+					if processed == 0 && !ready {
 						budget += watch.startup
 					}
 					if wait, ok := batchCPUWait(watch, marks[len(marks)-1], budget, time.Since(last)); ok {
@@ -986,7 +1019,7 @@ func shouldUseBatchedExecution(language string, testCount int) bool {
 				threshold = parsed
 			}
 		}
-	case "c", "go":
+	case "c", "go", "typescript":
 		// Batch wrappers added with T5 step 2; no threshold override.
 		threshold = 1
 	default:

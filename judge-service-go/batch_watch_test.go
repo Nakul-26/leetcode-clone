@@ -229,3 +229,29 @@ func TestCPUSamplerMarksAreInOrder(t *testing.T) {
 		t.Errorf("a burst of marks should share reads, got %d reads for 200 marks", n)
 	}
 }
+
+// A wrapper that prints {"ready":true} after a slow start (tsx compiling) gets the start-up
+// allowance only before that line; the first test's limit counts from it.
+func TestBatchReadyLineStartsTheFirstTestClock(t *testing.T) {
+	run := func(lines []string, delays []time.Duration) (int, bool) {
+		r, w := io.Pipe()
+		fakeBatch(t, w, lines, delays)
+		processed, timedOut, _, err := streamBatchedResults(models.NewSubmissionResult(), strings.NewReader(""), r, &bytes.Buffer{}, batchProblem(1), batchWatch{
+			testTimeout: 300 * time.Millisecond,
+			startup:     2 * time.Second,
+			cancelRun:   func() { _ = w.Close() },
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return processed, timedOut
+	}
+	// Ready after 1 s of start-up, the test 100 ms later: within the limit.
+	if processed, timedOut := run([]string{`{"ready":true}`, `{"test":1,"output":0}`}, []time.Duration{time.Second, 100 * time.Millisecond}); processed != 1 || timedOut {
+		t.Fatalf("quick test after ready: processed=%d timedOut=%v", processed, timedOut)
+	}
+	// Ready after 1 s, the test 1 s later: over its 300 ms limit, although within the allowance.
+	if processed, timedOut := run([]string{`{"ready":true}`, `{"test":1,"output":0}`}, []time.Duration{time.Second, time.Second}); processed != 0 || !timedOut {
+		t.Fatalf("slow test after ready: processed=%d timedOut=%v", processed, timedOut)
+	}
+}
