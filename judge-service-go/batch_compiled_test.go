@@ -54,6 +54,62 @@ func TestBatchedCompiledLanguages(t *testing.T) {
 			"  if (n === 1) { console.log('x'.repeat(100000)); return 1; }\n" +
 			"  process.stdout.write('hi ' + n); return n;\n}\n",
 	}
+	programs["kotlin"] = program{
+		resume: "class Solution {\n" +
+			"  fun f(n: Int): Int {\n" +
+			"    if (n == 2) { var x = 0L; while (true) x++ }\n" +
+			"    if (n == 3) kotlin.system.exitProcess(3)\n" +
+			"    if (n == 4) { val a = ArrayList<LongArray>(); while (true) a.add(LongArray(1 shl 20) { 1L }) }\n" +
+			"    return n\n  }\n}\n",
+		prints: "class Solution {\n" +
+			"  fun f(n: Int): Int {\n" +
+			"    if (n == 1) { print(\"x\".repeat(100000)); return 1 }\n" +
+			"    print(\"hi $n\"); return n\n  }\n}\n",
+	}
+	programs["csharp"] = program{
+		resume: "public class Solution {\n" +
+			"  public int f(int n) {\n" +
+			"    if (n == 2) { long x = 0; while (true) x++; }\n" +
+			"    if (n == 3) System.Environment.Exit(3);\n" +
+			"    if (n == 4) { var a = new System.Collections.Generic.List<long[]>(); while (true) { var b = new long[1 << 20]; System.Array.Fill(b, 1L); a.Add(b); } }\n" +
+			"    return n;\n  }\n}\n",
+		prints: "public class Solution {\n" +
+			"  public int f(int n) {\n" +
+			"    if (n == 1) { System.Console.Write(new string('x', 100000)); return 1; }\n" +
+			"    System.Console.Write(\"hi \" + n); return n;\n  }\n}\n",
+	}
+	programs["ruby"] = program{
+		resume: "def f(n)\n" +
+			"  if n == 2\n    x = 0\n    loop { x += 1 }\n  end\n" +
+			"  exit!(3) if n == 3\n" +
+			"  if n == 4\n    s = 'x' * (1 << 30)\n    return s.size\n  end\n" +
+			"  n\nend\n",
+		prints: "def f(n)\n" +
+			"  if n == 1\n    print('x' * 100000)\n    return 1\n  end\n" +
+			"  print(\"hi #{n}\")\n  n\nend\n",
+	}
+	programs["php"] = program{
+		resume: "function f($n) {\n" +
+			"  if ($n == 2) { $x = 0; while (true) { $x++; } }\n" +
+			"  if ($n == 3) { exit(3); }\n" +
+			"  if ($n == 4) { $s = str_repeat('x', 1 << 30); return strlen($s); }\n" +
+			"  return $n;\n}\n",
+		prints: "function f($n) {\n" +
+			"  if ($n == 1) { echo str_repeat('x', 100000); return 1; }\n" +
+			"  echo \"hi $n\"; return $n;\n}\n",
+	}
+	programs["rust"] = program{
+		resume: "struct Solution;\nimpl Solution {\n" +
+			"  fn f(&self, n: i32) -> i32 {\n" +
+			"    if n == 2 { let mut x: u64 = 0; loop { x = std::hint::black_box(x + 1); } }\n" +
+			"    if n == 3 { std::process::exit(3); }\n" +
+			"    if n == 4 { let v = vec![1u8; 1 << 30]; return std::hint::black_box(&v)[5] as i32; }\n" +
+			"    n\n  }\n}\n",
+		prints: "struct Solution;\nimpl Solution {\n" +
+			"  fn f(&self, n: i32) -> i32 {\n" +
+			"    if n == 1 { print!(\"{}\", \"x\".repeat(100000)); return 1; }\n" +
+			"    print!(\"hi {}\", n); n\n  }\n}\n",
+	}
 	resumeProblem := models.Problem{
 		Title: "resume", FunctionName: "f", ReturnType: "number", TimeLimitMs: 1000, MemoryLimitMb: 256,
 		Parameters: []models.Parameter{{Name: "n", Type: "number"}},
@@ -87,7 +143,7 @@ func TestBatchedCompiledLanguages(t *testing.T) {
 		return v
 	}
 
-	for _, langID := range []string{"c", "go", "typescript"} {
+	for _, langID := range []string{"c", "go", "typescript", "kotlin", "csharp", "ruby", "php", "rust"} {
 		t.Run(langID, func(t *testing.T) {
 			if !shouldUseBatchedExecution(langID, 1) {
 				t.Fatalf("%s is not batched", langID)
@@ -113,6 +169,10 @@ func TestBatchedCompiledLanguages(t *testing.T) {
 
 			res := run(resumeProblem, programs[langID].resume)
 			want := []string{"ok", models.ErrorTypeTimeout, models.ErrorTypeRuntime, models.ErrorTypeMemoryLimit, "ok", models.ErrorTypeWrongAnswer}
+			if langID == "php" {
+				// PHP stops at its own memory_limit with a fatal error before the container's limit.
+				want[3] = models.ErrorTypeRuntime
+			}
 			if got := verdicts(res); strings.Join(got, ",") != strings.Join(want, ",") {
 				for _, d := range res.Details {
 					t.Logf("test %d: %s %s tb=%.200q", d.Test, d.ErrorType, d.Error, d.Traceback)

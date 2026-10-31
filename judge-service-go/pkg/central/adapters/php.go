@@ -47,6 +47,24 @@ func (PHPAdapter) PrepareFiles(workDir string, submissionMsg models.SubmissionMe
 	return []string{"wrapper.php"}, nil
 }
 
+// PrepareBatchFiles writes the wrapper that runs every test in one process (JUDGE_FIX_PLAN T5).
+func (PHPAdapter) PrepareBatchFiles(workDir string, submissionMsg models.SubmissionMessage, problem models.Problem) ([]string, error) {
+	lang := languages.GetLanguage("php")
+	wrapperCode, err := wrapper.GenerateWrapper(problem, lang, submissionMsg.FunctionName, "php_batch_wrapper.tpl")
+	if err != nil {
+		return nil, err
+	}
+	finalCode := strings.Replace(wrapperCode, "// USER_CODE_MARKER", normalizePHPUserCode(submissionMsg.Code), 1)
+	if err := workspace.WriteFile(workDir, "wrapper.php", []byte(finalCode), 0644); err != nil {
+		return nil, fmt.Errorf("failed to write wrapper.php: %w", err)
+	}
+	return []string{"wrapper.php"}, nil
+}
+
+func (PHPAdapter) BatchRunCommand(testsB64 string) []string {
+	return []string{"php", "/app/wrapper.php", testsB64}
+}
+
 func (PHPAdapter) RunCommand(inputB64 string) []string {
 	return []string{"php", "/app/wrapper.php", inputB64}
 }

@@ -547,6 +547,11 @@ fn base64_decode(input: &str) -> Result<Vec<u8>, String> {
 // verbatim here (not as a separate module) so its items don't need `pub`.
 include!("solution.rs");
 
+// The generated call hands its result (already JSON) here.
+fn judge_result(output_json: String) {
+    eprintln!("{{\"output\": {}}}", output_json);
+}
+
 fn main() {
     std::panic::set_hook(Box::new(|_| {}));
 

@@ -41,6 +41,7 @@ type batchedTestExecOutput struct {
 	Test      int         `json:"test"`
 	Output    interface{} `json:"output"`
 	Error     string      `json:"error,omitempty"`
+	Message   string      `json:"message,omitempty"` // C# and C++ put the exception text here
 	Traceback string      `json:"traceback,omitempty"`
 	Fatal     string      `json:"fatal,omitempty"`
 	Ready     bool        `json:"ready,omitempty"` // start-up is over (see batchStartupAllowanceFor)
@@ -874,7 +875,8 @@ func batchedTestResult(out batchedTestExecOutput, problem models.Problem) models
 	}
 	if out.Error != "" {
 		reason := models.SubmissionStatusRuntimeError
-		if strings.Contains(strings.ToLower(out.Error), "outofmemory") {
+		// Java and Kotlin name OutOfMemoryError in error, C# in message.
+		if strings.Contains(strings.ToLower(out.Error+" "+out.Message+" "+out.Traceback), "outofmemory") {
 			reason = models.SubmissionStatusMemoryLimitExceeded
 		}
 		markTestFailed(&tr, reason)
@@ -1019,7 +1021,7 @@ func shouldUseBatchedExecution(language string, testCount int) bool {
 				threshold = parsed
 			}
 		}
-	case "c", "go", "typescript":
+	case "c", "go", "typescript", "kotlin", "csharp", "ruby", "php", "rust":
 		// Batch wrappers added with T5 step 2; no threshold override.
 		threshold = 1
 	default:

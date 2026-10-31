@@ -37,6 +37,26 @@ func (RustAdapter) PrepareFiles(workDir string, submissionMsg models.SubmissionM
 	return []string{"solution.rs", "main.rs"}, nil
 }
 
+// PrepareBatchFiles writes the wrapper that runs every test in one process (JUDGE_FIX_PLAN T5).
+func (RustAdapter) PrepareBatchFiles(workDir string, submissionMsg models.SubmissionMessage, problem models.Problem) ([]string, error) {
+	lang := languages.GetLanguage("rust")
+	wrapperCode, err := wrapper.GenerateWrapper(problem, lang, submissionMsg.FunctionName, "rust_batch_wrapper.tpl")
+	if err != nil {
+		return nil, err
+	}
+	if err := workspace.WriteFile(workDir, "solution.rs", []byte(submissionMsg.Code), 0644); err != nil {
+		return nil, fmt.Errorf("failed to write solution.rs: %w", err)
+	}
+	if err := workspace.WriteFile(workDir, "main.rs", []byte(wrapperCode), 0644); err != nil {
+		return nil, fmt.Errorf("failed to write main.rs: %w", err)
+	}
+	return []string{"solution.rs", "main.rs"}, nil
+}
+
+func (RustAdapter) BatchRunCommand(testsB64 string) []string {
+	return []string{"/app/main", testsB64}
+}
+
 func (RustAdapter) CompileCommand() []string {
 	return []string{"rustc", "--edition", "2021", "-O", "-o", "/app/main", "/app/main.rs"}
 }

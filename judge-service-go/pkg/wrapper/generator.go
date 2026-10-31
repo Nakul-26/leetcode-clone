@@ -589,10 +589,12 @@ func buildRustCall(p models.Problem, funcName string) string {
 			}
 		}
 		sb.WriteString(");\n")
+		// judge_result is defined by both Rust templates; the batch one adds the test number
+		// and the test's captured stdout (T5).
 		if len(params) > 0 {
-			sb.WriteString(fmt.Sprintf("    eprintln!(\"{{\\\"output\\\": {}}}\", %s(&arg0));\n", params[0].toJSON))
+			sb.WriteString(fmt.Sprintf("    judge_result(%s(&arg0));\n", params[0].toJSON))
 		} else {
-			sb.WriteString("    eprintln!(\"{{\\\"output\\\": null}}\");\n")
+			sb.WriteString("    judge_result(\"null\".to_string());\n")
 		}
 	} else {
 		sb.WriteString(fmt.Sprintf("    let output = sol.%s(", funcName))
@@ -603,7 +605,7 @@ func buildRustCall(p models.Problem, funcName string) string {
 			sb.WriteString(fmt.Sprintf("arg%d", i))
 		}
 		sb.WriteString(");\n")
-		sb.WriteString(fmt.Sprintf("    eprintln!(\"{{\\\"output\\\": {}}}\", %s(&output));\n", returnToJSON))
+		sb.WriteString(fmt.Sprintf("    judge_result(%s(&output));\n", returnToJSON))
 	}
 
 	return sb.String()
