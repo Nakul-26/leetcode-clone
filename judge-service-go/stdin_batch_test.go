@@ -45,6 +45,12 @@ func TestStdinBatchedVerdicts(t *testing.T) {
 		" if (n == 4) { var x = 0L; while (true) x++ }\n" +
 		" if (n == 5) { print(\"x\".repeat(100000)); return }\n" +
 		" println(n * 2) }\n"
+	programs["csharp"] = "using System;\npublic class Program { public static void Main() {\n" +
+		" int n = int.Parse(Console.ReadLine()!.Trim());\n" +
+		" if (n == 3) { Console.Error.Write(\"boom\"); Environment.Exit(3); }\n" +
+		" if (n == 4) { long x = 0; while (true) x++; }\n" +
+		" if (n == 5) { Console.Write(new string('x', 100000)); return; }\n" +
+		" Console.WriteLine(n * 2); } }\n"
 	problem := models.Problem{
 		Title: "stdin-batch", Type: models.StdinProblem, TimeLimitMs: 1000,
 		TestCases: []models.TestCase{
@@ -59,7 +65,7 @@ func TestStdinBatchedVerdicts(t *testing.T) {
 	}
 	wantRun := []string{"ok", models.ErrorTypeWrongAnswer, models.ErrorTypeRuntime, models.ErrorTypeTimeout, models.ErrorTypeWrongAnswer, "ok", "ok"}
 
-	for _, langID := range []string{"python", "cpp", "go", "java", "kotlin"} {
+	for _, langID := range []string{"python", "cpp", "go", "java", "kotlin", "csharp"} {
 		t.Run(langID, func(t *testing.T) {
 			exec, p, pc, _ := setupIntegration(t, langID)
 			defer p.Release(pc)

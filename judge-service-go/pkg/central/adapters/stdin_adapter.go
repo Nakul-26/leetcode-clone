@@ -170,7 +170,7 @@ var StdinAdapterRegistry = map[string]StdinLanguageAdapter{
 		// the first real build isn't paying SDK/restore cold-start cost. No
 		// /p:StartupObject override here: unlike the wrapper flow there is no
 		// Harness class competing with the student's entry point.
-		compileCmd: []string{"sh", "-c", "cp /home/judge/app/app.csproj . && dotnet build -c Release -o out"},
+		compileCmd: csharpCompileCommand(""), // csc directly; see csharpCompileScript (T9)
 		runCmd:     []string{"dotnet", "out/app.dll"},
 	},
 }
