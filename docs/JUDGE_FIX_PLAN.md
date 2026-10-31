@@ -156,3 +156,4 @@ Order: P5, P4, P1+P2 (bugs, small) → P6 + P7 (the core fix) → P3 → P8 + P9
 | 2026-10-30 | Done: S2 (docker-guard replaces the path-only socket proxy; a compromised judge can no longer reach the host) |
 | 2026-10-30 | Done: T5 step 2 (all tests in one exec: function mode in Python/JS/Java/C++, stdin mode in every language; 2-27x faster) |
 | 2026-10-30 | T5 follow-up: C and Go function mode batched too (15 tests: C 3.04 -> 0.89 s, Go 2.66 -> 1.11 s); TS, Ruby, PHP, Rust, Kotlin, C# still one exec per test |
+| 2026-10-31 | T5 follow-up: every function-mode language now batched. 15 tests: TypeScript 17.5 -> 0.77 s (tsx start-up once; a ready line keeps test 1 on its normal limit), PHP 2.49 -> 0.37 s, Ruby 2.78 -> 0.72 s, Rust 4.90 -> 2.55 s, C# 10.8 -> 6.4 s, Kotlin 20.7 -> 18.9 s (its compile dominates, see T9). C# out-of-memory now reads as Memory Limit Exceeded |
