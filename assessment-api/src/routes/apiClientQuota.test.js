@@ -132,7 +132,10 @@ describe("Per-API-client admission control (plan Phase 4)", () => {
       const b = await makeClient();
       await ApiClient.updateOne({ _id: a.id }, { monthlyQuota: 3 });
       await UsageEvent.create({ apiClientId: b.id, collegeId: collegeA._id, testCount: 50 });
-      const lastMonth = new Date(); lastMonth.setUTCMonth(lastMonth.getUTCMonth() - 1);
+      // Day 0 of this month is the last day of the previous one. Not setUTCMonth(month - 1):
+      // on the 31st that names a day the previous month may not have ("31 September"), which
+      // rolls over into this month and made the test fail on those days.
+      const lastMonth = new Date(); lastMonth.setUTCDate(0);
       await UsageEvent.create({ apiClientId: a.id, collegeId: collegeA._id, testCount: 50, createdAt: lastMonth });
       expect((await admitApiClient(a.id, 3)).allowed).toBe(true);
     });
