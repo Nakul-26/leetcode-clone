@@ -27,7 +27,7 @@ func setupCppIntegration(t *testing.T) (*executor.Executor, *pool.ContainerPool,
 		t.Fatal("cpp language config not found")
 	}
 
-	p := pool.NewPool(exec.Client(), 1)
+	p := newTestPool(t, exec.Client(), 1)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	if err := p.WarmUp(ctx, lang.ID, lang.Image, 1, 1); err != nil {

@@ -4,8 +4,11 @@ package main
 
 import (
 	"context"
+	"os"
 	"testing"
 	"time"
+
+	docker "github.com/fsouza/go-dockerclient"
 
 	"judge-service-go/pkg/central/adapters"
 	"judge-service-go/pkg/executor"
@@ -13,6 +16,17 @@ import (
 	"judge-service-go/pkg/models"
 	"judge-service-go/pkg/pool"
 )
+
+// newTestPool makes a pool on the runtime named by JUDGE_SANDBOX_RUNTIME, as the judge does,
+// so the integration suites can be run under gVisor (JUDGE_FIX_PLAN S3).
+func newTestPool(tb testing.TB, cli *docker.Client, globalCap int) *pool.ContainerPool {
+	tb.Helper()
+	p := pool.NewPool(cli, globalCap)
+	if err := p.SetRuntime(os.Getenv("JUDGE_SANDBOX_RUNTIME")); err != nil {
+		tb.Fatal(err)
+	}
+	return p
+}
 
 func setupIntegration(t *testing.T, languageID string) (*executor.Executor, *pool.ContainerPool, *pool.PooledContainer, *languages.Language) {
 	t.Helper()
@@ -27,7 +41,7 @@ func setupIntegration(t *testing.T, languageID string) (*executor.Executor, *poo
 		t.Fatalf("%s language config not found", languageID)
 	}
 
-	p := pool.NewPool(exec.Client(), 1)
+	p := newTestPool(t, exec.Client(), 1)
 	t.Cleanup(func() {
 		p.Shutdown(context.Background())
 	})

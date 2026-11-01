@@ -101,7 +101,7 @@ func setupCentralStress(t *testing.T, languageID string) (*executor.Executor, *p
 		t.Fatalf("adapter not found for %q", languageID)
 	}
 
-	p := pool.NewPool(exec.Client(), stressPoolSize)
+	p := newTestPool(t, exec.Client(), stressPoolSize)
 	t.Cleanup(func() {
 		p.Shutdown(context.Background())
 	})

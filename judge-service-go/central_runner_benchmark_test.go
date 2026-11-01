@@ -13,7 +13,6 @@ import (
 	"judge-service-go/pkg/executor"
 	"judge-service-go/pkg/languages"
 	"judge-service-go/pkg/models"
-	"judge-service-go/pkg/pool"
 )
 
 func BenchmarkPerTestExecution50Tests(b *testing.B) {
@@ -52,7 +51,7 @@ func benchmarkCentralRunnerPython(b *testing.B, threshold string) {
 		b.Fatalf("adapter not found for language %q", lang.ID)
 	}
 
-	p := pool.NewPool(exec.Client(), 1)
+	p := newTestPool(b, exec.Client(), 1)
 	warmCtx, warmCancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer warmCancel()
 	if err := p.WarmUp(warmCtx, lang.ID, lang.Image, 1, 1); err != nil {
