@@ -45,6 +45,7 @@ type ContainerPool struct {
 	globalCap  int                              // max containers across ALL languages combined
 	images     map[string]string                // language -> image name
 	claims     map[string]int                   // language -> bulk workers holding or waiting for one of its containers
+	runtime    string                           // OCI runtime for new containers; "" is the daemon default (runc)
 }
 
 // NewPool creates a new container pool. globalCap bounds the total container count summed
@@ -61,6 +62,30 @@ func NewPool(cli *docker.Client, globalCap int) *ContainerPool {
 		images:     make(map[string]string),
 		claims:     make(map[string]int),
 	}
+}
+
+// SandboxRuntimes are the OCI runtimes SetRuntime accepts (and docker-guard allows): ""/"runc"
+// is the daemon default, "runsc" is gVisor, which puts a user-space kernel between submissions
+// and the host kernel (JUDGE_FIX_PLAN S3). runsc must be registered with the Docker daemon.
+var SandboxRuntimes = []string{"", "runc", "runsc"}
+
+func (p *ContainerPool) sandboxRuntime() string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.runtime
+}
+
+// SetRuntime picks the OCI runtime for containers created from now on. Call it before WarmUp.
+func (p *ContainerPool) SetRuntime(runtime string) error {
+	for _, r := range SandboxRuntimes {
+		if r == runtime {
+			p.mu.Lock()
+			p.runtime = runtime
+			p.mu.Unlock()
+			return nil
+		}
+	}
+	return fmt.Errorf("sandbox runtime %q is not supported (want runc or runsc)", runtime)
 }
 
 // claimsPerContainer is how many bulk workers one language may tie up per container it
@@ -765,6 +790,7 @@ func (p *ContainerPool) createContainer(ctx context.Context, image string, lang 
 	// (any host-side option it does not know, network, mounts, capabilities beyond KILL):
 	// change it together with this.
 	hostCfg := &docker.HostConfig{
+		Runtime:        p.sandboxRuntime(),
 		NetworkMode:    "none",
 		ReadonlyRootfs: true,
 		SecurityOpt:    []string{noNewPrivileges},

@@ -1740,6 +1740,11 @@ func main() {
 
 	// Initialize Container Pool
 	containerPool := pool.NewPool(executor.Client(), globalCap)
+	sandboxRuntime := strings.TrimSpace(os.Getenv("JUDGE_SANDBOX_RUNTIME"))
+	failOnError(containerPool.SetRuntime(sandboxRuntime), "Invalid JUDGE_SANDBOX_RUNTIME")
+	if sandboxRuntime != "" {
+		slog.Info("Using sandbox runtime", "runtime", sandboxRuntime)
+	}
 	slog.Info("Warming up container pool...", "globalCap", globalCap, "autoscaleEnabled", autoscaleEnabled)
 
 	ctx, cancel := context.WithCancel(context.Background())

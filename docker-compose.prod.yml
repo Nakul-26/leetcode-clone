@@ -42,6 +42,9 @@
 #                          toward its Max under sustained load and shrink back under its Min-
 #                          floor when idle. Ships off — flip on deliberately once /stats's
 #                          metrics.acquire_wait numbers have been observed and look sane.
+#   JUDGE_SANDBOX_RUNTIME  (default: empty = runc) — set to runsc to run submissions under gVisor
+#                          (JUDGE_FIX_PLAN S3). runsc must first be installed and registered as a
+#                          runtime in the host's Docker daemon, or every container create fails.
 #   JUDGE_WORKER_CONCURRENCY  (default: 24) — how many submissions can be pulled off RabbitMQ
 #                          and processed concurrently. Deliberately set above the host's core
 #                          count: these workers spend most of their time blocked on Docker API
@@ -363,6 +366,7 @@ services:
       JUDGE_POOL_GLOBAL_CAP: ${JUDGE_POOL_GLOBAL_CAP:-60}
       JUDGE_POOL_AUTOSCALE_ENABLED: ${JUDGE_POOL_AUTOSCALE_ENABLED:-false}
       JUDGE_WORKER_CONCURRENCY: ${JUDGE_WORKER_CONCURRENCY:-24}
+      JUDGE_SANDBOX_RUNTIME: ${JUDGE_SANDBOX_RUNTIME:-}
       # Every other judge setting is passed through as well. Only variables listed here reach the
       # container, so a setting added in Dokploy but missing here is silently ignored (this happened
       # to JUDGE_INTERACTIVE_WORKERS, JUDGE_POOL_MAX_PY and JUDGE_BATCH_THRESHOLD_*). An empty value
