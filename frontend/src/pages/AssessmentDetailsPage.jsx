@@ -121,7 +121,7 @@ const AssessmentDetailsPage = ({ user }) => {
         </p>
       </div>
 
-      <div className="grid grid-cols-2 gap-6" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '24px' }}>
+      <div className="grid grid-cols-2 gap-6" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(300px, 100%), 1fr))', gap: '24px' }}>
         
         {/* Left Col: Info */}
         <div className="problem-card" style={{ height: 'fit-content' }}>

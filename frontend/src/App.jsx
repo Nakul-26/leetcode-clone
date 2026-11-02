@@ -1,6 +1,6 @@
 import React, { useEffect, useState, Suspense, lazy } from 'react';
 import { BrowserRouter as Router, Route, Routes, Link, useNavigate, useLocation, Navigate } from 'react-router-dom';
-import { Code2, BookOpen, Settings, PlusCircle, LogIn, Database, LogOut, LayoutDashboard, Users, AlertTriangle, CreditCard, Briefcase, CalendarClock } from 'lucide-react';
+import { Code2, BookOpen, Settings, PlusCircle, LogIn, Database, LogOut, LayoutDashboard, Users, AlertTriangle, CreditCard, Briefcase, CalendarClock, Menu, X } from 'lucide-react';
 import ProblemListPage from './pages/ProblemListPage';
 import HomePage from './pages/HomePage';
 import AssessmentListPage from './pages/AssessmentListPage';
@@ -129,6 +129,20 @@ function AppContent() {
     const canCreateProblem = user && (user.role === 'admin' || user.role === 'faculty' || user.role === 'superadmin');
     const isCollegeAdmin = user && (user.role === 'admin' || user.role === 'superadmin');
 
+    // The nav collapses into a menu button when its links would not fit on one line: staff
+    // have 11 links, everyone else at most 5.
+    const collapseQuery = canCreateProblem ? '(max-width: 1399px)' : '(max-width: 899px)';
+    const [navCollapsed, setNavCollapsed] = useState(() => window.matchMedia(collapseQuery).matches);
+    const [menuOpen, setMenuOpen] = useState(false);
+    useEffect(() => {
+        const mq = window.matchMedia(collapseQuery);
+        const update = () => setNavCollapsed(mq.matches);
+        update();
+        mq.addEventListener('change', update);
+        return () => mq.removeEventListener('change', update);
+    }, [collapseQuery]);
+    useEffect(() => { setMenuOpen(false); }, [location.pathname, navCollapsed]);
+
     const NavLink = ({ to, children, icon: Icon }) => {
         const isActive = location.pathname === to;
         return (
@@ -182,13 +196,27 @@ function AppContent() {
                     <span>{banner.message}</span>
                 </div>
             )}
-            <div className="header">
+            <div className={`header${navCollapsed ? ' collapsed' : ''}`}>
                 <h1>
-                    <Code2 size={28} />
-                    <span>Placement Assessment</span>
+                    <Link to="/" className="brand">
+                        <Code2 size={28} />
+                        <span>Placement Assessment</span>
+                    </Link>
                 </h1>
+                {!isAssessmentRoute && navCollapsed && (
+                    <button
+                        type="button"
+                        className="nav-toggle"
+                        aria-label={menuOpen ? 'Close menu' : 'Open menu'}
+                        aria-expanded={menuOpen}
+                        aria-controls="main-nav"
+                        onClick={() => setMenuOpen((open) => !open)}
+                    >
+                        {menuOpen ? <X size={22} /> : <Menu size={22} />}
+                    </button>
+                )}
                 {!isAssessmentRoute && (
-                <nav>
+                <nav id="main-nav" className={menuOpen ? 'open' : ''}>
                     <div className="nav-links">
                         <NavLink to="/problems" icon={BookOpen}>Problems</NavLink>
                         {user && <NavLink to="/assessments" icon={LayoutDashboard}>Assessments</NavLink>}

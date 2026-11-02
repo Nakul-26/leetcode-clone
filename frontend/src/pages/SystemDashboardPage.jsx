@@ -317,7 +317,7 @@ const SystemDashboardPage = ({ user }) => {
               if (langs.length === 0) return <p className="text-muted py-4">Judge pool data unavailable.</p>;
 
               return (
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '24px' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(300px, 100%), 1fr))', gap: '24px' }}>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                     <div className="stat-card">
                       <div className="flex-between mb-2"><span className="text-muted" style={{ fontSize: '0.8rem' }}>Last GC</span><strong>{formatTimestamp(js.metrics?.last_gc_run)}</strong></div>
@@ -360,7 +360,7 @@ const SystemDashboardPage = ({ user }) => {
           <LanguageStatsCard />
 
           {/* System Settings & Utilities */}
-          <div className="grid grid-cols-2 gap-6 mb-8" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(400px, 1fr))', gap: '24px' }}>
+          <div className="grid grid-cols-2 gap-6 mb-8" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(400px, 100%), 1fr))', gap: '24px' }}>
             {/* Incident Banner Card */}
             <div className="problem-card">
               <h3 className="mb-4 flex-center gap-2" style={{ justifyContent: 'flex-start' }}>
@@ -457,7 +457,7 @@ const SystemDashboardPage = ({ user }) => {
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-6 mb-8" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(400px, 1fr))', gap: '24px' }}>
+          <div className="grid grid-cols-2 gap-6 mb-8" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(400px, 100%), 1fr))', gap: '24px' }}>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
               <div className="problem-card">
                 <h3 className="mb-6 flex-center gap-2" style={{ justifyContent: 'flex-start' }}>

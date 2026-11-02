@@ -151,6 +151,79 @@ a {
   border-bottom-color: var(--primary);
 }
 
+.header .brand {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  color: inherit;
+  white-space: nowrap;
+}
+
+.header .brand svg { color: var(--text); flex-shrink: 0; }
+
+/* Menu button, shown only when the nav is collapsed (App.jsx decides when, by role). */
+.nav-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-bright);
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.nav-toggle:hover { background: var(--surface-hover); }
+
+/* Collapsed nav: a full-width panel under the header, opened by the menu button. */
+.header.collapsed nav {
+  display: none;
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  height: auto;
+  max-height: calc(100vh - 64px);
+  overflow-y: auto;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4) var(--sp-4);
+  background: var(--bg);
+  border-bottom: 1px solid var(--border-bright);
+  box-shadow: 0 16px 32px rgba(0, 0, 0, 0.5);
+}
+
+.header.collapsed nav.open { display: flex; }
+
+.header.collapsed .nav-links {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(200px, 100%), 1fr));
+  gap: var(--sp-1);
+  height: auto;
+}
+
+.header.collapsed nav a {
+  padding: 12px var(--sp-3);
+  border-bottom: none;
+  border-radius: var(--radius-md);
+  font-size: 0.95rem;
+}
+
+.header.collapsed nav a:hover { background: var(--surface-hover); }
+
+.header.collapsed nav a.active {
+  background: rgba(99, 102, 241, 0.12);
+}
+
+.header.collapsed .logout-btn {
+  width: 100%;
+  justify-content: center;
+  padding: 10px 12px !important;
+}
+
 /* Container */
 .container {
   max-width: 1680px;
@@ -161,7 +234,7 @@ a {
 /* Problem Cards (New) */
 .problem-card-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(350px, 100%), 1fr));
   gap: var(--sp-4);
   margin-top: var(--sp-6);
 }
@@ -499,9 +572,11 @@ input:focus, textarea:focus, select:focus {
 /* Utilities */
 .flex-between { display: flex; justify-content: space-between; align-items: center; }
 .flex-center { display: flex; justify-content: center; align-items: center; }
+.gap-1 { gap: var(--sp-1); }
 .gap-2 { gap: var(--sp-2); }
 .gap-3 { gap: var(--sp-3); }
 .gap-4 { gap: var(--sp-4); }
+.gap-6 { gap: var(--sp-6); }
 .mb-2 { margin-bottom: var(--sp-2); }
 .mb-4 { margin-bottom: var(--sp-4); }
 .mb-6 { margin-bottom: var(--sp-6); }
@@ -989,12 +1064,8 @@ code {
 .w-full { width: 100% !important; }
 
 @media (max-width: 1024px) {
-  .header h1 span {
-    display: none;
-  }
-  
   .problem-card-grid {
-    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(min(300px, 100%), 1fr));
   }
 
   .grid-2-col, .grid-2-col-equal, .grid-3-col {
@@ -1049,36 +1120,60 @@ code {
 }
 
 @media (max-width: 768px) {
+  h1 { font-size: 1.75rem; }
+  h2 { font-size: 1.4rem; }
+  h3 { font-size: 1.2rem; }
+
   .header {
-    height: auto;
-    padding: var(--sp-4);
-    flex-direction: column;
-    gap: var(--sp-4);
-    position: relative;
-  }
-
-  .header nav {
-    width: 100%;
-    flex-direction: column;
-    gap: var(--sp-4);
-    height: auto;
-  }
-
-  .nav-links {
-    width: 100%;
-    justify-content: center;
-    flex-wrap: wrap;
-    gap: var(--sp-4);
-    height: auto;
-  }
-
-  .logout-btn {
-    width: 100%;
-    justify-content: center;
+    padding: 0 var(--sp-4);
   }
 
   .container {
+    padding: var(--sp-6) var(--sp-4);
+  }
+
+  /* Page headers (title block + actions): stack, and let the action buttons wrap. */
+  .flex-between:has(> div > h1),
+  .flex-between:has(> h1) {
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--sp-4);
+  }
+
+  .flex-between:has(> div > h1) > :not(:first-child) {
+    flex-wrap: wrap;
+    justify-content: flex-start;
+  }
+
+  .flex-center {
+    flex-wrap: wrap;
+  }
+
+  .problem-card {
     padding: var(--sp-4);
+  }
+
+  /* List rows (details beside action buttons, laid out inline as a row card) stack:
+     details on top, the buttons in a two-column grid underneath. */
+  .problem-card[style*="flex-direction: row"] {
+    flex-direction: column !important;
+    align-items: stretch !important;
+    gap: var(--sp-4);
+    padding: var(--sp-4) !important;
+  }
+
+  .problem-card[style*="flex-direction: row"] > .flex-center:last-child {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--sp-2);
+  }
+
+  .problem-card[style*="flex-direction: row"] > .flex-center:last-child .button { width: 100%; }
+
+  /* Filter bars: controls share the row and fill it. */
+  .responsive-flex .flex-center > * {
+    flex: 1 1 140px;
+    width: auto !important;
   }
 
   .problem-card-grid {
@@ -1115,11 +1210,7 @@ code {
 
 @media (max-width: 480px) {
   .header h1 {
-    font-size: 1.1rem;
-  }
-
-  .header nav {
-    gap: var(--sp-2);
+    font-size: 1.05rem;
   }
 
   .button {

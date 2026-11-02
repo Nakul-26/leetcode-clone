@@ -825,7 +825,7 @@ const AssessmentResultsPage = () => {
               <p className="text-secondary mb-6" style={{ fontSize: '0.85rem' }}>
                 Track correct submissions per problem. Use this data to identify broken challenges, verify difficulty, or adjust scoring weight.
               </p>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '20px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(320px, 100%), 1fr))', gap: '20px' }}>
                 {analytics.questionReports?.map((q) => {
                   const getDifficultyStyle = (diff) => {
                     switch (diff.toLowerCase()) {
