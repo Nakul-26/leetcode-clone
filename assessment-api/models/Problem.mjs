@@ -78,6 +78,12 @@ const ProblemSchema = new Schema({
   // for explicitly (problemsRepo.findByIdWithReference), so it never reaches a student.
   referenceSolution: { type: String, select: false },
   solutionLanguage: { type: String, select: false },
+  // Optional second, independent solution (a brute force, say; JUDGE_FIX_PLAN P11). When set,
+  // saving runs it on every test input too and refuses the problem where it disagrees with the
+  // reference solution, so one wrong reference solution cannot set every expected output.
+  // Hidden the same way as referenceSolution.
+  alternateSolution: { type: String, select: false },
+  alternateSolutionLanguage: { type: String, select: false },
 
   // mcq-only. Auto-graded in submissions.service.js: correct iff the submitted
   // selectedOptions set exactly equals the set of isCorrect indexes.

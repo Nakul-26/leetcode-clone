@@ -75,9 +75,14 @@ const TestCasesEditor = ({ formData, onChange, fieldError, fieldClassName }) => 
     try {
       const res = await api.post('/api/v1/problems/reference-outputs', draft);
       const results = res.data.tests || [];
+      // P11: with a second solution, alternate[k] says whether it agrees on test k. One that
+      // does not compile is shown once (alternateError), not on every test.
+      const alternate = res.data.alternateError ? [] : res.data.alternate || [];
+      if (res.data.alternateError) setGenerateError(res.data.alternateError);
       const next = testCases.map((tc) => ({ ...tc }));
       const nextChecks = {};
-      results.forEach((r, k) => {
+      results.forEach((result, k) => {
+        const r = alternate[k] ? { ...result, alternate: alternate[k] } : result;
         const row = indexes[k];
         nextChecks[row] = r;
         if (!r.error && String(next[row].expected ?? '').trim() === '') {
@@ -117,6 +122,8 @@ const TestCasesEditor = ({ formData, onChange, fieldError, fieldClassName }) => 
   };
 
   const mismatches = Object.values(checks).filter((r) => r && (r.error || r.matches === false)).length;
+  const altDisagrees = (r) => !!r?.alternate && (r.alternate.agrees === false || !!r.alternate.error);
+  const disagreements = Object.values(checks).filter(altDisagrees).length;
 
   return (
     <div>
@@ -140,6 +147,11 @@ const TestCasesEditor = ({ formData, onChange, fieldError, fieldClassName }) => 
           mismatches === 0
             ? <span className="success-text flex-center gap-2"><CheckCircle2 size={16} /> Every expected output matches the reference solution</span>
             : <span className="error-text flex-center gap-2" style={{ marginTop: 0 }}><AlertTriangle size={16} /> {mismatches} test{mismatches > 1 ? 's' : ''} disagree with the reference solution</span>
+        )}
+        {disagreements > 0 && (
+          <span className="error-text flex-center gap-2" style={{ marginTop: 0 }} data-testid="alt-summary">
+            <AlertTriangle size={16} /> The two solutions disagree on {disagreements} test{disagreements > 1 ? 's' : ''}: one of them is wrong
+          </span>
         )}
       </div>
 
@@ -166,7 +178,7 @@ const TestCasesEditor = ({ formData, onChange, fieldError, fieldClassName }) => 
       <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', marginBottom: '24px' }}>
         {testCases.map((tc, i) => {
           const check = checks[i];
-          const bad = check && (check.error || check.matches === false);
+          const bad = check && (check.error || check.matches === false || altDisagrees(check));
           return (
             <div key={i} data-testid={`test-case-${i}`} style={{ background: 'var(--bg)', borderRadius: 'var(--radius-md)', border: `1px solid ${bad ? 'var(--error)' : 'var(--border)'}`, overflow: 'hidden' }}>
               <div className="flex-between" style={{ padding: '12px 16px', background: 'rgba(255,255,255,0.02)', borderBottom: '1px solid var(--border)' }}>
@@ -176,7 +188,7 @@ const TestCasesEditor = ({ formData, onChange, fieldError, fieldClassName }) => 
                     <input type="checkbox" checked={!!tc.isSample} onChange={(e) => updateRow(i, 'isSample', e.target.checked)} style={{ width: 'auto', margin: 0 }} />
                     <span style={{ fontSize: '0.85rem', color: tc.isSample ? 'var(--success)' : 'var(--text-muted)', fontWeight: tc.isSample ? '600' : '400' }}>Public Sample</span>
                   </label>
-                  {check && !bad && <span className="success-text flex-center gap-1" style={{ fontSize: '0.8rem' }}><CheckCircle2 size={14} /> {check.filled ? 'generated' : 'matches reference'}</span>}
+                  {check && !bad && <span className="success-text flex-center gap-1" style={{ fontSize: '0.8rem' }}><CheckCircle2 size={14} /> {check.filled ? 'generated' : 'matches reference'}{check.alternate?.agrees === true ? ', both solutions agree' : ''}</span>}
                 </div>
                 {testCases.length > 1 && (
                   <button type="button" onClick={() => removeRow(i)} className="button button-outline" style={{ padding: '6px', color: 'var(--text-muted)', borderColor: 'transparent' }} title="Delete Test Case">
@@ -218,6 +230,17 @@ const TestCasesEditor = ({ formData, onChange, fieldError, fieldClassName }) => 
                         </button>
                       )}
                     </div>
+                  )}
+                  {check?.alternate?.error && (
+                    <div className="error-text" data-testid={`alt-error-${i}`}>The second solution failed on this input: {check.alternate.error}</div>
+                  )}
+                  {check?.alternate?.agrees === false && (
+                    <div className="error-text" data-testid={`alt-mismatch-${i}`}>
+                      The second solution gives <code>{formatOutput(formData.problemType, check.alternate.output)}</code>, the reference solution <code>{formatOutput(formData.problemType, check.output)}</code>
+                    </div>
+                  )}
+                  {check?.alternate?.skipped && (
+                    <div className="form-hint" data-testid={`alt-skipped-${i}`}>Not cross-checked: the second solution ran out of time on this input.</div>
                   )}
                 </div>
               </div>

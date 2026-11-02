@@ -12,6 +12,13 @@ import { getCacheJSON, setCacheJSON } from "./cache.service.js";
 // Run test an expected output (P3).
 
 const REFERENCE_RUN_TIMEOUT_MS = 120_000;
+// A second solution (P11) gets this many times the problem's time limit per test, at most
+// ALTERNATE_MAX_TEST_MS. The judge ends any /run after 120 s; tests it did not reach come back
+// as time limit exceeded, which crossCheckAlternate reports as skipped, so the client waits a
+// little longer than that instead of failing first.
+const ALTERNATE_TIME_FACTOR = 3;
+const ALTERNATE_MAX_TEST_MS = 10_000;
+const ALTERNATE_RUN_TIMEOUT_MS = 150_000;
 
 function hasValue(v) {
   return v !== undefined && v !== null && !(typeof v === "string" && v === "");
@@ -41,7 +48,7 @@ function errorText(detail) {
  *   error   - set when the reference solution itself failed on this test (TLE, crash)
  * Throws HttpError 400 when there is no reference solution or it does not compile.
  */
-export async function runReferenceSolution(problem, testCases, { timeLimitMs, memoryLimitMb } = {}) {
+export async function runReferenceSolution(problem, testCases, { timeLimitMs, memoryLimitMb, timeoutMs = REFERENCE_RUN_TIMEOUT_MS } = {}) {
   if (!problem.referenceSolution || !problem.solutionLanguage) {
     throw new HttpError(400, "A reference solution is required", {
       msg: "Add a reference solution and its language first: expected outputs are computed from it."
@@ -79,7 +86,7 @@ export async function runReferenceSolution(problem, testCases, { timeLimitMs, me
 
   let result;
   try {
-    const response = await judgeFetch("/run", { body: JSON.stringify(msg), timeoutMs: REFERENCE_RUN_TIMEOUT_MS });
+    const response = await judgeFetch("/run", { body: JSON.stringify(msg), timeoutMs });
     if (!response.ok) {
       const text = await response.text();
       throw new HttpError(response.status >= 500 ? 502 : 400, "Judge rejected the reference run", { msg: `Judge error: ${text}` });
@@ -109,6 +116,49 @@ export async function runReferenceSolution(problem, testCases, { timeLimitMs, me
       stderr: detail.stderr || detail.traceback || "",
       timeMs: detail.timeMs ?? 0
     };
+  });
+}
+
+/**
+ * P11: runs the problem's second solution (alternateSolution, e.g. a brute force) on the same
+ * inputs and compares it with what the reference solution produced (`referenceResults`, from
+ * runReferenceSolution on `testCases`). Two independent solutions that agree make a wrong
+ * expected output much less likely than one solution alone.
+ *
+ * Returns null when the problem has no second solution, else one entry per test:
+ *   { output, agrees, skipped, error }
+ *   agrees  - true/false; null when there is nothing to compare (either solution failed)
+ *   skipped - the second solution ran out of time: brute forces are allowed to be slow on big
+ *             inputs, so that is not a disagreement
+ *   error   - the second solution failed on this test
+ * When the second solution does not compile, every entry carries that error and the array has
+ * a compileError property with it, so callers can report it once.
+ * A test the reference solution failed on is left to the reference check.
+ */
+export async function crossCheckAlternate(problem, testCases, referenceResults) {
+  if (!problem.alternateSolution || !problem.alternateSolutionLanguage) return null;
+  const alternate = { ...problem, referenceSolution: problem.alternateSolution, solutionLanguage: problem.alternateSolutionLanguage };
+  const compared = testCases.map((tc, i) => ({ inputs: tc.inputs, expected: referenceResults[i]?.error ? null : referenceResults[i]?.output }));
+  let runs;
+  try {
+    const timeLimitMs = Math.min((problem.timeLimitMs || 2000) * ALTERNATE_TIME_FACTOR, ALTERNATE_MAX_TEST_MS);
+    runs = await runReferenceSolution(alternate, compared, { timeLimitMs, timeoutMs: ALTERNATE_RUN_TIMEOUT_MS });
+  } catch (err) {
+    if (!(err instanceof HttpError) || err.status !== 400) throw err;
+    const compileError = err.body?.compileOutput ? `The second solution does not compile:
+${err.body.compileOutput}` : `The second solution could not run: ${err.body?.msg || err.message}`;
+    // Reported once (compileError), not once per test; every test still has an entry.
+    return Object.assign(testCases.map(() => ({ output: null, agrees: null, skipped: false, error: compileError })), { compileError });
+  }
+  return runs.map((r, i) => {
+    const refFailed = Boolean(referenceResults[i]?.error);
+    if (r.error && /^Time Limit/.test(r.error)) return { output: null, agrees: null, skipped: true, error: null };
+    if (r.error) return { output: null, agrees: null, skipped: false, error: r.error };
+    if (refFailed) return { output: r.output, agrees: null, skipped: false, error: null };
+    // matches is null when the reference output is empty (a function returning null): the
+    // judge had nothing to compare with, so compare the two outputs directly.
+    const agrees = r.matches === null ? JSON.stringify(r.output ?? null) === JSON.stringify(referenceResults[i]?.output ?? null) : r.matches;
+    return { output: r.output, agrees, skipped: false, error: null };
   });
 }
 

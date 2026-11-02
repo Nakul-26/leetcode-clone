@@ -81,6 +81,34 @@ describe('TestCasesEditor (JUDGE_FIX_PLAN P6, P10)', () => {
     expect(screen.getByText(/Every expected output matches/)).toBeDefined();
   });
 
+  it('with a second solution, sends it and shows per test whether the two solutions agree (P11)', async () => {
+    post.mockResolvedValue({ data: {
+      tests: [
+        { output: '6\n', matches: null, error: null },
+        { output: '11\n', matches: null, error: null },
+        { output: '99\n', matches: null, error: null }
+      ],
+      alternate: [
+        { output: '6\n', agrees: true, skipped: false, error: null },
+        { output: '10\n', agrees: false, skipped: false, error: null },
+        { output: null, agrees: null, skipped: true, error: null }
+      ]
+    } });
+    render(<Harness initial={{ ...stdinForm([
+      { inputs: '3\n', expected: '', isSample: true },
+      { inputs: '5\n', expected: '', isSample: false },
+      { inputs: '99999\n', expected: '', isSample: false }
+    ]), alternateSolution: 'brute', alternateSolutionLanguage: 'cpp' }} />);
+
+    fireEvent.click(screen.getByTestId('generate-outputs'));
+    await waitFor(() => expect(screen.getByTestId('alt-mismatch-1')).toBeDefined());
+    expect(post.mock.calls[0][1]).toMatchObject({ alternateSolution: 'brute', alternateSolutionLanguage: 'cpp' });
+    expect(screen.getByTestId('alt-mismatch-1').textContent).toMatch(/second solution gives 10/);
+    expect(screen.getByTestId('alt-summary').textContent).toMatch(/disagree on 1 test/);
+    expect(screen.getByTestId('alt-skipped-2')).toBeDefined();
+    expect(screen.getByText(/both solutions agree/)).toBeDefined();
+  });
+
   it('shows why the reference solution could not run', async () => {
     // What axios rejects with: an Error carrying the response.
     failWith = Object.assign(new Error('Request failed with status code 400'), {

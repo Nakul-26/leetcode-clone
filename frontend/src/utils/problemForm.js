@@ -1,5 +1,19 @@
 import { isValidType } from "./typeValidator";
 
+// What the second-solution language picker shows before the author picks one.
+export const DEFAULT_ALTERNATE_LANGUAGE = "python";
+
+/**
+ * The optional second solution (JUDGE_FIX_PLAN P11). Always sent, blank when there is none, so
+ * clearing it in the editor removes it from the saved problem.
+ */
+export function alternateSolutionFields(formData) {
+  const code = String(formData.alternateSolution || "");
+  return code.trim()
+    ? { alternateSolution: code, alternateSolutionLanguage: formData.alternateSolutionLanguage || DEFAULT_ALTERNATE_LANGUAGE }
+    : { alternateSolution: "", alternateSolutionLanguage: "" };
+}
+
 const IDENTIFIER_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 function addError(errors, key, message) {
@@ -148,6 +162,7 @@ export function buildProblemPayload(formData) {
       testCases,
       referenceSolution: formData.referenceSolution,
       solutionLanguage: formData.solutionLanguage,
+      ...alternateSolutionFields(formData),
       tags: String(formData.tags || "")
         .split(",")
         .map((tag) => tag.trim())
@@ -312,6 +327,7 @@ export function buildReferenceDraft(formData) {
     difficulty: formData.difficulty || "Easy",
     referenceSolution: formData.referenceSolution,
     solutionLanguage: formData.solutionLanguage,
+    ...alternateSolutionFields(formData),
     compareConfig: formData.compareConfig,
     testCases
   };
@@ -382,6 +398,7 @@ export function buildStdinPayload(formData) {
       testCases,
       referenceSolution: formData.referenceSolution,
       solutionLanguage: formData.solutionLanguage,
+      ...alternateSolutionFields(formData),
       tags: String(formData.tags || "").split(",").map((tag) => tag.trim()).filter(Boolean),
       isPremium: !!formData.isPremium
     }

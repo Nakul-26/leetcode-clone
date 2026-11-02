@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildProblemPayload, collectErrorMessages } from './problemForm';
+import { buildProblemPayload, collectErrorMessages, alternateSolutionFields } from './problemForm';
 
 describe('problemForm Utility', () => {
   describe('buildProblemPayload', () => {
@@ -51,6 +51,21 @@ describe('problemForm Utility', () => {
       expect(messages).toContain('Title is required');
       expect(messages).toContain('Difficulty is invalid');
       expect(messages.length).toBe(2);
+    });
+  });
+
+  describe('alternateSolutionFields (P11)', () => {
+    it('sends the second solution with its language, defaulting to the one the picker shows', () => {
+      expect(alternateSolutionFields({ alternateSolution: 'brute', alternateSolutionLanguage: 'cpp' }))
+        .toEqual({ alternateSolution: 'brute', alternateSolutionLanguage: 'cpp' });
+      expect(alternateSolutionFields({ alternateSolution: 'brute' }))
+        .toEqual({ alternateSolution: 'brute', alternateSolutionLanguage: 'python' });
+    });
+
+    it('sends blanks when there is none, so an edit can remove it', () => {
+      expect(alternateSolutionFields({ alternateSolution: '  \n', alternateSolutionLanguage: 'cpp' }))
+        .toEqual({ alternateSolution: '', alternateSolutionLanguage: '' });
+      expect(alternateSolutionFields({})).toEqual({ alternateSolution: '', alternateSolutionLanguage: '' });
     });
   });
 });

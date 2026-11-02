@@ -2,7 +2,7 @@ import * as problemsRepo from "../repositories/problems.repo.js";
 import Submission from "../../models/Submission.mjs";
 import { HttpError } from "../utils/httpError.js";
 import { validateProblemDefinition, checkTestsAgainstReference } from "./preview.service.js";
-import { referenceOutputsFor, runReferenceSolution } from "./referenceSolution.service.js";
+import { referenceOutputsFor, runReferenceSolution, crossCheckAlternate } from "./referenceSolution.service.js";
 import { judgeFetch } from "./judgeClient.service.js";
 import { collegeAllowsPremium } from "./billing.service.js";
 import { escapeRegex } from "../utils/escapeRegex.js";
@@ -44,6 +44,15 @@ function normalizeProblemPayload(payload = {}) {
         name: typeof p.name === "string" ? p.name.trim() : p.name,
         type: typeof p.type === "string" ? p.type.trim() : p.type
       }));
+  }
+
+  // A blank second solution is no second solution; both fields are cleared so an edit can
+  // remove one (updates only overwrite the fields they send).
+  if ("alternateSolution" in normalized || "alternateSolutionLanguage" in normalized) {
+    if (typeof normalized.alternateSolution !== "string" || !normalized.alternateSolution.trim()) {
+      normalized.alternateSolution = "";
+      normalized.alternateSolutionLanguage = "";
+    }
   }
 
   normalized.compareConfig = {
@@ -361,6 +370,12 @@ function validateStdinPayload(payload) {
   return errors;
 }
 
+// P11: the second solution is optional, but one without a language cannot be run.
+function alternateSolutionErrors(payload) {
+  if (!payload.alternateSolution) return [];
+  return payload.alternateSolutionLanguage ? [] : ["alternateSolutionLanguage is required with a second solution"];
+}
+
 function structuralValidatorFor(problemType) {
   if (problemType === "mcq") return validateMcqPayload;
   if (problemType === "subjective") return validateSubjectivePayload;
@@ -371,7 +386,7 @@ function structuralValidatorFor(problemType) {
 export async function createProblem(payload) {
   const normalizedPayload = normalizeProblemPayload(payload);
   const problemType = normalizedPayload.problemType || "function";
-  const validationErrors = structuralValidatorFor(problemType)(normalizedPayload);
+  const validationErrors = [...structuralValidatorFor(problemType)(normalizedPayload), ...alternateSolutionErrors(normalizedPayload)];
   if (validationErrors.length > 0) {
     throw new HttpError(400, "Validation failed", {
       error: validationErrors.join(", "),
@@ -404,7 +419,7 @@ export async function createProblem(payload) {
 export async function updateProblem(id, payload) {
   const normalizedPayload = normalizeProblemPayload(payload);
   const problemType = normalizedPayload.problemType || "function";
-  const validationErrors = structuralValidatorFor(problemType)(normalizedPayload);
+  const validationErrors = [...structuralValidatorFor(problemType)(normalizedPayload), ...alternateSolutionErrors(normalizedPayload)];
   if (validationErrors.length > 0) {
     throw new HttpError(400, "Validation failed", {
       error: validationErrors.join(", "),
@@ -454,7 +469,12 @@ export async function computeReferenceOutputs(draft) {
   if ((problem.problemType || "function") === "function" && (!problem.functionName || !Array.isArray(problem.parameters) || !problem.returnType)) {
     throw new HttpError(400, "Function signature required", { msg: "Fill in the function name, parameters and return type first." });
   }
-  return { tests: await runReferenceSolution(problem, problem.testCases) };
+  const tests = await runReferenceSolution(problem, problem.testCases);
+  // P11: with a second solution, show per test whether it agrees, so the author sees a
+  // disagreement while filling in the outputs rather than only when saving.
+  const alternate = await crossCheckAlternate(problem, problem.testCases, tests);
+  if (!alternate) return { tests };
+  return alternate.compileError ? { tests, alternate, alternateError: alternate.compileError } : { tests, alternate };
 }
 
 // A student may add up to this many tests of their own to a Run (JUDGE_FIX_PLAN P2).

@@ -3,7 +3,7 @@ import addFormats from 'ajv-formats';
 import fs from 'fs';
 import path from 'path';
 import { validateData, isValidType } from "../utils/typeValidator.mjs";
-import { runReferenceSolution } from "./referenceSolution.service.js";
+import { runReferenceSolution, crossCheckAlternate } from "./referenceSolution.service.js";
 
 const ajv = new Ajv({ allErrors: true });
 addFormats(ajv);
@@ -101,6 +101,7 @@ export async function validateProblemDefinition(problem) {
     report.referenceSolutionPassed = check.passed;
     report.errors.push(...check.errors);
     report.testResults = check.tests;
+    report.warnings = check.warnings;
   } else if (report.wrapperGeneration) {
     report.errors.push("referenceSolution and solutionLanguage are required to pass deep validation.");
   }
@@ -181,5 +182,20 @@ ${err.body.compileOutput}` : (err.body?.msg || err.message);
     if (t.error) errors.push(`${label}: the reference solution failed: ${t.error}`);
     else if (t.matches === false) errors.push(`${label}: expected ${show(tc.expected)} but the reference solution gives ${show(t.output)}`);
   });
-  return { passed: errors.length === 0 && tests.length > 0, errors, tests };
+
+  // P11: a second solution, when there is one, must agree with the reference on every test.
+  const warnings = [];
+  const alternate = tests.length > 0 ? await crossCheckAlternate(problem, problem.testCases, tests) : null;
+  if (alternate?.compileError) {
+    errors.push(alternate.compileError);
+    return { passed: false, errors, warnings, tests, alternate };
+  }
+  (alternate || []).forEach((a, i) => {
+    const tc = problem.testCases[i];
+    const label = `Test case ${i + 1} (${tc.isHidden || tc.isSample === false ? "hidden" : "sample"})`;
+    if (a.skipped) warnings.push(`${label}: not cross-checked, the second solution ran out of time`);
+    else if (a.error) errors.push(`${label}: the second solution failed: ${a.error}`);
+    else if (a.agrees === false) errors.push(`${label}: the reference solution gives ${show(tests[i].output)} but the second solution gives ${show(a.output)}`);
+  });
+  return { passed: errors.length === 0 && tests.length > 0, errors, warnings, tests, alternate };
 }

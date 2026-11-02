@@ -4,6 +4,7 @@ import { Plus, Save, Trash2, AlertTriangle, CheckCircle2, ChevronLeft, Info, Set
 import api from '../api';
 import { buildProblemPayload, buildMcqPayload, buildSubjectivePayload, buildStdinPayload, collectErrorMessages, isCodingType } from '../utils/problemForm';
 import TestCasesEditor from '../components/TestCasesEditor';
+import AlternateSolutionFields from '../components/AlternateSolutionFields';
 import { PROBLEM_TEMPLATES } from '../utils/problemTemplates';
 
 const AddProblemPage = () => {
@@ -451,6 +452,8 @@ const AddProblemPage = () => {
           />
           {fieldError('referenceSolution') && <div className="error-text">{fieldError('referenceSolution')}</div>}
         </div>
+
+        <AlternateSolutionFields formData={formData} onChange={handleChange} />
 
         <TestCasesEditor
           formData={formData}

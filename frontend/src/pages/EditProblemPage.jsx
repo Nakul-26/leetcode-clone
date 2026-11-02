@@ -4,6 +4,7 @@ import { Plus, Save, Trash2, AlertTriangle, CheckCircle2, ChevronLeft, Info, Set
 import api from '../api';
 import { buildProblemPayload, buildMcqPayload, buildSubjectivePayload, buildStdinPayload, collectErrorMessages, isCodingType, toFormTestCase } from '../utils/problemForm';
 import TestCasesEditor from '../components/TestCasesEditor';
+import AlternateSolutionFields from '../components/AlternateSolutionFields';
 import { PROBLEM_TEMPLATES } from '../utils/problemTemplates';
 
 const EditProblemPage = () => {
@@ -68,6 +69,8 @@ const EditProblemPage = () => {
           testCases: (problem.testCases || []).map((tc) => toFormTestCase(problem.problemType || 'function', tc)),
           referenceSolution: problem.referenceSolution || '',
           solutionLanguage: problem.solutionLanguage || 'javascript',
+          alternateSolution: problem.alternateSolution || '',
+          alternateSolutionLanguage: problem.alternateSolutionLanguage || '',
           options: Array.isArray(problem.options) && problem.options.length > 0
             ? problem.options
             : [{ text: '', isCorrect: false }, { text: '', isCorrect: false }],
@@ -449,6 +452,8 @@ const EditProblemPage = () => {
           />
           {fieldError('referenceSolution') && <div className="error-text">{fieldError('referenceSolution')}</div>}
         </div>
+
+        <AlternateSolutionFields formData={formData} onChange={handleChange} />
 
         <TestCasesEditor
           formData={formData}

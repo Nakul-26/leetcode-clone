@@ -135,6 +135,13 @@
       "type": "string",
       "enum": ["javascript", "typescript", "python", "java", "go", "cpp", "c", "csharp", "rust", "ruby", "php", "kotlin"]
     },
+    "alternateSolution": {
+      "type": "string"
+    },
+    "alternateSolutionLanguage": {
+      "type": "string",
+      "enum": ["", "javascript", "typescript", "python", "java", "go", "cpp", "c", "csharp", "rust", "ruby", "php", "kotlin"]
+    },
     "createdAt": {
       "type": "string",
       "format": "date-time"

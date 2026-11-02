@@ -12,10 +12,10 @@ export async function findById(id) {
   return Problem.findById(id);
 }
 
-// Includes the reference solution, which every other query leaves out (select:false). Only for
+// Includes the reference (and alternate, P11) solution, which every other query leaves out (select:false). Only for
 // server-side use and privileged readers; never return this to a student.
 export async function findByIdWithReference(id) {
-  return Problem.findById(id).select("+referenceSolution +solutionLanguage");
+  return Problem.findById(id).select("+referenceSolution +solutionLanguage +alternateSolution +alternateSolutionLanguage");
 }
 
 export async function findByExternalId(externalId) {
