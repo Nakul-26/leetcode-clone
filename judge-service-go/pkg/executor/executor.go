@@ -271,7 +271,7 @@ func (e *Executor) runExecWithTimeout(ctx context.Context, containerID string, u
 	}
 
 	if inspect.ExitCode != 0 {
-		return stdoutBuf.String(), stderrBuf.String(), inspect.ExitCode, exitError(inspect.ExitCode, stderrBuf.String())
+		return stdoutBuf.String(), stderrBuf.String(), inspect.ExitCode, e.execExitError(containerID, inspect.ExitCode, stderrBuf.String())
 	}
 
 	return stdoutBuf.String(), stderrBuf.String(), inspect.ExitCode, nil
@@ -364,7 +364,7 @@ func (e *Executor) runExecWithStdinTimeout(ctx context.Context, containerID stri
 	}
 
 	if inspect.ExitCode != 0 {
-		return stdoutBuf.String(), stderrBuf.String(), inspect.ExitCode, exitError(inspect.ExitCode, stderrBuf.String())
+		return stdoutBuf.String(), stderrBuf.String(), inspect.ExitCode, e.execExitError(containerID, inspect.ExitCode, stderrBuf.String())
 	}
 
 	return stdoutBuf.String(), stderrBuf.String(), inspect.ExitCode, nil
@@ -556,16 +556,36 @@ func (e *Executor) runExecStreamWithTimeout(ctx context.Context, containerID str
 
 		waitResult.exitCode = inspect.ExitCode
 		if inspect.ExitCode != 0 {
-			if inspect.ExitCode == 137 {
-				waitResult.err = NewExecutionError(ErrMemoryLimitExceeded, "process killed (possibly OOM)", inspect.ExitCode)
-			} else {
-				waitResult.err = NewExecutionError(ErrRuntimeError, fmt.Sprintf("exit code %d", inspect.ExitCode), inspect.ExitCode)
-			}
+			// stderr is still being read here; collectStream re-checks a runtime error once it is.
+			waitResult.err = e.execExitError(containerID, inspect.ExitCode, "")
 		}
 		stream.waitCh <- waitResult
 	}()
 
 	return stream, nil
+}
+
+// execExitError classifies a non-zero exec exit (see exitError). An exit of
+// lostSandboxExitCode from a container that has since stopped OOM-killed is a memory limit
+// exceeded that took the container with it.
+func (e *Executor) execExitError(containerID string, exitCode int, stderr string) error {
+	if exitCode == lostSandboxExitCode {
+		// The exec can end a moment before Docker records the container as stopped.
+		for i := 0; i < 5; i++ {
+			c, err := e.cli.InspectContainerWithOptions(docker.InspectContainerOptions{ID: containerID})
+			if err != nil || c.HostConfig == nil || c.HostConfig.Runtime != "runsc" {
+				break // under runc an exit of 128 is the student's own
+			}
+			if !c.State.Running {
+				if c.State.OOMKilled {
+					return sandboxOOMError()
+				}
+				break
+			}
+			time.Sleep(200 * time.Millisecond)
+		}
+	}
+	return exitError(exitCode, stderr)
 }
 
 func (e *Executor) collectStream(stream *ExecStream) (string, string, int, error) {
@@ -891,7 +911,7 @@ func (e *Executor) runExecWithStdin(ctx context.Context, containerID string, use
 	}
 
 	if inspect.ExitCode != 0 {
-		return stdoutBuf.String(), stderrBuf.String(), inspect.ExitCode, exitError(inspect.ExitCode, stderrBuf.String())
+		return stdoutBuf.String(), stderrBuf.String(), inspect.ExitCode, e.execExitError(containerID, inspect.ExitCode, stderrBuf.String())
 	}
 
 	return stdoutBuf.String(), stderrBuf.String(), inspect.ExitCode, nil

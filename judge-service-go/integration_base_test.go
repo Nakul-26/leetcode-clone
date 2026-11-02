@@ -28,6 +28,55 @@ func newTestPool(tb testing.TB, cli *docker.Client, globalCap int) *pool.Contain
 	return p
 }
 
+// underGVisor reports a run with JUDGE_SANDBOX_RUNTIME=runsc. There an MLE kills the whole
+// sandbox (S3): that test is Memory Limit Exceeded, the tests after it are not run, and the
+// container is gone.
+func underGVisor() bool { return os.Getenv("JUDGE_SANDBOX_RUNTIME") == "runsc" }
+
+// gvisorAfterMLE turns verdicts expected under runc into those expected under gVisor: every
+// test after the first memory limit exceeded is not run.
+func gvisorAfterMLE(want []string) []string {
+	if !underGVisor() {
+		return want
+	}
+	out := append([]string{}, want...)
+	for i, v := range out {
+		if v == models.ErrorTypeMemoryLimit {
+			for j := i + 1; j < len(out); j++ {
+				out[j] = models.ErrorTypeNotRun
+			}
+			break
+		}
+	}
+	return out
+}
+
+// containerLost reports a pooled container that is no longer running (gVisor OOM).
+func containerLost(exec *executor.Executor, pc *pool.PooledContainer) bool {
+	c, err := exec.Client().InspectContainerWithOptions(docker.InspectContainerOptions{ID: pc.ID})
+	return err == nil && !c.State.Running
+}
+
+// resetOrReplace resets pc between runs as production does; under gVisor a container that
+// died with an MLE is discarded and a fresh one acquired, as finishWithContainer does.
+func resetOrReplace(t *testing.T, exec *executor.Executor, p *pool.ContainerPool, pc *pool.PooledContainer, langID string) *pool.PooledContainer {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	if underGVisor() && containerLost(exec, pc) {
+		p.Discard(ctx, pc, "lost (gVisor OOM)")
+		next := p.Acquire(ctx, langID)
+		if next == nil {
+			t.Fatalf("no %s container after discarding a lost one", langID)
+		}
+		return next
+	}
+	if err := exec.ResetContainer(ctx, pc.ID); err != nil {
+		t.Fatalf("reset: %v", err)
+	}
+	return pc
+}
+
 func setupIntegration(t *testing.T, languageID string) (*executor.Executor, *pool.ContainerPool, *pool.PooledContainer, *languages.Language) {
 	t.Helper()
 
@@ -87,6 +136,9 @@ func runCertificationTest(t *testing.T, exec *executor.Executor, pc *pool.Pooled
 	}
 	// Production resets a container when it is released (finishWithContainer); per-test steps
 	// no longer clean up after a clean exit (JUDGE_FIX_PLAN T5), so do the same between runs here.
+	if underGVisor() && containerLost(exec, pc) {
+		return result // the MLE took the container (S3); the caller does not reuse it
+	}
 	if err := exec.ResetContainer(ctx, pc.ID); err != nil {
 		t.Fatalf("container reset failed: %v", err)
 	}

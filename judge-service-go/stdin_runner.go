@@ -188,6 +188,11 @@ func runSubmissionStdinDetailed(ctx context.Context, exec *executor.Executor, po
 			}
 			tr.TimeMs = timing.TimeMs()
 			result.AddTestResult(tr)
+			if executor.IsContainerLost(runErr) {
+				// The sandbox died with the program (gVisor OOM, S3): nothing more can run.
+				appendNotRunTests(result, problem, i+1)
+				break
+			}
 			continue
 		}
 

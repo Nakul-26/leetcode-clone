@@ -19,6 +19,9 @@ type ExecutionError struct {
 	Type     error
 	Message  string
 	ExitCode int
+	// ContainerLost: the container stopped with the process (see sandboxOOMError), so
+	// nothing more can run in it.
+	ContainerLost bool
 }
 
 func (e *ExecutionError) Error() string {
@@ -41,6 +44,22 @@ func NewExecutionError(errType error, message string, exitCode int) *ExecutionEr
 		Message:  message,
 		ExitCode: exitCode,
 	}
+}
+
+// IsContainerLost reports an error after which the container is no longer running.
+func IsContainerLost(err error) bool {
+	var execErr *ExecutionError
+	return errors.As(err, &execErr) && execErr.ContainerLost
+}
+
+// lostSandboxExitCode is what an exec reports when the sandbox around it went away. Under
+// gVisor (runsc, JUDGE_FIX_PLAN S3) the memory cgroup covers the whole sandbox, so an OOM
+// kills the sandbox, not just the student's process: the exec ends 128 ("WaitPID failed:
+// EOF") instead of runc's 137, and the container stops with OOMKilled set.
+const lostSandboxExitCode = 128
+
+func sandboxOOMError() error {
+	return &ExecutionError{Type: ErrMemoryLimitExceeded, Message: "sandbox killed at the memory limit", ExitCode: lostSandboxExitCode, ContainerLost: true}
 }
 
 // exitError classifies a non-zero exit of the submitted program. 137 is a SIGKILL, which in

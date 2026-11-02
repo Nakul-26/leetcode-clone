@@ -236,6 +236,11 @@ func runSubmissionCentralPerTest(ctx context.Context, exec *executor.Executor, p
 			}
 			tr.TimeMs = timing.TimeMs()
 			result.AddTestResult(tr)
+			if executor.IsContainerLost(runErr) {
+				// The sandbox died with the program (gVisor OOM, S3): nothing more can run.
+				appendNotRunTests(result, problem, i+1)
+				break
+			}
 			continue
 		}
 
@@ -377,6 +382,11 @@ func runBatchedTests(ctx context.Context, exec *executor.Executor, pooledContain
 			offset = len(problem.TestCases)
 		case attempt.remainingReason == "":
 			offset = len(problem.TestCases)
+		case attempt.containerLost && done < len(problem.TestCases):
+			// The test it died on gets the verdict; the container is gone, so the rest cannot run.
+			appendFailedTest(result, problem, done, attempt.remainingReason)
+			appendNotRunTests(result, problem, done+1)
+			offset = len(problem.TestCases)
 		case attempt.resumable && !submissionMsg.StopOnFirstFailure && done+1 < len(problem.TestCases) &&
 			!(startupCrash(attempt) && attempt.stderr == lastStartupCrash):
 			// The test the process died on gets the verdict; the next attempt starts after it.
@@ -413,6 +423,7 @@ type batchAttempt struct {
 	stoppedEarly    bool
 	remainingReason string // the verdict for the test it died on, "" when every test ran
 	resumable       bool   // the process died on one test; the tests after it can run in a new one
+	containerLost   bool   // the container died with the process (gVisor OOM, S3): nothing more can run
 	internalError   string
 	stderr          string
 }
@@ -507,6 +518,7 @@ func runBatchAttempt(ctx context.Context, exec *executor.Executor, pooledContain
 			attempt.remainingReason = "Time Limit Exceeded"
 		} else if errors.Is(runErr, executor.ErrMemoryLimitExceeded) {
 			attempt.remainingReason = models.SubmissionStatusMemoryLimitExceeded
+			attempt.containerLost = executor.IsContainerLost(runErr)
 		} else {
 			// The student's program exited non-zero (see the per-test path, T3).
 			attempt.remainingReason = "Runtime Error"

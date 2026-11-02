@@ -16,7 +16,7 @@ import (
 // every test gets its own result as it did with one exec per test.
 func TestBatchedRunResumesAfterATestKillsTheProcess(t *testing.T) {
 	exec, p, pc, lang := setupIntegration(t, "python")
-	defer p.Release(pc)
+	defer func() { p.Release(pc) }()
 	adapter, _ := adapters.GetAdapter(lang.ID)
 
 	problem := models.Problem{
@@ -47,9 +47,7 @@ func TestBatchedRunResumesAfterATestKillsTheProcess(t *testing.T) {
 		if err != nil {
 			t.Fatalf("run: %v", err)
 		}
-		if err := exec.ResetContainer(ctx, pc.ID); err != nil {
-			t.Fatalf("reset: %v", err)
-		}
+		pc = resetOrReplace(t, exec, p, pc, lang.ID)
 		return res
 	}
 	verdicts := func(res *models.SubmissionResult) []string {
@@ -67,7 +65,7 @@ func TestBatchedRunResumesAfterATestKillsTheProcess(t *testing.T) {
 	started := time.Now()
 	res := run(false)
 	got := verdicts(res)
-	want := []string{"ok", models.ErrorTypeTimeout, models.ErrorTypeRuntime, models.ErrorTypeMemoryLimit, "ok", models.ErrorTypeWrongAnswer}
+	want := gvisorAfterMLE([]string{"ok", models.ErrorTypeTimeout, models.ErrorTypeRuntime, models.ErrorTypeMemoryLimit, "ok", models.ErrorTypeWrongAnswer})
 	if len(got) != len(want) {
 		t.Fatalf("Run: %d results %v, want %v", len(got), got, want)
 	}

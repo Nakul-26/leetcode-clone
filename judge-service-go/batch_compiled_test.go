@@ -149,7 +149,7 @@ func TestBatchedCompiledLanguages(t *testing.T) {
 				t.Fatalf("%s is not batched", langID)
 			}
 			exec, p, pc, lang := setupIntegration(t, langID)
-			defer p.Release(pc)
+			defer func() { p.Release(pc) }()
 			adapter, _ := adapters.GetAdapter(lang.ID)
 			run := func(problem models.Problem, code string) *models.SubmissionResult {
 				t.Helper()
@@ -161,9 +161,7 @@ func TestBatchedCompiledLanguages(t *testing.T) {
 				if err != nil {
 					t.Fatalf("run: %v", err)
 				}
-				if err := exec.ResetContainer(ctx, pc.ID); err != nil {
-					t.Fatalf("reset: %v", err)
-				}
+				pc = resetOrReplace(t, exec, p, pc, lang.ID)
 				return res
 			}
 
@@ -173,6 +171,7 @@ func TestBatchedCompiledLanguages(t *testing.T) {
 				// PHP stops at its own memory_limit with a fatal error before the container's limit.
 				want[3] = models.ErrorTypeRuntime
 			}
+			want = gvisorAfterMLE(want)
 			if got := verdicts(res); strings.Join(got, ",") != strings.Join(want, ",") {
 				for _, d := range res.Details {
 					t.Logf("test %d: %s %s tb=%.200q", d.Test, d.ErrorType, d.Error, d.Traceback)
