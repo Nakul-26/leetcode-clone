@@ -171,4 +171,10 @@ describe('Problems API', () => {
     expect(res.body.problem.problemType).toBe('subjective');
     expect(res.body.problem.maxWords).toBe(200);
   });
+  it('GET /api/problems/<malformed id> is a 404, not a server error', async () => {
+    for (const path of ['/api/problems/not-an-id', '/api/problems/not-an-id/stats']) {
+      const res = await request(app).get(path);
+      expect(res.status).toBe(404);
+    }
+  });
 });

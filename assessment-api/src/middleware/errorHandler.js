@@ -1,6 +1,11 @@
 import { safeErrorMessage } from "../utils/safeErrorMessage.js";
 
 export function errorHandler(err, req, res, _next) {
+  // A malformed id in the URL (/problems/abc) cannot name any document: not found, not a crash.
+  if (err.name === "CastError" && err.kind === "ObjectId") {
+    return res.status(404).json({ message: "Not found", msg: "Not found" });
+  }
+
   console.error(err);
 
   const status = err.status || 500;
