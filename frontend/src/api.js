@@ -90,7 +90,12 @@ export const admin = {
   updateBanner: (data) => api.post("/api/v1/admin/banner", data),
   downloadBackup: () => api.get("/api/v1/admin/backup", { responseType: 'blob' }),
   restoreDatabase: (data) => api.post("/api/v1/admin/restore", data),
-  getLanguageStats: (days) => api.get("/api/v1/admin/language-stats", { params: { days } })
+  getLanguageStats: (days) => api.get("/api/v1/admin/language-stats", { params: { days } }),
+  listApiClients: () => api.get("/api/v1/admin/api-clients"),
+  createApiClient: (data) => api.post("/api/v1/admin/api-clients", data),
+  updateApiClient: (id, data) => api.patch(`/api/v1/admin/api-clients/${id}`, data),
+  revokeApiClient: (id) => api.delete(`/api/v1/admin/api-clients/${id}`),
+  getApiClientUsage: (id) => api.get(`/api/v1/admin/api-clients/${id}/usage`)
 };
 
 export const system = {
@@ -142,6 +147,7 @@ export const billing = {
   createCheckout: (planId) => api.post("/api/v1/billing/checkout", { planId }),
   createPortal: () => api.post("/api/v1/billing/portal"),
   listColleges: () => api.get("/api/v1/billing/colleges"),
+  createCollege: (name) => api.post("/api/v1/billing/colleges", { name }),
   setCollegePlan: (collegeId, data) => api.patch(`/api/v1/billing/colleges/${collegeId}/plan`, data)
 };
 

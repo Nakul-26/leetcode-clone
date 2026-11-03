@@ -3,6 +3,7 @@ import { verifyToken, authorizeRoles } from "../middleware/auth.mjs";
 import { env } from "../config/env.js";
 import { getStripeClient } from "../config/stripe.js";
 import * as billingService from "../services/billing.service.js";
+import * as collegeService from "../services/college.service.js";
 
 const router = express.Router();
 
@@ -50,6 +51,15 @@ router.get("/colleges", verifyToken, authorizeRoles("superadmin"), async (req, r
   try {
     const colleges = await billingService.listCollegesForBilling();
     res.json(colleges);
+  } catch (err) {
+    if (err.status && err.body) return res.status(err.status).json(err.body);
+    next(err);
+  }
+});
+
+router.post("/colleges", verifyToken, authorizeRoles("superadmin"), async (req, res, next) => {
+  try {
+    res.status(201).json(await collegeService.createCollege(req.body));
   } catch (err) {
     if (err.status && err.body) return res.status(err.status).json(err.body);
     next(err);

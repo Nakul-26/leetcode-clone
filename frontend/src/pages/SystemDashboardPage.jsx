@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Activity, Server, Database, Users, Code2, RefreshCw, AlertCircle, BookOpen, History, Target, TrendingUp, Trophy, AlertTriangle, CheckCircle2 } from 'lucide-react';
+import { Activity, Server, Database, Users, Code2, RefreshCw, AlertCircle, BookOpen, History, Target, TrendingUp, Trophy, AlertTriangle, CheckCircle2, KeyRound } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { admin, submissions, system } from '../api';
 import LanguageStatsCard from '../components/LanguageStatsCard';
 
@@ -178,6 +179,11 @@ const SystemDashboardPage = ({ user }) => {
           <p className="text-muted">Live monitoring of platform infrastructure and metrics.</p>
         </div>
         <div className="flex-center gap-4">
+          {(user?.role === 'admin' || user?.role === 'superadmin') && (
+            <Link to="/admin/api-keys" className="button button-outline" style={{ padding: '6px 12px', fontSize: '0.85rem' }}>
+              <KeyRound size={16} /> API Keys
+            </Link>
+          )}
           <div className="flex-center gap-2">
             <span className="text-muted" style={{ fontSize: '0.85rem' }}>Auto-refresh:</span>
             <select 

@@ -176,4 +176,21 @@ describe("Admin API client management", () => {
     expect(res.status).toBe(404);
     expect(mongoose.Types.ObjectId.isValid("not-an-object-id")).toBe(false);
   });
+  it("lets a superadmin create a college to own a key (e.g. an internal load-test college)", async () => {
+    const res = await request(app).post("/api/billing/colleges")
+      .set("Authorization", `Bearer ${superadminToken}`).send({ name: "Load test" });
+    expect(res.status).toBe(201);
+    expect(res.body).toMatchObject({ name: "Load test", slug: "load-test" });
+
+    const key = await create(superadminToken, { name: "loadtest", scopes: ["codeassess"], collegeId: res.body._id });
+    expect(key.status).toBe(201);
+    expect(String(key.body.client.collegeId)).toBe(String(res.body._id));
+
+    for (const token of [adminAToken, facultyToken]) {
+      const denied = await request(app).post("/api/billing/colleges").set("Authorization", `Bearer ${token}`).send({ name: "Mine" });
+      expect(denied.status).toBe(403);
+    }
+    const blank = await request(app).post("/api/billing/colleges").set("Authorization", `Bearer ${superadminToken}`).send({ name: " " });
+    expect(blank.status).toBe(400);
+  });
 });

@@ -53,3 +53,15 @@ export async function signup({ collegeName, name, email, password }) {
     throw err;
   }
 }
+
+// Superadmin-created tenant with no first user: for operator-run colleges (an internal
+// "Load test" college to own a load-test API key, a client onboarded by hand). Its admins
+// are added afterwards through the normal user management.
+export async function createCollege({ name } = {}) {
+  if (!name || typeof name !== "string" || !name.trim()) {
+    throw new HttpError(400, "College name is required", { message: "College name is required" });
+  }
+  const slug = await uniqueSlug(slugify(name));
+  const college = await College.create({ name: name.trim(), slug });
+  return { _id: college._id, name: college.name, slug: college.slug, planId: college.planId };
+}

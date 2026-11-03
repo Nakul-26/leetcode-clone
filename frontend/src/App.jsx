@@ -34,6 +34,7 @@ import EditProblemPage from './pages/EditProblemPage';
 import LoginPage from './pages/LoginPage';
 import SignupPage from './pages/SignupPage';
 import BillingPage from './pages/BillingPage';
+import ApiKeysPage from './pages/ApiKeysPage';
 import MySubmissionsPage from './pages/MySubmissionsPage';
 import SystemDashboardPage from './pages/SystemDashboardPage';
 import UserManagementPage from './pages/UserManagementPage';
@@ -287,6 +288,7 @@ function AppContent() {
                 <Route path="/admin/system" element={<RequireStaff><SystemDashboardPage /></RequireStaff>} />
                 <Route path="/admin/users" element={<RequireStaff><UserManagementPage /></RequireStaff>} />
                 <Route path="/admin/billing" element={<RequireRole roles={['admin', 'superadmin']}><BillingPage user={user} /></RequireRole>} />
+                <Route path="/admin/api-keys" element={<RequireRole roles={['admin', 'superadmin']}><ApiKeysPage user={user} /></RequireRole>} />
 
                 <Route path="/problems/:_id" element={<ProblemPage user={user} />} />
                 <Route path="/add-problem" element={<RequireStaff><AddProblemPage /></RequireStaff>} />

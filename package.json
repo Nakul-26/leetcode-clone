@@ -7,7 +7,8 @@
     "test:submission": "node scripts/test_submission.js",
     "test:submission:docker": "docker compose run --rm harness",
     "seed:problems": "docker compose exec -T assessment-api node scripts/seed_certification_set.mjs",
-    "seed:e2e": "docker compose exec -T assessment-api node scripts/seed_e2e_users.mjs"
+    "seed:e2e": "docker compose exec -T assessment-api node scripts/seed_e2e_users.mjs",
+    "loadtest": "node loadtest/run.mjs"
   },
   "dependencies": {
     "@monaco-editor/react": "^4.7.0",
