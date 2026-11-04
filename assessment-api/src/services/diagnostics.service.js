@@ -703,6 +703,7 @@ function cleanMessage(message) {
     .replace(/std::basic_istream<char>/g, "std::istream")
     .replace(/, std::allocator<[^<>]*(?:<[^<>]*>)?>/g, "")
     .replace(/std::_Rb_tree_const_iterator<(\w+)>/g, "set<$1>::iterator")
+    .replace(/\s*\[-W[\w=+-]+\]\s*$/, "") // GCC's warning-flag name
     .replace(/\s+/g, " ")
     .trim()
     .slice(0, MAX_MESSAGE);

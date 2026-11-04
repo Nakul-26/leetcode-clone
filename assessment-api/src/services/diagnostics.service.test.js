@@ -362,3 +362,10 @@ describe("judge error prefix", () => {
     expect(d[0]).toMatchObject({ line: 3 });
   });
 });
+
+describe("message cleanup", () => {
+  it("drops GCC's warning-flag name", () => {
+    const d = analyze({ language: "c", code: "int main() {\n    pritnf(\"x\");\n}\n", compileOutput: "main.c:2:5: error: implicit declaration of function 'pritnf'; did you mean 'printf'? [-Wimplicit-function-declaration]\n    2 |     pritnf(\"x\");", kind: "compile" });
+    expect(d[0].message).toBe("implicit declaration of function 'pritnf'; did you mean 'printf'?");
+  });
+});
