@@ -88,6 +88,13 @@ Ordered by how many students each item helps for the effort.
 - GO Judge API: always return `status.description` (`"Accepted"`, `"Compilation Error"`, `"Runtime
   Error (NZEC)"`, `"Time Limit Exceeded"`, ...) on the sync path too, matching the keyed path.
   This only adds a field, so clients can't break.
+- When a program is killed by a signal, put a plain explanation in `stderr` on the raw path (X9):
+  - 139 / SIGSEGV: "Segmentation fault: reading or writing memory you don't own (null pointer, array index out of range, very deep recursion)";
+  - 136 / SIGFPE: "Arithmetic error, e.g. division by zero";
+  - 132 / SIGILL: "Program hit undefined behaviour, often division by zero or a missing return";
+  - 134 / SIGABRT: "Program aborted (failed assert, bad allocation)".
+- Report a Python `SyntaxError` or `IndentationError` as Compilation Error (status 6), not Runtime Error. Name the
+  file `main.py` so the traceback matches the editor tab (X10).
 - Report an out-of-memory kill as **Memory Limit Exceeded** instead of a runtime error that only
   shows a big memory number.
 
@@ -155,6 +162,9 @@ fullscreen and paste-blocked), in the same editor. The exam was left unsubmitted
 | X5 | Python `input("Enter n: ")`: Wrong answer, with output `Enter n: Enter numbers: 4`. Nothing says prompts are the cause. | Input |
 | X6 | The Python starter is a single comment line: no example of reading a number or a list | Guidance and boilerplate |
 | X7 | Each question has one sample and no explanation of the answer | Guidance |
+| X9 | **Run** on C++ with a null-pointer read (segfault) or a division by zero: just **"RUNTIME ERROR · (nothing printed)"**, no reason at all. Cause on **our** side: `/raw-run` leaves `stderr` empty when the program is killed by a signal. The function path says "Segmentation fault (core dumped)", exit 139. Division by zero at `-O2` comes out as SIGILL, "Illegal instruction", exit 132. | Error messages |
+| X10 | **Run** on Python with bad indentation: labelled **"RUNTIME ERROR"** although it's a syntax error, and the traceback names `solution.py` while the editor tab says `main.py` | Error messages |
+| X11 | **Run** on an infinite loop: "TIME LIMIT EXCEEDED · took 2.1 s · (nothing printed)". This one is clear. | ok |
 | X8 | **Run is disabled until the code differs from the starter**, with no tooltip or message, so it just looks broken | Error messages |
 
 ---
