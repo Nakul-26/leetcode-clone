@@ -119,7 +119,26 @@ services:
       - RABBITMQ_URL=${RABBITMQ_URI:-amqp://user:password@rabbitmq:5672}
       - REDIS_URI=${REDIS_URI:-redis://redis:6379}
       - LOG_LEVEL=info
-      - DEFAULT_POOL_SIZE=4
+      # Laptop-sized pool: one warm container per language (12, not 48), growing to at most
+      # 3 per language only while there's load and shrinking back after ~2 idle minutes.
+      # Production sets its own values in docker-compose.prod.yml.
+      - DEFAULT_POOL_SIZE=${JUDGE_LOCAL_POOL_MIN:-1}
+      - JUDGE_POOL_AUTOSCALE_ENABLED=true
+      - JUDGE_POOL_MAX_PY=${JUDGE_LOCAL_POOL_MAX:-3}
+      - JUDGE_POOL_MAX_JS=${JUDGE_LOCAL_POOL_MAX:-3}
+      - JUDGE_POOL_MAX_TS=${JUDGE_LOCAL_POOL_MAX:-3}
+      - JUDGE_POOL_MAX_JAVA=${JUDGE_LOCAL_POOL_MAX:-3}
+      - JUDGE_POOL_MAX_CPP=${JUDGE_LOCAL_POOL_MAX:-3}
+      - JUDGE_POOL_MAX_C=${JUDGE_LOCAL_POOL_MAX:-3}
+      - JUDGE_POOL_MAX_CS=${JUDGE_LOCAL_POOL_MAX:-3}
+      - JUDGE_POOL_MAX_GO=${JUDGE_LOCAL_POOL_MAX:-3}
+      - JUDGE_POOL_MAX_RS=${JUDGE_LOCAL_POOL_MAX:-3}
+      - JUDGE_POOL_MAX_RB=${JUDGE_LOCAL_POOL_MAX:-3}
+      - JUDGE_POOL_MAX_PHP=${JUDGE_LOCAL_POOL_MAX:-3}
+      - JUDGE_POOL_MAX_KT=${JUDGE_LOCAL_POOL_MAX:-3}
+      - JUDGE_POOL_SCALE_DOWN_COOLDOWN=120
+      - JUDGE_WORKER_CONCURRENCY=6
+      - JUDGE_INTERACTIVE_RESERVE=0
       - JUDGE_CENTRAL_COMPARE_PY=true
       - JUDGE_CENTRAL_COMPARE_JS=true
       - JUDGE_CENTRAL_COMPARE_JAVA=true

@@ -1722,7 +1722,14 @@ func main() {
 	}
 
 	workerConcurrency := getIntEnv("JUDGE_WORKER_CONCURRENCY", defaultWorkerConcurrency)
-	bulkContainerReserve = getIntEnv("JUDGE_INTERACTIVE_RESERVE", bulkContainerReserve)
+	// 0 is allowed: a small local pool (one warm container per language) has no exam traffic
+	// to hold containers back for, and a reserve of 1 would make every submission wait for
+	// the autoscaler to grow the pool first.
+	if raw := strings.TrimSpace(os.Getenv("JUDGE_INTERACTIVE_RESERVE")); raw != "" {
+		if parsed, err := strconv.Atoi(raw); err == nil && parsed >= 0 {
+			bulkContainerReserve = parsed
+		}
+	}
 
 	// Max executions per pooled container before eviction
 	maxExecs := 100
