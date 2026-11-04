@@ -16,7 +16,7 @@ Ordered so the exam portal benefits first, without any change on its side.
 | A2 | **Crash explanations:** done in the API rather than the judge (`explainRawResult`). An exit by signal with an empty stderr gets a plain message. | `codeAssessShim.service.js` | **done** |
 | C1 | **Summary card** at the top of our result panel: line, message and hint; click jumps to the line; red underline on the line (Monaco markers); full output collapsed | `SubmissionOutput`, `ProblemPage`, `AssessmentWorkspace` | **done** |
 | C2 | Starter code that runs as is in all 12 languages, per-language drafts, examples in the statement | frontend | later |
-| D1 | API contract for the portal (`diagnostics` field, how to show it), tests for every real mistake in this doc, lint, deploy to the testing stack, re-check in Chrome | docs, tests | API contract written (`GO_JUDGE_API.md`, "Showing errors to students"); tests done; deploy and live check next |
+| D1 | API contract for the portal (`diagnostics` field, how to show it), tests for every real mistake in this doc, lint, deploy to the testing stack, re-check in Chrome | docs, tests | API contract written (`GO_JUDGE_API.md`, "Showing errors to students"); tests done; deployed to the testing stack 2026-11-04 and checked live in Chrome (C `strlen` without its header passes, `cout << vector` is one diagnostic on line 7, the Python input loop gets its hint, click-to-jump and underlines work) | **done** |
 
 Students reported five problems:
 
