@@ -28,7 +28,9 @@ export default defineConfig({
   projects: [
     {
       name: 'chromium',
-      use: { ...devices['Desktop Chrome'] },
+      // Wider than Desktop Chrome's 1280px default: below 1400px the staff header folds its
+      // links into a menu button (App.jsx), and these tests click the full desktop header.
+      use: { ...devices['Desktop Chrome'], viewport: { width: 1600, height: 900 } },
     },
   ],
 });
