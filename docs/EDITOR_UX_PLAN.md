@@ -132,6 +132,54 @@ server-side, so the portal benefits without changing anything. Then E2, then E3 
 
 ---
 
+## Verified on the exam portal (2026-11-04)
+
+Tested on exam-portal.fortifyhub.net with a dummy student account. I ran both dummy tests, the practice test
+"test to improve the platform" (10 questions) and the exam "test exam to improve platform" (20 questions,
+fullscreen and paste-blocked), in the same editor. The exam was left unsubmitted.
+
+**Already good:**
+- Switching language keeps each language's own code (C → Java → C → Java kept my edits).
+- The Java starter has `import java.util.*`, `class Main` and a `Scanner`.
+- Sample tests show input, expected output and your output side by side.
+- A crash shows "(nothing printed)" separately from the traceback.
+
+**Problems seen:**
+
+| # | What happened | Report |
+|---|---|---|
+| X1 | C++ with `vector` and `sort` under the starter's only `#include <iostream>`: **"didn't compile"**, `'vector' was not declared in this scope` | Libraries |
+| X2 | C with `strlen` and `tolower` under the starter's only `#include <stdio.h>`: **"didn't compile"**, `implicit declaration of function 'strlen'`. GCC 14 makes this an error; older compilers only warned, so students don't expect it. | Libraries |
+| X3 | Every compiler and traceback line starts with `/app/sub-raw-1793763843311605486-1051734594/main.cpp:5:5:`. The real message is hard to find in a small scrolling box. | Error messages |
+| X4 | Python: reading an array with `for i in range(n): arr.append(int(input()))` gives `ValueError: invalid literal for int() with base 10: '4 1 7 7 3'`, with no hint that `input()` reads the whole line | Input |
+| X5 | Python `input("Enter n: ")`: Wrong answer, with output `Enter n: Enter numbers: 4`. Nothing says prompts are the cause. | Input |
+| X6 | The Python starter is a single comment line: no example of reading a number or a list | Guidance and boilerplate |
+| X7 | Each question has one sample and no explanation of the answer | Guidance |
+| X8 | **Run is disabled until the code differs from the starter**, with no tooltip or message, so it just looks broken | Error messages |
+
+---
+
+## Libraries and input: what we'll do
+
+**Libraries.** Students shouldn't have to remember basic headers.
+- Starter code includes them. C++: `#include <bits/stdc++.h>` plus `using namespace std;`. C: stdio, stdlib,
+  string, ctype, math and stdbool. Java: `java.util.*`, `java.io.*`, `java.math.*`.
+- The judge also adds them silently when missing. This is safe for C, C++, Java, C# and Kotlin: adding a
+  duplicate include or import is harmless. C also gets linked with the math library (`-lm`). Line numbers
+  in errors are shifted back so they match the student's code.
+- Go can't be done this way, because an unused import is a compile error. Go stays starter-code only.
+
+**Input.** `input()` reads one whole line on every platform (HackerRank, Codeforces, CodeChef), so a loop
+of `int(input())` can only read numbers that are one per line. The fix is guidance, not a change to Python:
+- Starter code reads input the robust way: `data = sys.stdin.read().split()`, then an iterator. That works
+  whether the numbers are on one line or several. Each language gets the same pattern.
+- A hint line under the error, keyed on the error text. A `ValueError: invalid literal for int()` with spaces
+  in the value gets: "input() reads a whole line. Use list(map(int, input().split())) for numbers on one line."
+- A hint for prompts: if the output starts with the text passed to `input("...")`, show "Don't pass text to
+  input(): it's printed and compared with the answer."
+
+---
+
 ## For the exam portal (friend's changes)
 
 These are changes in the portal's own editor and its judge client (`runOnJudge()` in `judge.js`). Our
@@ -145,6 +193,12 @@ API changes above help with no portal change needed. Everything else needs the p
 | P4 | **Show the real reason** (item 1) | Map `status.id` to a message: 3 Accepted, 4 Wrong Answer, 5 Time Limit Exceeded, 6 Compilation Error (show `compile_output`), 11 Runtime Error (show `stderr`), 13 internal error ("Judge problem, try again", not the student's fault). Don't rely on `status.description` until E1 is deployed. Decode `stdout`, `stderr` and `compile_output` from base64 when `base64_encoded=true`. |
 | P5 | **Output panel** (item 5) | Always show the decoded `stdout`, even for status 11 or 5. Show `stderr` separately and in a neutral style when the status is 3. For a wrong answer, show expected and actual output side by side. |
 | P6 | **Custom input box** (item 4) | **VERIFY** that the stdin typed by the student is sent as is (multi-line, base64 encoded) and isn't trimmed or JSON-quoted. Add a trailing newline if there isn't one. |
+
+| P7 | **Fuller starter code** (X1, X2, X6) | C++: `bits/stdc++.h`. C: the common headers. Python: read n and a list, with a comment saying what each line reads. |
+| P8 | **Hints on common mistakes** (X4, X5) | The two Python hints above. Our API can return a `hint` field so the portal only has to display it. |
+| P9 | **Explain the disabled Run button** (X8) | A tooltip such as "Edit the code to run it", or just keep Run enabled. |
+| P10 | **Shorter error box** (X3) | Remove `/app/sub-raw-…/` from each line (we'll also do this in the API), make the box taller, and show the first `error:` line in bold above it. |
+| P11 | **More samples and an explanation** (X7) | Two or three samples per question, including one edge case, with one line explaining the answer. |
 
 **To make this concrete, ask the friend for 2 or 3 failing examples**: the language, the code, the input
 and what the student saw. Then we can check them directly with `npm run loadtest`-style calls against
