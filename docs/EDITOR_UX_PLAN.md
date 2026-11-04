@@ -30,6 +30,50 @@ maintains it). Anything only the portal's code can confirm is marked **VERIFY**.
 
 ---
 
+## Verified on the testing site (2026-11-04)
+
+Checked in Chrome on assess.fortifyhub.net, using two test problems `[TEST] Sum of a list (stdin)` and
+`[TEST] Sum of a list (function)`, created for this. They're tagged `test` and can be deleted.
+
+**Input methods (item 4):** every usual way of reading input works:
+- Python: `input()`, `sys.stdin`
+- JS: `fs.readFileSync(0)`, `readline`
+- Java: `Scanner`, `BufferedReader`
+- C++: `cin`, `getline`
+- C: `scanf`
+- Go: `fmt.Scan`
+- Kotlin: `readLine()`
+- C#: `Console.ReadLine`
+- Rust: `read_to_string`
+- Ruby: `gets`
+- PHP: `fgets(STDIN)`
+
+Input with or without a trailing newline both pass. What fails:
+
+| Student wrote | Student sees |
+|---|---|
+| Java `public class Solution` | Compilation Error: `compilation failed: runtime error: exit code 1 \| compilation failed: runtime error: exit code 1 \| stderr=/app/sub-run-…/Main.java:3: error: class Solution is public, should be declared in a file named Solution.java`, and "0 / 0 tests passed" |
+| Python `input("Enter n: ")` | Wrong Answer, because the output becomes `Enter n: 6`. Nothing says why. |
+| JS `prompt()` | Each case shows only "Runtime Error". `ReferenceError: prompt is not defined` appears only further down, under Console Logs. |
+
+**Errors and output (items 1, 5):** for a Python crash after printing, each case shows:
+- the error box: just "Runtime Error";
+- no "Your output" field: what the program printed is mixed into "Console Logs";
+- the traceback twice, with a literal `\n` between the copies and the full `/app/sub-run-…` path.
+
+**Starter code (item 2):** switching language replaces the code. Switching back loses what the student wrote.
+Running the untouched function-problem starter code, unchanged, in each language:
+
+| Result | Languages |
+|---|---|
+| Wrong Answer (fine: it runs) | Python, JS, TS, C, Go, Ruby, PHP |
+| Compilation Error | Java (missing return), Rust (mismatched types), C# (null warning shown first), Kotlin (first line shown is `Failed to load native library:jansi`, a harmless warning) |
+| Runtime Error | C++: no return value, so the program crashes at `-O2` |
+
+**Guidance (item 3):** the statement shows the input/output format but no examples.
+
+---
+
 ## Plan: our side
 
 Ordered by how many students each item helps for the effort.
