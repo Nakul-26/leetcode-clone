@@ -6,6 +6,7 @@ import api, { assessments } from '../api';
 import SubmissionOutput from '../components/SubmissionOutput';
 import { starterCode } from '../utils/buildTemplate';
 import { SUPPORTED_LANGUAGES } from '../utils/languages';
+import { applyDiagnosticMarkers, diagnosticsOf, jumpToLine } from '../utils/editorDiagnostics';
 import { defineModernDarkTheme, MONACO_EDITOR_OPTIONS } from '../utils/editorTheme';
 import { buildCustomTests, initialTestCases, emptyTestCase, isStdinProblem, MAX_CUSTOM_TESTS } from '../utils/buildCustomTests';
 
@@ -68,6 +69,8 @@ const AssessmentWorkspace = () => {
   const [fsWarningTimeLeft, setFsWarningTimeLeft] = useState(0);
   const [fsWarningReason, setFsWarningReason] = useState('');
   const fsIntervalRef = useRef(null);
+  const editorRef = useRef(null);
+  const monacoRef = useRef(null);
 
   const [testCasesMap, setTestCasesMap] = useState({});
   const [activeTestCaseIdxMap, setActiveTestCaseIdxMap] = useState({});
@@ -599,6 +602,12 @@ const AssessmentWorkspace = () => {
     }
   };
 
+  // Underline the lines the current problem's latest result points at.
+  const resultForMarkers = currentProblem ? (runResultMap[currentProblem._id] || submissionMap[currentProblem._id]) : null;
+  useEffect(() => {
+    applyDiagnosticMarkers(monacoRef.current, editorRef.current, diagnosticsOf(resultForMarkers));
+  }, [resultForMarkers]);
+
   if (loading) return <div className="container flex-center" style={{ height: '100vh' }}><Loader2 className="spin" size={48} color="var(--primary)" /></div>;
   if (error) return <div className="container error-box">{error}</div>;
   if (!currentProblem) return <div className="container">No problems found.</div>;
@@ -1117,6 +1126,7 @@ const AssessmentWorkspace = () => {
                     value={codeMap[currentProblem._id]}
                     onChange={(val) => handleCodeChange(currentProblem._id, val)}
                     beforeMount={defineModernDarkTheme}
+                    onMount={(editor, monaco) => { editorRef.current = editor; monacoRef.current = monaco; }}
                     options={MONACO_EDITOR_OPTIONS}
                   />
                 )}
@@ -1278,8 +1288,8 @@ const AssessmentWorkspace = () => {
 
                         {consoleTab === 'result' && (
                           <div className="fade-in">
-                            {currentRunResult && <SubmissionOutput output={currentRunResult} />}
-                            {currentSubmission && !currentRunResult && <SubmissionOutput output={currentSubmission} />}
+                            {currentRunResult && <SubmissionOutput output={currentRunResult} onJumpToLine={(line, column) => jumpToLine(editorRef.current, line, column)} />}
+                            {currentSubmission && !currentRunResult && <SubmissionOutput output={currentSubmission} onJumpToLine={(line, column) => jumpToLine(editorRef.current, line, column)} />}
                             {!currentRunResult && !currentSubmission && (
                               <div className="flex-center" style={{ height: '100px', color: 'var(--text-muted)', fontSize: '0.85rem' }}>
                                 Run your code to see results here.

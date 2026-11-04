@@ -1,5 +1,7 @@
 import React from 'react';
 import { CheckCircle2, XCircle, AlertTriangle, Clock, MinusCircle, Info } from 'lucide-react';
+import DiagnosticsSummary from './DiagnosticsSummary';
+import { diagnosticsOf } from '../utils/editorDiagnostics';
 
 const formatValue = (val) => {
     if (val === undefined || val === null) return 'null';
@@ -13,7 +15,7 @@ const formatValue = (val) => {
     return String(val);
 };
 
-const SubmissionOutput = ({ output }) => {
+const SubmissionOutput = ({ output, onJumpToLine }) => {
     if (!output) return null;
 
     let parsed = output;
@@ -74,6 +76,8 @@ const SubmissionOutput = ({ output }) => {
     const passedTests = parsed.passedCount ?? parsed.passed ?? normalizedDetails.filter(d => d.passed).length;
     const totalTests = parsed.totalCount ?? parsed.total ?? Math.max(normalizedDetails.length, passedTests);
     
+    const diagnostics = diagnosticsOf(parsed);
+
     const timeNum = Number(parsed.maxTimeMs || parsed.elapsedMs || parsed.time);
     const timeStr = !isNaN(timeNum) ? `${timeNum.toFixed(0)} ms` : 'N/A';
 
@@ -85,6 +89,8 @@ const SubmissionOutput = ({ output }) => {
                     <span style={{ fontSize: '1.25rem', fontWeight: '700' }}>{parsed.status}</span>
                 </div>
             )}
+
+            <DiagnosticsSummary diagnostics={diagnostics} onJumpToLine={onJumpToLine} />
 
             <div className="grid grid-cols-2 gap-4 mb-8" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '16px' }}>
                 <div className="stat-card" style={{ padding: '16px', background: 'var(--surface)', borderRadius: '12px', border: '1px solid var(--border)' }}>
@@ -101,7 +107,14 @@ const SubmissionOutput = ({ output }) => {
                 </div>
             </div>
 
-            {(parsed.error || parsed.status === 'Compilation Error') && (
+            {(parsed.error || parsed.status === 'Compilation Error') && diagnostics.length > 0 && (
+                <details className="raw-output mb-8">
+                    <summary>Full compiler output</summary>
+                    <pre>{parsed.stderr || parsed.error || parsed.output}</pre>
+                </details>
+            )}
+
+            {(parsed.error || parsed.status === 'Compilation Error') && diagnostics.length === 0 && (
                 <div className="testcase-box mb-8" style={{ border: '1px solid rgba(239, 68, 68, 0.3)', borderRadius: '8px', overflow: 'hidden' }}>
                     <div className="testcase-header failed" style={{ background: 'rgba(239, 68, 68, 0.1)', padding: '12px 16px', borderBottom: '1px solid rgba(239, 68, 68, 0.2)' }}>
                         <div className="flex-center gap-2" style={{ color: 'var(--error)', fontWeight: '600' }}>

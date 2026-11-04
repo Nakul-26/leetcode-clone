@@ -8,6 +8,7 @@ import { starterCode } from '../utils/buildTemplate';
 import { SUPPORTED_LANGUAGES } from '../utils/languages';
 import { defineModernDarkTheme, MONACO_EDITOR_OPTIONS } from '../utils/editorTheme';
 import { buildCustomTests, initialTestCases, emptyTestCase, isStdinProblem, MAX_CUSTOM_TESTS } from '../utils/buildCustomTests';
+import { applyDiagnosticMarkers, diagnosticsOf, jumpToLine } from '../utils/editorDiagnostics';
 
 const ProblemPage = ({ user }) => {
   const { _id } = useParams();
@@ -32,6 +33,8 @@ const ProblemPage = ({ user }) => {
   const [loadingSubmissions, setLoadingSubmissions] = useState(false);
   
   const intervalRef = useRef(null);
+  const editorRef = useRef(null);
+  const monacoRef = useRef(null);
   const isAuthed = !!user;
   const canManage = user && (user.role === 'admin' || user.role === 'faculty' || user.role === 'superadmin');
   const isCollegeAdmin = user && (user.role === 'admin' || user.role === 'superadmin');
@@ -81,6 +84,14 @@ const ProblemPage = ({ user }) => {
       setCode(starterCode(selectedLanguage, problem));
     }
   }, [selectedLanguage, problem]);
+
+  // Underline the lines the latest result points at (cleared when a new run starts).
+  const shownResult = runResult || submission;
+  useEffect(() => {
+    applyDiagnosticMarkers(monacoRef.current, editorRef.current, diagnosticsOf(shownResult));
+  }, [shownResult]);
+
+  const handleJumpToLine = (line, column) => jumpToLine(editorRef.current, line, column);
 
   const checkStatus = async (submissionId) => {
     try {
@@ -391,6 +402,7 @@ const ProblemPage = ({ user }) => {
             value={code}
             onChange={(val) => setCode(val)}
             beforeMount={defineModernDarkTheme}
+            onMount={(editor, monaco) => { editorRef.current = editor; monacoRef.current = monaco; }}
             options={MONACO_EDITOR_OPTIONS}
           />
         </div>
@@ -488,8 +500,8 @@ const ProblemPage = ({ user }) => {
 
                   {consoleTab === 'result' && (
                     <div className="fade-in">
-                      {runResult && <SubmissionOutput output={runResult} />}
-                      {submission && !runResult && <SubmissionOutput output={submission} />}
+                      {runResult && <SubmissionOutput output={runResult} onJumpToLine={handleJumpToLine} />}
+                      {submission && !runResult && <SubmissionOutput output={submission} onJumpToLine={handleJumpToLine} />}
                       {!runResult && !submission && (
                         <div className="flex-center" style={{ height: '100px', color: 'var(--text-muted)', fontSize: '0.85rem' }}>
                           Run your code to see results here.

@@ -2,6 +2,7 @@
 // problems.service.js / preview.service.js / admin.routes.js. The "node-fetch"
 // package is not a listed dependency; don't import it.
 import { judgeFetch } from "./judgeClient.service.js";
+import { analyze, describeSignal, isPythonSyntaxError, stripWorkspacePaths } from "./diagnostics.service.js";
 
 // Public-API numeric language IDs -> judge-service-go's internal language keys
 // (pkg/languages/languages.go). 51 matches the conventional id for C# (Mono) so callers
@@ -32,6 +33,61 @@ const CODEASSESS_STATUS = {
 
 export function mapLanguageId(languageId) {
   return LANGUAGE_ID_MAP[languageId] || null;
+}
+
+const STATUS_DESCRIPTIONS = {
+  3: "Accepted",
+  5: "Time Limit Exceeded",
+  6: "Compilation Error",
+  11: "Runtime Error (NZEC)",
+  13: "Internal Error"
+};
+
+/**
+ * Makes a finished GO Judge result readable for a student (docs/EDITOR_UX_PLAN.md B3), on
+ * plain (not base64) fields. Used by both the synchronous and the queue-backed paths.
+ *
+ * - Removes the judge's workspace paths from stderr and compile_output.
+ * - A Python SyntaxError/IndentationError never ran, so it is a Compilation Error (6) with the
+ *   message in compile_output, like any other compiler.
+ * - A program killed by a signal (a C/C++ segfault) prints nothing; stderr then says what
+ *   happened instead of being empty.
+ * - status always has a description.
+ * - diagnostics: up to three { line, column, kind, message, hint } (diagnostics.service.js).
+ *
+ * Everything is additive or a cleaner version of the same text, so existing callers that only
+ * read status.id, stdout, stderr and compile_output keep working.
+ */
+export function explainRawResult(result, { language, code, memoryLimitHit = false }) {
+  let stderr = stripWorkspacePaths(result.stderr || "");
+  let compileOutput = stripWorkspacePaths(result.compile_output || "");
+  let id = result.status?.id;
+
+  if (language === "python" && id === CODEASSESS_STATUS.RUNTIME_ERROR && isPythonSyntaxError(stderr)) {
+    id = CODEASSESS_STATUS.COMPILATION_ERROR;
+    compileOutput = stderr;
+    stderr = "";
+  }
+  if (id === CODEASSESS_STATUS.RUNTIME_ERROR && !stderr.trim() && !memoryLimitHit && Number(result.exit_code) > 128) {
+    stderr = describeSignal(result.exit_code);
+  }
+
+  const kind = {
+    [CODEASSESS_STATUS.COMPILATION_ERROR]: "compile",
+    [CODEASSESS_STATUS.TIME_LIMIT_EXCEEDED]: "timeout",
+    [CODEASSESS_STATUS.RUNTIME_ERROR]: memoryLimitHit ? "memory" : "runtime"
+  }[id];
+  const diagnostics = kind
+    ? analyze({ language, code, compileOutput, stderr, kind, exitCode: result.exit_code, trustLines: true })
+    : [];
+
+  return {
+    ...result,
+    stderr,
+    compile_output: compileOutput,
+    status: { id, description: STATUS_DESCRIPTIONS[id] || result.status?.description },
+    diagnostics
+  };
 }
 
 /**
@@ -117,7 +173,7 @@ export async function runRawCodeAssess({ languageId, sourceCode, stdin, wallTime
     statusId = CODEASSESS_STATUS.RUNTIME_ERROR;
   }
 
-  return {
+  return explainRawResult({
     stdout: raw.stdout || "",
     // raw.error (judge-service-go's internal/plumbing failure message, distinct from
     // compile/timeout/OOM) was previously dropped entirely, making INTERNAL_ERROR
@@ -130,5 +186,5 @@ export async function runRawCodeAssess({ languageId, sourceCode, stdin, wallTime
     memory: memoryKb,
     exit_code: raw.exitCode ?? null,
     exit_signal: null,
-  };
+  }, { language, code: sourceCode, memoryLimitHit: !!raw.oomKilled });
 }

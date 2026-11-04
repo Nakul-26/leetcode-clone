@@ -296,7 +296,8 @@ each `actual_output` as that case's expected output.
   "time": 0.04,
   "memory": 0,
   "exit_code": 0,
-  "exit_signal": null
+  "exit_signal": null,
+  "diagnostics": []
 }
 ```
 
@@ -308,6 +309,7 @@ each `actual_output` as that case's expected output.
 | `memory` | Not measured, so `0`. After an out-of-memory kill it is reported as the sandbox limit |
 | `exit_code` | The program's exit code. `-1` when the program never ran to an exit (compile error, timeout) |
 | `exit_signal` | Always `null` |
+| `diagnostics` | What went wrong, for a student to read. **Plain JSON, never base64.** Empty when the run was accepted. See [Showing errors to students](#showing-errors-to-students) |
 
 ### Status
 
@@ -324,6 +326,63 @@ each `actual_output` as that case's expected output.
 While status is `1` or `2` every output field is `null`. Decode defensively: a client that base64-decodes
 `null` without checking will throw.
 
+Some details that make the raw fields easier to show as they are:
+
+- `stderr` and `compile_output` never contain the judge's workspace paths: errors read
+  `main.cpp:5:3: error: ...`, not `/app/sub-raw-1793.../main.cpp:5:3: error: ...`.
+- A Python `SyntaxError`, `IndentationError` or `TabError` is status `6` with the message in
+  `compile_output`: the program never ran.
+- A program killed by a signal (a C/C++ segmentation fault, a division by zero) prints nothing
+  itself, so `stderr` says what happened, e.g. `Segmentation fault (exit code 139): The program read or
+  wrote memory it doesn't own...`.
+
+### Showing errors to students
+
+Raw compiler output buries the cause. Printing a vector with `cout` is over 100 lines of overload
+candidates; `sort()` on a `set` reports its first error inside the compiler's own `stl_algo.h`; a missing
+`;` is reported on the next line; a Python traceback puts the cause on its last line.
+
+`diagnostics` is the short version: at most three entries, most important first.
+
+```json
+"diagnostics": [
+  {
+    "line": 17,
+    "column": 24,
+    "kind": "compile",
+    "message": "expected ',' or ';' before 'pritnf'",
+    "hint": "Missing `;` at the end of this line."
+  }
+]
+```
+
+| Field | Meaning |
+|---|---|
+| `line`, `column` | 1-based position in the submitted source. `null` when no line applies (a crash, a time limit). Already corrected where the compiler names the wrong place: a missing `;` points at the line that's missing it, a missing `}` at the `{` that's never closed, a library-header error at the student's line that caused it |
+| `kind` | `compile`, `runtime`, `timeout` or `memory` |
+| `message` | The compiler's or interpreter's own message, without paths and type noise |
+| `hint` | A plain-language explanation for common mistakes, or `null`. Code is marked with backticks |
+
+Recommended display:
+
+1. Show the `diagnostics` first, above any raw output: "Line 17: missing `;` at the end of this line".
+2. Make each line clickable: move the editor's cursor there and mark it. In Monaco:
+
+   ```js
+   const markers = diagnostics.filter((d) => d.line).map((d) => ({
+     severity: monaco.MarkerSeverity.Error,
+     startLineNumber: d.line,
+     startColumn: d.column || 1,
+     endLineNumber: d.line,
+     endColumn: model.getLineMaxColumn(d.line),
+     message: d.hint ? `${d.message}\n${d.hint}` : d.message
+   }));
+   monaco.editor.setModelMarkers(model, "judge", markers);
+   editor.revealLineInCenter(diagnostics[0].line); // on click
+   ```
+
+3. Keep the full `compile_output`/`stderr` available, collapsed under "Show full output".
+
 ---
 
 ## Languages
@@ -333,17 +392,22 @@ While status is `1` or `2` every output field is `null`. Decode defensively: a c
 | 71 | Python | |
 | 63 | JavaScript (Node.js) | |
 | 74 | TypeScript | |
-| 54 | C++ | Compiled with `-O2` |
-| 50 | C | Compiled with `-O2` |
-| 62 | Java | The class must be `public class Main` |
+| 54 | C++ | Compiled with `-O2`. Missing standard headers are added |
+| 50 | C | Compiled with `-O2`. Missing standard headers are added |
+| 62 | Java | Any `public class` with a `main` method (`Main` or not). Missing `java.util`, `java.io`, `java.math` imports are added |
 | 78 | Kotlin | A single file with a top-level `fun main()` |
-| 51 | C# | One entry point, in a single file |
+| 51 | C# | One entry point, in a single file. Missing common `using`s are added |
 | 60 | Go | `package main` with `func main()` |
 | 73 | Rust | Compiled with `-O`, edition 2021 |
 | 72 | Ruby | |
 | 68 | PHP | |
 
-- Your source is compiled and run **exactly as sent**. Nothing is rewritten or "unescaped".
+- Your source is compiled and run **as sent**. Nothing is rewritten or "unescaped". The one exception
+  helps students: when a C, C++, Java or C# program uses a standard library it didn't include or import
+  (e.g. `strlen` without `<string.h>`, `vector` without `<vector>`, `Scanner` without `java.util`), the
+  judge supplies it. C/C++ headers are force-included from a separate file and Java/C# imports are joined
+  onto line 1, so **line numbers in errors are unchanged**. Nothing is added for a name the program
+  defines itself (a student's own `strlen`), and nothing at all when it includes `<bits/stdc++.h>`.
 - Programs have **no network access**, and each run gets its own working directory.
 - Heavy toolchains (C#, Kotlin, Rust, Go) take several seconds to compile. That is normal.
 - C and C++ are optimised (`-O2`). Code with undefined behaviour (uninitialised variables,
@@ -530,3 +594,4 @@ This document describes the current behaviour. Fields are only ever **added**; e
 their meaning. Operators announce changes that could affect an integration in advance.
 
 - **2026-10-24:** added `POST /test-cases/generate` and `POST /test-cases/check`, for authoring test cases with your own reference solution.
+- **2026-11-04:** added `diagnostics`; `status.description` on every response; workspace paths removed from `stderr`/`compile_output`; Python syntax errors are status `6`; a crash by signal explains itself in `stderr`. C, C++, Java and C# programs that use a standard library they forgot to include/import now compile (the judge adds the missing include, without changing line numbers), and Java accepts any `public class` with a `main` method, not only `Main`.

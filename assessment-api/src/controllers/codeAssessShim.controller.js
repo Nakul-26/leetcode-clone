@@ -96,6 +96,8 @@ export async function submitRawExecution(req, res) {
     memory: result.memory,
     exit_code: result.exit_code,
     exit_signal: result.exit_signal,
+    // Plain JSON even when base64_encoded=true: it's a new field, so no client decodes it.
+    diagnostics: result.diagnostics,
   });
 }
 

@@ -9,6 +9,7 @@ import { checkCollegeSubmissionQuota, checkStudentSubmissionQuota } from "./quot
 import { checkPlanUsageLimit, collegeAllowsPremium } from "./billing.service.js";
 import { HttpError } from "../utils/httpError.js";
 import { admitApiClient } from "./apiClientQuota.service.js";
+import { explainJudgeResult } from "./diagnostics.service.js";
 
 function validateSubmissionMessage(msg) {
   if (!msg || typeof msg !== "object") return false;
@@ -467,7 +468,19 @@ export async function submitSolution({ problemId, code, language, selectedOption
   return { submission };
 }
 
+// A submission as its viewer sees it, with a short summary of what went wrong
+// (docs/EDITOR_UX_PLAN.md B4). Computed on read, so older submissions get it too.
 export async function getSubmissionById(id, auth = {}) {
+  const result = await loadSubmissionForViewer(id, auth);
+  const submission = result.submission;
+  if (!submission?.testResult || !submission.code) return result;
+  const plain = typeof submission.toObject === "function" ? submission.toObject() : { ...submission };
+  const problemType = plain.problemType || (await problemsRepo.findById(plain.problemId))?.problemType;
+  plain.testResult = explainJudgeResult(plain.testResult, { language: plain.language, code: plain.code, trustLines: problemType === "stdin" });
+  return { ...result, submission: plain };
+}
+
+async function loadSubmissionForViewer(id, auth = {}) {
   const cacheKey = `submission:${id}`;
   const cached = await getCacheJSON(cacheKey);
   if (cached) {

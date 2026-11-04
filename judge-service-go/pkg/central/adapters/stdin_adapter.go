@@ -77,8 +77,19 @@ type compiledStdinAdapter struct {
 
 func (a compiledStdinAdapter) Name() string { return a.name }
 
+// A compiled program gets the standard-library includes/imports it uses but forgot (prelude.go).
+// C and C++ always get a prelude.h, empty when nothing is missing, so the compile command can
+// decide on -include without knowing whether one was needed.
 func (a compiledStdinAdapter) PrepareFiles(workDir string, code string) ([]string, error) {
-	return writeStdinSource(workDir, a.fileName, code)
+	source, header := WithPrelude(a.name, code)
+	files, err := writeStdinSource(workDir, a.fileName, source)
+	if err != nil || (a.name != "c" && a.name != "cpp") {
+		return files, err
+	}
+	if err := workspace.WriteFile(workDir, PreludeHeaderFile, []byte(header), 0644); err != nil {
+		return nil, fmt.Errorf("failed to write %s: %w", PreludeHeaderFile, err)
+	}
+	return append(files, PreludeHeaderFile), nil
 }
 
 func (a compiledStdinAdapter) CompileCommand() []string { return a.compileCmd }
@@ -126,12 +137,14 @@ var StdinAdapterRegistry = map[string]StdinLanguageAdapter{
 		// -ljson-c is kept from languages.go's CompileCmd even though a stdin
 		// program has no reason to use it: dropping a link flag could only break
 		// a submission that does, and linking it unused costs nothing.
-		compileCmd: []string{"gcc", "-O2", "-o", "/app/main", "/app/main.c", "-ljson-c", "-lm"},
+		// Run through sh so prelude.h is force-included only when it has content (prelude.go).
+		// Relative paths: the working directory is the submission's workspace, as for Go below.
+		compileCmd: []string{"sh", "-c", "gcc -O2 " + forceIncludeIfNeeded + " -o main main.c -ljson-c -lm"},
 		runCmd:     []string{"/app/main"},
 	},
 	"cpp": compiledStdinAdapter{
 		name: "cpp", fileName: "main.cpp",
-		compileCmd: []string{"g++", "-O2", "-o", "/app/main", "/app/main.cpp"},
+		compileCmd: []string{"sh", "-c", "g++ -O2 " + forceIncludeIfNeeded + " -o main main.cpp"},
 		runCmd:     []string{"/app/main"},
 	},
 	"go": compiledStdinAdapter{

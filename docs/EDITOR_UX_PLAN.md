@@ -1,6 +1,22 @@
 # Coding editor: problems students reported, and the plan
 
-**Written:** 2026-11-03. **Status:** plan only, nothing built yet.
+**Written:** 2026-11-03. **Status:** building, see "Build plan" below.
+
+## Build plan (started 2026-11-04)
+
+Ordered so the exam portal benefits first, without any change on its side.
+
+| Step | What | Where | Status |
+|---|---|---|---|
+| B1 | **Diagnostics module.** Raw compiler or traceback text in; `[{line, column, kind, message, hint}]` out. Handles gcc/g++, javac, Python, Node, kotlinc, csc, rustc, go, Ruby and PHP formats. Only the student's file, first error first (max 3), library-header errors mapped to the student's "required from here" line. Fixes the `;` and `}` line misdirections, gives hints for the common errors, and suggests "did you mean" from the student's own identifiers. | `assessment-api/src/services/diagnostics/` | **done** |
+| B2 | **Remove workspace paths** (`/app/sub-raw-…/`) from `stderr` and `compile_output`, and show `solution.py` as `main.py` | same module | **done** |
+| B3 | **GO Judge API** (`/api/codeAssess`, sync and queued): add a `diagnostics` array (additive), remove paths from the raw fields, report a Python `SyntaxError`/`IndentationError` as Compilation Error (6) | `codeAssessShim` | **done** |
+| B4 | **Our Run and submission results** carry `diagnostics` too | `problems.service` runProblem, GET submission | **done** |
+| A1 | **Basic libraries added automatically**, without moving line numbers. Only what the code *uses and doesn't define itself*: a blanket `bits/stdc++.h` makes a global `count`/`rank` ambiguous, and `<string.h>` breaks a student's own `strlen`. C/C++: missing headers go in a `prelude.h` passed with `-include` only when non-empty. A `#line 1` directive would make GCC print the wrong source text under each error, and an always-on `-include` stops `bits/stdc++.h` from using its precompiled header. Java/C#: imports and usings are joined onto line 1. Java also runs any `public class` with `main` through an appended `Main`. Checked with the real gcc, g++ and javac images. | `judge-service-go/pkg/central/adapters/prelude.go` | **done** |
+| A2 | **Crash explanations:** done in the API rather than the judge (`explainRawResult`). An exit by signal with an empty stderr gets a plain message. | `codeAssessShim.service.js` | **done** |
+| C1 | **Summary card** at the top of our result panel: line, message and hint; click jumps to the line; red underline on the line (Monaco markers); full output collapsed | `SubmissionOutput`, `ProblemPage`, `AssessmentWorkspace` | **done** |
+| C2 | Starter code that runs as is in all 12 languages, per-language drafts, examples in the statement | frontend | later |
+| D1 | API contract for the portal (`diagnostics` field, how to show it), tests for every real mistake in this doc, lint, deploy to the testing stack, re-check in Chrome | docs, tests | API contract written (`GO_JUDGE_API.md`, "Showing errors to students"); tests done; deploy and live check next |
 
 Students reported five problems:
 

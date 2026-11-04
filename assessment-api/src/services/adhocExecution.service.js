@@ -1,7 +1,7 @@
 import mongoose from "mongoose";
 import Submission from "../../models/Submission.mjs";
 import { publishSubmissionMessage, INTERACTIVE_QUEUE_NAME } from "./evaluation.service.js";
-import { mapLanguageId } from "./codeAssessShim.service.js";
+import { mapLanguageId, explainRawResult } from "./codeAssessShim.service.js";
 import { watchSubmission } from "./submissionEvents.service.js";
 
 // Queue-backed execution for the GO Judge public API surface (plan Phases 2-3). A keyed
@@ -257,15 +257,25 @@ export function toApiResponse(doc, token = String(doc._id)) {
     status = t.passed ? API_STATUS.ACCEPTED : (ERROR_TYPE_TO_API[t.errorType] || API_STATUS.INTERNAL_ERROR);
   }
 
-  return {
-    ...base,
-    stdout: b64(t.stdout ?? t.output ?? ""),
-    stderr: b64(compileFailed ? "" : t.stderr || t.traceback || ""),
-    compile_output: b64(compileFailed ? result.stderr || "" : ""),
+  const memoryLimitHit = status.id === API_STATUS.RUNTIME_ERROR.id && (t.errorType === "memory_limit" || result.status === "Memory Limit Exceeded");
+  const explained = explainRawResult({
+    stdout: t.stdout ?? t.output ?? "",
+    stderr: compileFailed ? "" : t.stderr || t.traceback || "",
+    compile_output: compileFailed ? result.stderr || "" : "",
     status,
-    time: (Number(t.timeMs ?? result.elapsedMs) || 0) / 1000,
-    memory: status.id === API_STATUS.RUNTIME_ERROR.id && (t.errorType === "memory_limit" || result.status === "Memory Limit Exceeded") ? 262144 : 0,
     // -1 where the program never ran to an exit, matching what the synchronous path reports.
     exit_code: compileFailed ? -1 : (t.exitCode ?? 0)
+  }, { language: doc.language, code: doc.code, memoryLimitHit });
+
+  return {
+    ...base,
+    stdout: b64(explained.stdout),
+    stderr: b64(explained.stderr),
+    compile_output: b64(explained.compile_output),
+    status: explained.status,
+    time: (Number(t.timeMs ?? result.elapsedMs) || 0) / 1000,
+    memory: memoryLimitHit ? 262144 : 0,
+    exit_code: explained.exit_code,
+    diagnostics: explained.diagnostics
   };
 }

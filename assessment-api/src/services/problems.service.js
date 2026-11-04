@@ -4,6 +4,7 @@ import { HttpError } from "../utils/httpError.js";
 import { validateProblemDefinition, checkTestsAgainstReference } from "./preview.service.js";
 import { referenceOutputsFor, runReferenceSolution, crossCheckAlternate } from "./referenceSolution.service.js";
 import { judgeFetch } from "./judgeClient.service.js";
+import { explainJudgeResult } from "./diagnostics.service.js";
 import { collegeAllowsPremium } from "./billing.service.js";
 import { escapeRegex } from "../utils/escapeRegex.js";
 
@@ -603,5 +604,7 @@ export async function runProblem(id, payload) {
       judgeResult.total = judgeResult.totalCount = judged.length;
     }
   }
-  return judgeResult;
+  // A stdin program runs exactly as written, so its line numbers can be trusted; a function
+  // problem's code is wrapped in a harness, so lines are matched by their text instead.
+  return explainJudgeResult(judgeResult, { language, code, trustLines: problemType === "stdin" });
 }

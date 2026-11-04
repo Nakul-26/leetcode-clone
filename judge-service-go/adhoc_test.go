@@ -63,8 +63,13 @@ func TestRawRunDelegatesToStdinAdapters(t *testing.T) {
 			if got, want := strings.Join(compileCmd, " "), strings.Join(adapters.StdinCompileCommand(adapter), " "); got != want {
 				t.Errorf("compile command drifted from adapter:\n raw-run: %s\n adapter: %s", got, want)
 			}
-			if len(files) != 1 {
-				t.Errorf("expected exactly one source file, got %v", files)
+			// One source file; C and C++ also get the force-included prelude.h (adapters/prelude.go).
+			want := 1
+			if id == "c" || id == "cpp" {
+				want = 2
+			}
+			if len(files) != want || (want == 2 && files[1] != adapters.PreludeHeaderFile) {
+				t.Errorf("expected the source file (and prelude.h for C/C++), got %v", files)
 			}
 		})
 	}
@@ -78,8 +83,9 @@ func TestStdinAdapterWritesTheFileItRuns(t *testing.T) {
 			if err != nil {
 				t.Fatalf("PrepareFiles: %v", err)
 			}
-			if len(files) != 1 {
-				t.Fatalf("expected one file, got %v", files)
+			// The source first; C and C++ also write prelude.h (adapters/prelude.go).
+			if len(files) == 0 || len(files) > 2 || (len(files) == 2 && files[1] != adapters.PreludeHeaderFile) {
+				t.Fatalf("expected the source file (and prelude.h for C/C++), got %v", files)
 			}
 
 			body, err := os.ReadFile(filepath.Join(dir, files[0]))
@@ -157,10 +163,13 @@ func TestCompiledStdinLanguagesOptimise(t *testing.T) {
 	// (see adapters/cpp.go).
 	fnCpp, _ := adapters.GetAdapter("cpp")
 	stdinCpp, _ := adapters.GetStdinAdapter("cpp")
+	// Stdin mode runs g++ through sh (it force-includes prelude.h only when needed, see
+	// adapters/prelude.go), so compare the compiler flags rather than the whole command.
 	fnFlags := strings.Join(fnCpp.(adapters.CompilingLanguageAdapter).CompileCommand(), " ")
 	stdinFlags := strings.Join(stdinCpp.(interface{ CompileCommand() []string }).CompileCommand(), " ")
-	if fnFlags != stdinFlags {
-		t.Errorf("cpp function-mode compile %q differs from stdin mode %q", fnFlags, stdinFlags)
+	if !strings.HasPrefix(fnFlags, "g++ -O2 -o ") || !strings.Contains(stdinFlags, "g++ -O2 ") ||
+		strings.Contains(fnFlags+stdinFlags, "-std=") || strings.Contains(fnFlags+stdinFlags, " -f") {
+		t.Errorf("cpp function-mode compile %q and stdin mode %q must both be plain g++ -O2", fnFlags, stdinFlags)
 	}
 }
 
