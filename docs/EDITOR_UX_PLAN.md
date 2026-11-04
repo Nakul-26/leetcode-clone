@@ -167,6 +167,61 @@ fullscreen and paste-blocked), in the same editor. The exam was left unsubmitted
 | X11 | **Run** on an infinite loop: "TIME LIMIT EXCEEDED · took 2.1 s · (nothing printed)". This one is clear. | ok |
 | X8 | **Run is disabled until the code differs from the starter**, with no tooltip or message, so it just looks broken | Error messages |
 
+### Realistic mistakes: where the real error ends up (Run, practice test)
+
+The output box shows about **200px** (roughly 10 lines) and scrolls.
+
+| Student code | Output | Where the useful part is |
+|---|---|---|
+| C++ `cout << result` where `result` is a `vector` | **107 lines, 8 KB**, "there are 47 candidates" | Line 4 says "no match for operator<<". The remaining ~100 lines are a list of overloads. Nothing says "you can't print a vector, loop over it". |
+| C++ `sort()` on a `set` | **93 lines** | The first `error:` is in **`/usr/local/include/c++/16.2.0/bits/stl_algo.h:1914`**: `no match for 'operator-' (… '_Rb_tree_const_iterator<int>' …)`. The student's line 9 appears only as a "required from here" note above it. |
+| C++ `secnd` typo, plus `greater<int>` without `()`, plus a missing `<algorithm>` | 3 errors | The box is already full, so the typo (with a useful "did you mean 'second'") is below the fold |
+| C++ missing `}` on an `else` block | `expected '}' at end of input` at **line 26**, "to match this '{'" at **line 10** (`main`) | The real mistake is the `else {` on line 17. Nothing points there. |
+| C missing `;` at the end of line 17 | `expected ',' or ';' before 'pritnf'` at **line 18** | The wrong line. After fixing it, the student compiles again to discover the `pritnf` typo. |
+| Python typo `reuslt` in a helper function | Three stack frames with full `/app/sub-raw-…/solution.py` paths, then the cause | The cause, `NameError: name 'reuslt' is not defined`, is the **last** line, in the same red as the noise. With a deeper call stack it scrolls out of view. |
+
+Also: the editor never marks the failing line (no red squiggle) and there's no way to jump to it.
+
+---
+
+## Error summary: the fix for "hard to pinpoint" (our side, plus a small portal change)
+
+The judge already has everything needed. It just returns one raw blob. Plan:
+
+**S1. Structured diagnostics in the API** (additive, so existing clients are unaffected). Every result gets
+`diagnostics: [{ line, column, kind, message, hint, raw }]`:
+- **Only the student's file.** Map library-header errors back to the student's "required from here" line.
+  `sort` on a `set` becomes **line 9**: "`sort` needs a vector or array; a `set` is already sorted, so loop over it directly."
+- **First error first**, at most 3, with duplicates and follow-on errors removed.
+- **Fix known misdirections:**
+  - `expected ';' before X` points to the end of the *previous* code line (line 17, not 18);
+  - `expected '}' at end of input`: we scan the code ourselves and report the `{` that was never closed (the `else {` on line 17);
+  - Python: the error line comes first, and only frames in the student's file are kept.
+- **Plain-language hints for the ~30 most common errors**, matched on the compiler text. For example:
+
+  | Compiler or Python says | Hint shown |
+  |---|---|
+  | `was not declared in this scope; did you mean 'second'` | "`secnd` isn't defined. Typo for `second`?" |
+  | `no match for 'operator<<' … std::vector` | "`cout` can't print a whole vector. Loop over it, or print elements with spaces." |
+  | `NameError: name 'reuslt' is not defined` | "`reuslt` isn't defined. Did you mean `result`?" Suggested from the student's own identifiers, by edit distance. |
+  | `invalid literal for int() … '4 1 7 7 3'` | "`input()` reads a whole line. Use `list(map(int, input().split()))`." |
+  | `IndentationError` / `SyntaxError` | Reported as a **compile** error, with the line |
+  | segfault / SIGFPE / SIGILL | The crash explanations above |
+  | `implicit declaration of function 'strlen'` / `'vector' was not declared` | Goes away once libraries are added automatically |
+
+- **`raw`** keeps the full output, with paths removed, for anyone who wants it.
+
+**S2. Portal display (small change for the friend):**
+- A **summary card at the top of the output**: "Line 17: missing `;` at the end of this line", with the hint underneath.
+- **Click a diagnostic to jump to that line**, and put a red squiggle on it (Monaco `setModelMarkers`; we send the line and column).
+- The full output collapsed under "Show full compiler output". Make the box taller or resizable.
+
+**S3. Same on our pages:** `SubmissionOutput` renders `diagnostics` the same way.
+
+**How we know it works:** a test fixture of the real student mistakes above (and more) per language. Each one asserts that the first
+diagnostic names the right line and has a hint. Fixtures come from these runs and, later, from anonymised real
+compile failures in the database.
+
 ---
 
 ## Libraries and input: what we'll do
