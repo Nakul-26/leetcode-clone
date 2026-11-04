@@ -1,23 +1,37 @@
 # Prompt for an AI agent working on the exam portal
 
-> **How to use this file:** pull this repository (GO Judge, `leetcode_clone`), open your AI coding agent in
-> the **exam portal's** repository, and give it everything below the line. Tell it where you cloned this
-> repository, replacing `<GO_JUDGE_REPO>` (for example `../leetcode_clone`).
+> **How to use this file:** open your AI coding agent in the **exam portal's** repository and give it
+> everything below the line. Nothing needs cloning: the agent reads the GO Judge files it needs straight
+> from GitHub (you already have access to the repo), and the judge itself keeps deploying from this repo
+> through Dokploy as it does today.
 >
-> Last updated: 2026-11-04. When this file changes, `git log -p docs/EXAM_PORTAL_AGENT_PROMPT.md` shows
-> what's new.
+> Last updated: 2026-11-04. The file's history on GitHub
+> (https://github.com/Nakul-26/leetcode-clone/commits/main/docs/EXAM_PORTAL_AGENT_PROMPT.md) shows what's new.
 
 ---
 
 You are working on the **exam portal** (exam-portal.fortifyhub.net): the platform students use for practice
-tests and exams. It runs and grades code through **GO Judge**, a separate service whose source is at
-`<GO_JUDGE_REPO>`. The portal calls GO Judge's public API (`/api/codeAssess/submissions`, header
+tests and exams. It runs and grades code through **GO Judge**, a separate service whose source is the
+private GitHub repository **`Nakul-26/leetcode-clone`** (branch `main`). The portal's judge is deployed
+from that repository through Dokploy (the "Exam Sandbox" deployment). The portal calls GO Judge's public API (`/api/codeAssess/submissions`, header
 `x-rapidapi-key`), most likely from `runOnJudge()` in `workers/student-workerjs/src/judge.js`. Confirm the
 actual location before changing anything.
 
 Your job is to bring the portal up to date with what GO Judge now offers, and to fix the editor problems
-students reported. Work in the portal's repository. Treat `<GO_JUDGE_REPO>` as **read-only reference**:
-don't change it. If something there looks wrong, write it down for the GO Judge owner.
+students reported. Work only in the portal's repository. Treat GO Judge as **read-only reference**: don't
+clone it into the portal, don't copy it wholesale, never push to it. If something there looks wrong, write
+it down for the GO Judge owner.
+
+**Reading GO Judge files.** Every path below such as `docs/GO_JUDGE_API.md` or
+`frontend/src/components/DiagnosticsSummary.jsx` is in `Nakul-26/leetcode-clone` on `main`. The repo is
+private, so read files with the GitHub CLI, which uses the developer's own access:
+
+```sh
+gh api repos/Nakul-26/leetcode-clone/contents/docs/GO_JUDGE_API.md -H "Accept: application/vnd.github.raw"
+```
+
+If `gh` isn't available or logged in, ask the developer to run `gh auth login`, or to paste the file from
+`https://github.com/Nakul-26/leetcode-clone/blob/main/<path>`.
 
 ## Ground rules
 
@@ -33,10 +47,10 @@ don't change it. If something there looks wrong, write it down for the GO Judge 
    each commit. Add tests where the portal has a test setup.
 5. **Plan first.** Start by writing a short plan (which files, which change, how you'll verify it) and
    wait for approval if your tool supports it.
-6. When unsure about the API, the source of truth is `<GO_JUDGE_REPO>/docs/GO_JUDGE_API.md`. Read it fully
+6. When unsure about the API, the source of truth is `docs/GO_JUDGE_API.md`. Read it fully
    before starting.
 
-## Read these first (in `<GO_JUDGE_REPO>/docs/`)
+## Read these first (in `docs/` of `Nakul-26/leetcode-clone`)
 
 | File | Why |
 |---|---|
@@ -50,9 +64,9 @@ don't change it. If something there looks wrong, write it down for the GO Judge 
 ## Part 1: what changed in GO Judge (context)
 
 You don't implement these: they're in GO Judge already. They explain what the portal will now receive
-and what it can rely on. If the portal's judge runs from this repository (the "Exam Sandbox" deployment
-uses the same `docker-compose.prod.yml`), **redeploying it from the latest `main`** is what delivers
-them. See Part 3.
+and what it can rely on. The portal's judge (the "Exam Sandbox" deployment in Dokploy) is built from
+`main` of `Nakul-26/leetcode-clone` with `docker-compose.prod.yml`, so **redeploying it in Dokploy** is
+what delivers them. See Part 3.
 
 ### 1a. Errors students can act on (2026-11-04)
 
@@ -179,9 +193,9 @@ test where possible.
 - If `diagnostics` is missing (older judge), keep today's display.
 
 A working reference implementation (React and Monaco):
-- `<GO_JUDGE_REPO>/frontend/src/components/DiagnosticsSummary.jsx`
-- `<GO_JUDGE_REPO>/frontend/src/utils/editorDiagnostics.js`
-- styles: `.diagnostic*` in `<GO_JUDGE_REPO>/frontend/src/styles.css`
+- `frontend/src/components/DiagnosticsSummary.jsx`
+- `frontend/src/utils/editorDiagnostics.js`
+- styles: `.diagnostic*` in `frontend/src/styles.css`
 
 **Done when:** for the six mistakes in Part 1a, the student sees the right line and the hint without
 scrolling, and clicking it jumps to the line. This holds in practice tests and in exams; check that the
@@ -205,7 +219,7 @@ drafts**: switching languages already keeps each language's code, and that's cor
   iterator. With a comment: "this reads every number, whatever the line breaks".
 - In every language, a comment saying **"print only the answer: no prompts, no extra text"**.
 - Our stdin templates can be copied: `STDIN_TEMPLATES` in
-  `<GO_JUDGE_REPO>/frontend/src/utils/buildTemplate.js`.
+  `frontend/src/utils/buildTemplate.js`.
 
 **Done when** each starter compiles and runs as is, and switching languages still keeps each language's
 draft.
@@ -262,17 +276,23 @@ Read `FRIEND_PORTAL_CHANGES.md` sections 2, 3 and 5 first: with a key, responses
 
 ## Part 3: deploying the judge side
 
-If the portal's GO Judge runs from this repository:
+This is done by the developer in Dokploy, not by you (the agent). Nothing is cloned or built locally:
+Dokploy pulls `main` of `Nakul-26/leetcode-clone` and builds it with `docker-compose.prod.yml`. Include
+these steps in your summary so the developer can follow them:
 
-1. Pick a time **outside any exam window**.
-2. Before deploying, re-check C/C++ questions' expected outputs:
-   `node scripts/judge_contract_check.mjs` (see `FRIEND_PORTAL_CHANGES.md` §6). Add the exam's own
-   questions as fixtures.
-3. Deploy the latest `main` with `docker-compose.prod.yml`. Wait until `/api/health` reports every service
+1. Pick a time **outside any exam window**. A deploy restarts the judge for a minute or two.
+2. Before deploying, check the C/C++ questions: the judge now compiles with `-O2` and adds missing
+   headers, which shouldn't change correct answers but can change the output of code with undefined
+   behaviour. Run each C/C++ question's reference solution once after the deploy (step 5). If any
+   question looks risky beforehand, ask the GO Judge owner to run `scripts/judge_contract_check.mjs`
+   against it (see `FRIEND_PORTAL_CHANGES.md` §6).
+3. In Dokploy, open the **Exam Sandbox** deployment, check its source is `main`, then click **Deploy** and
+   confirm.
+4. Wait until the deployment shows running and `/api/health` on the judge reports every service
    connected.
-4. Smoke-test with `npm run loadtest -- smoke` from this repository (needs an API key in
-   `loadtest/.env`; see `loadtest/README.md`). Then run one practice test by hand with the mistakes from
-   Part 1a.
+5. Run one practice test by hand: the reference solutions, then the mistakes from Part 1a. If something
+   is wrong, redeploy the previous deployment from Dokploy's deployment history and tell the GO Judge
+   owner.
 
 ## Part 4: how to verify your portal changes
 
