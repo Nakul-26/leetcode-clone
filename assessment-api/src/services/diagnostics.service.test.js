@@ -128,6 +128,32 @@ describe("C", () => {
     const d = analyze({ language: "c", code, compileOutput: out, kind: "compile" });
     expect(d[0].hint).toBe("`pritnf` doesn't exist. Did you mean `printf`?");
   });
+
+  it("a missing ';' that swallows the next declaration shows one card, not a follow-on 'undeclared'", () => {
+    const code = "#include <stdio.h>\nint main(){\n  int n;\n  scanf(\"%d\",&n)\n  long long t=0;\n  for(int i=0;i<n;i++){int x;scanf(\"%d\",&x);t+=x;}\n  printf(\"%lld\\n\",t);\n}";
+    const out = [
+      `${P}main.c: In function 'main':`,
+      `${P}main.c:4:17: error: expected ';' before 'long'`,
+      `    4 |   scanf("%d",&n)`,
+      `      |                 ^`,
+      `      |                 ;`,
+      `    5 |   long long t=0;`,
+      `      |   ~~~~`,
+      `${P}main.c:6:45: error: 't' undeclared (first use in this function)`,
+      `    6 |   for(int i=0;i<n;i++){int x;scanf("%d",&x);t+=x;}`,
+      `      |                                             ^`
+    ].join("\n");
+    const d = analyze({ language: "c", code, compileOutput: out, kind: "compile" });
+    expect(d).toHaveLength(1);
+    expect(d[0]).toMatchObject({ line: 4, hint: "Missing `;` at the end of this line." });
+  });
+
+  it("a real undeclared name is still reported, without guessing for one-letter names", () => {
+    const code = "#include <stdio.h>\nint main(){\n  printf(\"%d\", t);\n}";
+    const out = `${P}main.c: In function 'main':\n${P}main.c:3:16: error: 't' undeclared (first use in this function)\n    3 |   printf("%d", t);\n      |                ^`;
+    const d = analyze({ language: "c", code, compileOutput: out, kind: "compile" });
+    expect(d[0]).toMatchObject({ line: 3, hint: "`t` isn't defined: check the spelling, and declare it before this line." });
+  });
 });
 
 describe("Python", () => {

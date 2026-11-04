@@ -414,7 +414,9 @@ function editDistance(a, b) {
 }
 
 export function didYouMean(name, candidates) {
-  if (!name) return null;
+  // A one-letter name is one edit away from every other one-letter name (`t` -> `h`), so any
+  // guess is noise.
+  if (!name || name.length < 2) return null;
   const limit = name.length <= 4 ? 1 : 2;
   let best = null;
   let bestDistance = Infinity;
@@ -768,6 +770,11 @@ export function explainJudgeResult(result, { language, code, trustLines = false 
  *                                   the GO Judge API); false when it was wrapped in a harness
  * @returns {{ line:number|null, column:number|null, kind:string, message:string, hint:string|null }[]}
  */
+const C_TYPE = String.raw`(?:int|long|short|char|float|double|bool|auto|unsigned|signed|size_t|string|(?:std::)?\w+<[^;{}]*>|[A-Z]\w*)`;
+function declaresVariable(source, name) {
+  return new RegExp(String.raw`\b${C_TYPE}\b[^;(){}]*\b${name}\s*(?:=|;|\[|,|\))`).test(source);
+}
+
 export function analyze({ language, code = "", compileOutput = "", stderr = "", kind, exitCode, trustLines = true }) {
   const lang = String(language || "").toLowerCase();
   if (kind === "timeout") {
@@ -802,6 +809,17 @@ export function analyze({ language, code = "", compileOutput = "", stderr = "", 
     // Nothing recognisable: the first meaningful line, so the student still sees the start.
     const first = text.split("\n").map((l) => l.trim()).find((l) => l && !/^In function|^In file included|^\s*\|/.test(l));
     if (first) out.push({ line: null, column: null, kind, message: cleanMessage(first), hint: null });
+  }
+
+  // A C/C++ syntax error can swallow the next declaration (`scanf(...)` without `;` eats
+  // `long long t=0;`), and gcc then reports every later use of `t` as undeclared. Those
+  // follow-on errors point at correct code, so drop them when an earlier error exists and the
+  // name is declared in the code.
+  if (lang === "c" || lang === "cpp") {
+    out = out.filter((d, i) => {
+      const m = i > 0 && /^'(\w+)' (?:undeclared|was not declared in this scope)/.exec(d.message);
+      return !(m && declaresVariable(ctx.code, m[1]));
+    });
   }
 
   // One diagnostic per line and message; errors with a line first (they're the actionable ones),
