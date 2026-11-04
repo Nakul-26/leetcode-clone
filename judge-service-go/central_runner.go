@@ -402,6 +402,9 @@ func runBatchedTests(ctx context.Context, exec *executor.Executor, pooledContain
 			appendMissingBatchedResults(result, problem, done, attempt.remainingReason)
 			offset = len(problem.TestCases)
 		}
+		if attempt.remainingReason == models.SubmissionStatusRuntimeError && attempt.internalError == "" {
+			attachCrashOutput(result, done+1, attempt.stderr)
+		}
 	}
 	if submissionMsg.StopOnFirstFailure {
 		// Covers failures the watchdog could not stop on (a crash or bad output ends the run by
@@ -913,6 +916,29 @@ func appendMissingBatchedResults(result *models.SubmissionResult, problem models
 		}
 		markTestFailed(&tr, reason)
 		result.AddTestResult(tr)
+	}
+}
+
+// attachCrashOutput gives the test a crashed batch process was on the program's own error
+// output, without the wrapper's one-JSON-line-per-test protocol. Without it a function problem
+// whose code fails before any test runs (a Python IndentationError in wrapper.py, say) came
+// back as a bare "Runtime Error" with nothing to show the student.
+func attachCrashOutput(result *models.SubmissionResult, test int, stderr string) {
+	var kept []string
+	for _, line := range strings.Split(stderr, "\n") {
+		if t := strings.TrimSpace(line); t != "" && !strings.HasPrefix(t, "{\"") {
+			kept = append(kept, line)
+		}
+	}
+	text, _ := truncateString(strings.TrimSpace(strings.Join(kept, "\n")), maxLogOutputBytes)
+	if text == "" {
+		return
+	}
+	for i := range result.Details {
+		if result.Details[i].Test == test && !result.Details[i].Passed && result.Details[i].Traceback == "" {
+			result.Details[i].Traceback = text
+			return
+		}
 	}
 }
 

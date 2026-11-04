@@ -695,6 +695,21 @@ function resolveLine(entry, ctx) {
   return entry;
 }
 
+// A function problem's code runs inside the judge's wrapper, so a runtime error's line is the
+// wrapper's and gets dropped above. For an undefined name the student's line is still findable:
+// the one line of their code that uses that name.
+const UNDEFINED_NAME = /(?:name '(\w+)' is not defined|ReferenceError: (\w+) is not defined|undefined (?:local variable or )?method '(\w+)'|Undefined variable \$(\w+))/;
+function locateByName(entry, ctx) {
+  if (entry.line != null) return entry;
+  const m = UNDEFINED_NAME.exec(entry.message || "");
+  const name = m && (m[1] || m[2] || m[3] || m[4]);
+  if (!name) return entry;
+  const word = new RegExp(String.raw`(?<![\w$])${name}(?!\w)`);
+  const hits = ctx.codeLines.map((l, i) => (word.test(l) ? i : -1)).filter((i) => i >= 0);
+  if (hits.length !== 1) return entry;
+  return { ...entry, line: hits[0] + 1, column: ctx.codeLines[hits[0]].search(word) + 1 };
+}
+
 // Type noise that hides the point of a C++ message.
 function cleanMessage(message) {
   return String(message || "")
@@ -795,6 +810,7 @@ export function analyze({ language, code = "", compileOutput = "", stderr = "", 
   let out = errors
     .map((e) => relocateUnclosed(e, ctx))
     .map((e) => resolveLine(e, ctx))
+    .map((e) => locateByName(e, ctx))
     .map((e) => relocate(e, ctx))
     .map((e) => ({ line: e.line ?? null, column: e.line ? e.column ?? null : null, kind: kind === "memory" ? "memory" : kind, message: cleanMessage(e.message), hint: e.hint ?? hintFor(e, ctx) }));
 

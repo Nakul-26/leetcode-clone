@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { analyze, stripWorkspacePaths, findUnclosedBrace, didYouMean, isPythonSyntaxError, describeSignal } from "./diagnostics.service.js";
+import { analyze, explainJudgeResult, stripWorkspacePaths, findUnclosedBrace, didYouMean, isPythonSyntaxError, describeSignal } from "./diagnostics.service.js";
 
 // Fixtures are real outputs captured on the exam portal and the testing stack on 2026-11-04
 // (docs/EDITOR_UX_PLAN.md, "Realistic mistakes"), with the workspace ids as the judge printed them.
@@ -243,6 +243,26 @@ describe("JavaScript", () => {
     const d = analyze({ language: "javascript", code: "const n=Number(prompt());console.log(n)", stderr: err, kind: "runtime" });
     expect(d[0]).toMatchObject({ line: 1, column: 16, message: "ReferenceError: prompt is not defined" });
     expect(d[0].hint).toMatch(/readFileSync/);
+  });
+
+  it("an undefined name in a function problem finds the student's line, not the wrapper's", () => {
+    const code = "function sumList(nums){\n  let total = 0;\n  for (const x of nums) totl += x;\n  return total;\n}";
+    const err = "ReferenceError: totl is not defined\n    at sumList (wrapper.js:176:25)\n    at runAll (wrapper.js:230:25)\n    at Object.<anonymous> (wrapper.js:256:1)";
+    const d = analyze({ language: "javascript", code, stderr: err, kind: "runtime", trustLines: false });
+    expect(d[0]).toMatchObject({ line: 3, column: 25 });
+    expect(d[0].hint).toBe("`totl` isn't defined. Did you mean `total`?");
+  });
+});
+
+describe("function problems", () => {
+  it("a Python IndentationError in the wrapper is a compile error on the student's line", () => {
+    const code = "def sumList(nums):\nreturn sum(nums)\n";
+    const traceback = "File \"/app/wrapper.py\", line 9\n    return sum(nums)\n    ^^^^^^\nIndentationError: expected an indented block after function definition on line 8";
+    const result = { status: "Runtime Error", details: [{ test: 1, passed: false, error: "Runtime Error", errorType: "runtime", traceback }, { test: 2, passed: false, error: "Runtime Error", errorType: "runtime" }] };
+    const out = explainJudgeResult(result, { language: "python", code });
+    expect(out.status).toBe("Compilation Error");
+    expect(out.diagnostics[0]).toMatchObject({ line: 2, kind: "compile" });
+    expect(out.diagnostics[0].hint).toMatch(/indented/);
   });
 });
 
