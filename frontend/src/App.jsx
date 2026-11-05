@@ -38,7 +38,9 @@ import ApiKeysPage from './pages/ApiKeysPage';
 import MySubmissionsPage from './pages/MySubmissionsPage';
 import SystemDashboardPage from './pages/SystemDashboardPage';
 import UserManagementPage from './pages/UserManagementPage';
+import ProfilePage from './pages/ProfilePage';
 import { auth, system } from './api';
+import { roleInfo } from './utils/roles';
 
 function AppContent() {
     const navigate = useNavigate();
@@ -112,6 +114,26 @@ function AppContent() {
             window.removeEventListener('storage', handleStorage);
         };
     }, [user, navigate]);
+
+    // The cached user can belong to an earlier account (another tab signed in as someone else
+    // replaces the cookie, not this tab's copy). Ask the server who the cookie belongs to on
+    // load and on each page change, so the role badge and the role-based links are right.
+    useEffect(() => {
+        if (!user) return;
+        let cancelled = false;
+        auth.me().then((res) => {
+            const fresh = res.data?.user;
+            if (cancelled || !fresh) return;
+            if (fresh.id !== user.id || fresh.role !== user.role || fresh.name !== user.name) {
+                const { id, name, email, role, usn, section, collegeId } = fresh;
+                const next = { id, name, email, role, usn, section, collegeId };
+                localStorage.setItem('user', JSON.stringify(next));
+                setUser(next);
+            }
+        }).catch(() => { /* a 401 is handled by the api interceptor */ });
+        return () => { cancelled = true; };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [location.pathname]);
 
     const handleLogout = async () => {
         // The auth cookie is httpOnly - only the backend can clear it.
@@ -249,6 +271,18 @@ function AppContent() {
                         )}
                     </div>
                     {user && (
+                        <Link
+                            to="/profile"
+                            className="role-badge"
+                            style={{ '--role-color': roleInfo(user.role).color }}
+                            title={`Signed in as ${user.name || user.email} (${roleInfo(user.role).label}). Open your profile.`}
+                            onClick={() => setMenuOpen(false)}
+                        >
+                            <span className="role-badge-name">{user.name || user.email}</span>
+                            <span>{roleInfo(user.role).label}</span>
+                        </Link>
+                    )}
+                    {user && (
                         <button className="button button-outline logout-btn" onClick={handleLogout} style={{ padding: '6px 12px', fontSize: '0.85rem' }}>
                             <LogOut size={16} />
                             <span>Logout</span>
@@ -296,6 +330,7 @@ function AppContent() {
                 <Route path="/login" element={<LoginPage />} />
                 <Route path="/signup" element={<SignupPage />} />
                 <Route path="/my-submissions" element={<RequireAuth><MySubmissionsPage /></RequireAuth>} />
+                <Route path="/profile" element={<RequireAuth><ProfilePage /></RequireAuth>} />
             </Routes>
         </>
     );

@@ -75,6 +75,16 @@ describe('Auth API', () => {
     expect(res.body.message || res.body.msg).toBeDefined();
   });
 
+  it('GET /api/v1/auth/me returns the signed-in account and its role from the database', async () => {
+    const reg = await authService.register({ ...testUser, email: `me-${Date.now()}@example.com`, role: 'faculty' });
+    const res = await request(app).get('/api/v1/auth/me').set('Authorization', `Bearer ${reg.token}`);
+    expect(res.status).toBe(200);
+    expect(res.body.user).toMatchObject({ id: reg.user.id, email: reg.user.email, role: 'faculty', college: null });
+    expect(res.body.user.password).toBeUndefined();
+
+    expect((await request(app).get('/api/v1/auth/me')).status).toBe(401);
+  });
+
   describe('cookie-based auth (H8)', () => {
     it('authenticates via the httpOnly cookie alone, with no Authorization header', async () => {
       const uniqueEmail = `cookie-auth-${Date.now()}@example.com`;

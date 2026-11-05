@@ -1,5 +1,5 @@
 import express from "express";
-import { register, login, signup, logout } from "../controllers/auth.controller.js";
+import { register, login, signup, logout, me } from "../controllers/auth.controller.js";
 import { verifyToken, authorizeRoles } from "../middleware/auth.mjs";
 
 const router = express.Router();
@@ -48,6 +48,9 @@ router.post("/signup", signup);
  *         description: Invalid credentials
  */
 router.post("/login", login);
+
+// Who the auth cookie belongs to right now (profile page, header role badge).
+router.get("/me", verifyToken, me);
 
 // H8: clears the httpOnly auth cookie server-side (the frontend can't clear it itself).
 router.post("/logout", logout);

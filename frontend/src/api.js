@@ -39,7 +39,8 @@ api.interceptors.response.use(
 );
 
 export const auth = {
-  logout: () => api.post("/api/v1/auth/logout")
+  logout: () => api.post("/api/v1/auth/logout"),
+  me: () => api.get("/api/v1/auth/me")
 };
 
 export const assessments = {

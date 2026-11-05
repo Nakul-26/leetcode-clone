@@ -1329,3 +1329,58 @@ button.diagnostic-line:hover { border-color: var(--primary); }
 }
 
 
+
+/* Role badge (header) and profile page */
+.role-badge,
+nav a.role-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border: 1px solid var(--role-color, var(--border-bright));
+  border-radius: 999px;
+  color: var(--role-color, var(--text-secondary));
+  background: color-mix(in srgb, var(--role-color, transparent) 12%, transparent);
+  font-size: 0.8rem;
+  font-weight: 600;
+  white-space: nowrap;
+  text-decoration: none;
+}
+.role-badge-name {
+  color: var(--text);
+  font-weight: 500;
+  max-width: 14ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.header.collapsed nav a.role-badge {
+  justify-content: center;
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+}
+.role-badge-lg { font-size: 0.95rem; padding: 6px 12px; margin-top: var(--sp-2); }
+
+.profile-page { max-width: 720px; padding-top: var(--sp-8); }
+.profile-card {
+  background: var(--surface);
+  border: 1px solid var(--border-bright);
+  border-radius: var(--radius-lg);
+  padding: var(--sp-6);
+}
+.profile-head { display: flex; align-items: center; gap: var(--sp-4); margin-bottom: var(--sp-6); }
+.profile-name { font-size: 1.5rem; margin: 0; overflow-wrap: anywhere; }
+.profile-rows {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: var(--sp-2) var(--sp-6);
+  margin: 0 0 var(--sp-6);
+}
+.profile-rows dt { color: var(--text-muted); }
+.profile-rows dd { margin: 0; overflow-wrap: anywhere; }
+.profile-section h2 { display: flex; align-items: center; gap: var(--sp-2); font-size: 1rem; margin: 0 0 var(--sp-2); }
+.profile-section ul { margin: 0 0 var(--sp-6); padding-left: 1.2em; color: var(--text-secondary); }
+.profile-foot { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); flex-wrap: wrap; font-size: 0.85rem; }
+@media (max-width: 560px) {
+  .profile-rows { grid-template-columns: 1fr; gap: 2px; }
+  .profile-rows dd { margin-bottom: var(--sp-2); }
+}

@@ -51,6 +51,17 @@ export async function login(req, res, next) {
   }
 }
 
+export async function me(req, res, next) {
+  try {
+    return res.json({ user: await authService.getMe(req.user.id) });
+  } catch (err) {
+    if (err.status && err.body) {
+      return res.status(err.status).json(err.body);
+    }
+    next(err);
+  }
+}
+
 export function logout(req, res) {
   res.clearCookie(AUTH_COOKIE_NAME, getAuthCookieOptions());
   res.json({ message: "Logged out" });

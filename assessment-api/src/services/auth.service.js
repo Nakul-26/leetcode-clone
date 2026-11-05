@@ -251,6 +251,19 @@ export async function login({ email, password }, auditInfo = {}) {
   return { token, user: toPublicUser(user) };
 }
 
+// The account the auth cookie belongs to, read from the database rather than the token, so a
+// role or college changed since sign-in shows up (profile page and the header's role badge).
+export async function getMe(userId) {
+  const user = await User.findById(userId).select("-password");
+  if (!user) throw new HttpError(401, "Account no longer exists", { message: "Account no longer exists" });
+  const college = user.collegeId ? await College.findById(user.collegeId).select("name planId") : null;
+  return {
+    ...toPublicUser(user),
+    createdAt: user.createdAt || null,
+    college: college ? { id: college._id.toString(), name: college.name, planId: college.planId } : null
+  };
+}
+
 export async function listUsers(query = {}, requestingUser) {
   const { search, role, page = 1, limit = 50 } = query;
   const filter = {};
