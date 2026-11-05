@@ -285,7 +285,7 @@ function AppContent() {
                 <Route path="/admin/drives/add" element={<RequireStaff><AddDrivePage /></RequireStaff>} />
                 <Route path="/admin/drives/:id/edit" element={<RequireStaff><EditDrivePage /></RequireStaff>} />
                 <Route path="/admin/drives/:id/pipeline" element={<RequireStaff><DrivePipelinePage /></RequireStaff>} />
-                <Route path="/admin/system" element={<RequireStaff><SystemDashboardPage /></RequireStaff>} />
+                <Route path="/admin/system" element={<RequireStaff><SystemDashboardPage user={user} /></RequireStaff>} />
                 <Route path="/admin/users" element={<RequireStaff><UserManagementPage /></RequireStaff>} />
                 <Route path="/admin/billing" element={<RequireRole roles={['admin', 'superadmin']}><BillingPage user={user} /></RequireRole>} />
                 <Route path="/admin/api-keys" element={<RequireRole roles={['admin', 'superadmin']}><ApiKeysPage user={user} /></RequireRole>} />
