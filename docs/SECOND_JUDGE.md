@@ -15,7 +15,7 @@ shares all the work, with no change to the API: whichever judge is free takes th
  │ GO Judge stack: api, frontend, judge, rabbitmq,      │   │ Judge Worker stack:          │
  │                 mongo, redis                          │   │   judge + Docker guard +     │
  │        ▲  (stack network, go-judge-* aliases)         │   │   language images            │
- │ Judge Share stack: tailscale "judge-share" + 3 relays │◄──┤   (host Tailscale)           │
+ │ Judge Share stack: tailscale "judge-share" + 3 relays │◄──┤   + tailscale "judge-worker" │
  └──────────────────────────────────────────────────────┘   └──────────────────────────────┘
                        private Tailscale link (WireGuard, encrypted)
 ```
@@ -33,39 +33,25 @@ taken but not finished goes back to the queue and is judged again (R1-R6), by ei
 
 ## Setup
 
-### 1. Tailscale (once)
+Tailscale runs in a container on **both** servers (`judge-share` on deploy2, `judge-worker` on
+server 2), so nothing is installed on the hosts and no sudo is needed. Server 1 is
+`ssh college-server` (Dokploy deploy2.fortifyhub.net), server 2 is `ssh college-server2`.
 
-1. Create a free account at tailscale.com (any login).
-2. **Server 2:** install Tailscale on the host and log in:
-   `curl -fsSL https://tailscale.com/install.sh | sh` then `sudo tailscale up`.
-   Open the link it prints and approve the machine. In the admin console, open the machine's
-   menu and choose **Disable key expiry**, so the server doesn't drop off after 180 days.
-3. **Auth key for deploy2:** admin console → Settings → Keys → **Generate auth key**
-   (one-off is fine). Copy it; it's used once in step 2 below.
+### 1. deploy2: Judge Share
 
-### 2. deploy2: Judge Share
+1. Dokploy → exam-portal → **Create Service → Compose**, name it `Judge Share`, repository
+   `leetcode-clone`, branch `main`, compose path `./docker-compose.judge-share.yml`. No environment
+   is needed (`TS_AUTHKEY` is optional).
+2. **Deploy.** Then open the login link printed in the tailscale container's log:
+   `docker logs examportal-judge-share-*-tailscale-1 2>&1 | grep -o 'https://login.tailscale.com/[^ ]*'`.
+   Signing in there adds the node `judge-share` to your tailnet (the first login creates the
+   account). In the admin console, open its menu → **Disable key expiry**, and note its
+   **100.x address**.
 
-1. Dokploy → exam-portal → **Create Service → Compose**, name it `Judge Share`.
-2. Provider: GitHub, repository `leetcode-clone`, branch `main`, compose path
-   `./docker-compose.judge-share.yml`.
-3. Environment: `TS_AUTHKEY=<the key from 1.3>`.
-4. **Deploy.** In the Tailscale admin console a machine `judge-share` appears. Disable its key
-   expiry too, and copy its **100.x address**.
+### 2. Server 2: Judge Worker
 
-### 3. Check the link from server 2
-
-```
-nc -zv <judge-share 100.x address> 5672
-nc -zv <judge-share 100.x address> 27017
-nc -zv <judge-share 100.x address> 6379
-```
-All three must say `succeeded`/`open`.
-
-### 4. Server 2: Judge Worker
-
-1. In server 2's Dokploy: create a project (for example `judge`), then **Create Service →
-   Compose**, name it `Judge Worker`. Same repository and branch, compose path
-   `./docker-compose.judge-worker.yml`.
+1. In server 2's Dokploy: project `judge` → **Create Service → Compose**, name `Judge Worker`,
+   same repository and branch, compose path `./docker-compose.judge-worker.yml`.
 2. Environment:
    ```
    JUDGE_SHARE_HOST=<judge-share 100.x address>
@@ -75,12 +61,17 @@ All three must say `succeeded`/`open`.
    JUDGE_WORKER_CONCURRENCY=<about 4 x this server's CPU cores>
    ```
    Copy the three passwords from deploy2 → GO Judge → Environment. Add `MONGO_DB_NAME` only if
-   GO Judge sets it. Other `JUDGE_*` settings are optional, as on deploy2.
-3. **Deploy.** The first build compiles all 11 language images and takes a while (10-20 min).
-4. Logs of `judge-service-go` should end with the pool warm-up and the judge consuming the queues,
-   with no connection errors.
+   GO Judge sets it.
+3. **Deploy.** The first build compiles all 11 language images (10-20 min). Open the login link in
+   the `judge-link` container's log the same way, and disable key expiry for `judge-worker`.
 
-### 5. Check that both judges work
+### 3. Check the link
+
+From server 2: `docker exec <judge-link container> sh -c 'nc -zv judge-share-address 5672'`, or
+simply read the `judge-service-go` log: it should end with the pool warm-up and the judge
+consuming the queues, with no connection errors.
+
+### 4. Check that both judges work
 
 - Run the load test from this repo: `npm run loadtest -- quick`. With two judges, throughput at
   10 at a time should rise compared with the 2026-11-05 numbers (Python 1,242/min, C++ 600/min).
@@ -101,7 +92,7 @@ All three must say `succeeded`/`open`.
   ]
   ```
   The first rule keeps your own (untagged) devices reaching each other; tagged machines are only
-  reachable as the second rule allows. Repeat the `nc` checks in step 3 afterwards.
+  reachable as the second rule allows. Check the judge log on server 2 afterwards.
 
 ## Running it
 

@@ -13,11 +13,13 @@
 # REDIS_URI pointing at the other server. (Not `extends`: that would make this server
 # need every secret of the main file, JWT and API keys included.)
 #
-# Needs on this server: Docker, and Tailscale installed on the host and logged in to the
-# same tailnet (the judge container reaches 100.x addresses through the host).
+# Tailscale runs in this stack too (container "judge-link"), so the host needs no install and
+# no sudo. Three relays inside it listen on judge-net and forward to the judge-share node, so
+# the judge reaches RabbitMQ, Mongo and Redis at judge-link:5672/27017/6379.
 #
 # Environment (Dokploy -> Environment):
 #   JUDGE_SHARE_HOST   Tailscale address of the "judge-share" node, e.g. 100.101.102.103
+#   TS_AUTHKEY         optional; without it, judge-link's log prints a login link on first deploy
 #   RABBITMQ_PASS, MONGO_ROOT_PASS, REDIS_PASS   the SAME values as the main GO Judge stack
 #   MONGO_DB_NAME      only if the main stack sets it
 #   JUDGE_* pool and worker settings, as in docker-compose.prod.yml, sized for THIS server
@@ -48,11 +50,11 @@ services:
       # with reserved URL characters (%, $, ^, @, ...) don't break URL parsing.
       RABBITMQ_USER: user
       RABBITMQ_PASS: ${RABBITMQ_PASS:?RABBITMQ_PASS is required}
-      RABBITMQ_HOST: ${JUDGE_SHARE_HOST:?JUDGE_SHARE_HOST is required}
+      RABBITMQ_HOST: judge-link
       RABBITMQ_PORT: "5672"
-      MONGO_URI: mongodb://admin:${MONGO_ROOT_PASS:?MONGO_ROOT_PASS is required}@${JUDGE_SHARE_HOST}:27017/${MONGO_DB_NAME:-assessment_db}?authSource=admin
+      MONGO_URI: mongodb://admin:${MONGO_ROOT_PASS:?MONGO_ROOT_PASS is required}@judge-link:27017/${MONGO_DB_NAME:-assessment_db}?authSource=admin
       MONGO_DB_NAME: ${MONGO_DB_NAME:-assessment_db}
-      REDIS_URI: redis://:${REDIS_PASS}@${JUDGE_SHARE_HOST}:6379
+      REDIS_URI: redis://:${REDIS_PASS}@judge-link:6379
       REDIS_PASS: ${REDIS_PASS:?REDIS_PASS is required}
       HEALTH_PORT: "8081"
       LOG_LEVEL: ${JUDGE_LOG_LEVEL:-info}
@@ -116,10 +118,12 @@ services:
       timeout: 5s
       retries: 5
       start_period: 60s
-    # RabbitMQ, Mongo and Redis are on the other server: nothing local to wait for. If they
-    # can't be reached the judge exits and restarts until they can.
+    # RabbitMQ, Mongo and Redis are on the other server, behind judge-link. If they can't be
+    # reached the judge exits and restarts until they can.
     depends_on:
       docker-socket-proxy:
+        condition: service_started
+      judge-link:
         condition: service_started
     deploy:
       resources:
@@ -127,6 +131,50 @@ services:
           memory: 2G
     networks:
       - judge-net
+
+  # ── Tailscale link to the main server ──
+  # Kernel mode (a real tailnet interface in this container), so the relays below can dial
+  # 100.x addresses directly. Needs /dev/net/tun and NET_ADMIN, nothing on the host.
+  judge-link:
+    image: tailscale/tailscale:stable
+    hostname: judge-worker
+    restart: unless-stopped
+    environment:
+      TS_AUTHKEY: ${TS_AUTHKEY:-}
+      TS_HOSTNAME: judge-worker
+      TS_STATE_DIR: /var/lib/tailscale
+      TS_USERSPACE: "false"
+      TS_ACCEPT_DNS: "false"
+    cap_add: [NET_ADMIN, NET_RAW]
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    volumes:
+      - ts_state:/var/lib/tailscale
+    networks:
+      - judge-net
+
+  # Each relay shares judge-link's network: it listens on judge-net as judge-link:PORT and
+  # forwards over the tailnet to the same port on judge-share.
+  link-rabbitmq:
+    image: alpine/socat:latest
+    restart: unless-stopped
+    network_mode: service:judge-link
+    command: tcp-listen:5672,fork,reuseaddr tcp-connect:${JUDGE_SHARE_HOST:?JUDGE_SHARE_HOST is required}:5672
+    depends_on: [judge-link]
+
+  link-mongo:
+    image: alpine/socat:latest
+    restart: unless-stopped
+    network_mode: service:judge-link
+    command: tcp-listen:27017,fork,reuseaddr tcp-connect:${JUDGE_SHARE_HOST}:27017
+    depends_on: [judge-link]
+
+  link-redis:
+    image: alpine/socat:latest
+    restart: unless-stopped
+    network_mode: service:judge-link
+    command: tcp-listen:6379,fork,reuseaddr tcp-connect:${JUDGE_SHARE_HOST}:6379
+    depends_on: [judge-link]
 
   # ── Language images the judge starts its sandboxes from (built on this server) ──
   judge-java:
@@ -216,6 +264,9 @@ services:
     image: judge-kotlin-env
     networks:
       - judge-net
+
+volumes:
+  ts_state:
 
 networks:
   judge-net:

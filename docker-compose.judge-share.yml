@@ -11,11 +11,13 @@
 # on the same host, so anything added there would run twice and clash.
 #
 # Environment (Dokploy -> Environment):
-#   TS_AUTHKEY            Tailscale auth key (admin console -> Settings -> Keys). Reusable
-#                         is not needed; the node keeps its identity in the ts_state volume.
+#   TS_AUTHKEY            Optional Tailscale auth key (admin console -> Settings -> Keys).
+#                         Without it, the tailscale container's log prints a login link once;
+#                         open it to add the node. Either way the node keeps its identity in the
+#                         ts_state volume, so this happens only on the first deploy.
 #   JUDGE_STACK_NETWORK   The GO Judge stack's network. Default below is what Docker Compose
-#                         names it for the GO Judge compose on deploy2; check with
-#                         `docker network ls | grep assessment-net` if it changes.
+#                         names it for the GO Judge compose on deploy2 (checked 2026-11-05 with
+#                         `docker network ls | grep assessment-net`).
 # ─────────────────────────────────────────────────────────────────────────────
 
 services:
@@ -24,7 +26,7 @@ services:
     hostname: judge-share
     restart: unless-stopped
     environment:
-      TS_AUTHKEY: ${TS_AUTHKEY:?TS_AUTHKEY is required}
+      TS_AUTHKEY: ${TS_AUTHKEY:-}
       TS_HOSTNAME: judge-share
       TS_STATE_DIR: /var/lib/tailscale
       # Userspace mode needs no extra privileges or /dev/net/tun. Connections to this node's
