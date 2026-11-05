@@ -1,0 +1,68 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Judge Share: lets judge workers on other servers reach this stack's RabbitMQ, Mongo and
+# Redis, over Tailscale only (JUDGE_FIX_PLAN M2, docs/SECOND_JUDGE.md).
+#
+# Deploy on the SAME server as the GO Judge stack, as its own Dokploy compose. It publishes
+# no host port: a Tailscale container joins your tailnet as "judge-share" and three small
+# forwarders listen inside it. Nothing here is reachable from the internet, only from
+# devices on your tailnet. The services still ask for their own passwords.
+#
+# Why a separate file: docker-compose.prod.yml is also deployed by the Exam Sandbox stack
+# on the same host, so anything added there would run twice and clash.
+#
+# Environment (Dokploy -> Environment):
+#   TS_AUTHKEY            Tailscale auth key (admin console -> Settings -> Keys). Reusable
+#                         is not needed; the node keeps its identity in the ts_state volume.
+#   JUDGE_STACK_NETWORK   The GO Judge stack's network. Default below is what Docker Compose
+#                         names it for the GO Judge compose on deploy2; check with
+#                         `docker network ls | grep assessment-net` if it changes.
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+  tailscale:
+    image: tailscale/tailscale:stable
+    hostname: judge-share
+    restart: unless-stopped
+    environment:
+      TS_AUTHKEY: ${TS_AUTHKEY:?TS_AUTHKEY is required}
+      TS_HOSTNAME: judge-share
+      TS_STATE_DIR: /var/lib/tailscale
+      # Userspace mode needs no extra privileges or /dev/net/tun. Connections to this node's
+      # tailnet address are handed to the forwarders below, which share its network.
+      TS_USERSPACE: "true"
+      TS_ACCEPT_DNS: "false"
+    volumes:
+      - ts_state:/var/lib/tailscale
+    networks:
+      - judge-stack
+
+  # Each forwarder shares the Tailscale container's network, so it listens on the tailnet
+  # address only, and reaches the GO Judge service by its stack-private alias.
+  share-rabbitmq:
+    image: alpine/socat:latest
+    restart: unless-stopped
+    network_mode: service:tailscale
+    command: tcp-listen:5672,fork,reuseaddr tcp-connect:go-judge-rabbitmq:5672
+    depends_on: [tailscale]
+
+  share-mongo:
+    image: alpine/socat:latest
+    restart: unless-stopped
+    network_mode: service:tailscale
+    command: tcp-listen:27017,fork,reuseaddr tcp-connect:go-judge-mongo:27017
+    depends_on: [tailscale]
+
+  share-redis:
+    image: alpine/socat:latest
+    restart: unless-stopped
+    network_mode: service:tailscale
+    command: tcp-listen:6379,fork,reuseaddr tcp-connect:go-judge-redis:6379
+    depends_on: [tailscale]
+
+volumes:
+  ts_state:
+
+networks:
+  judge-stack:
+    name: ${JUDGE_STACK_NETWORK:-examportal-go-judge-ifal7h_assessment-net}
+    external: true

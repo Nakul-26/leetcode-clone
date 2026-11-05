@@ -1,0 +1,222 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Judge Worker: a second judge on another server, taking work from the main stack's queues
+# (JUDGE_FIX_PLAN M2, docs/SECOND_JUDGE.md).
+#
+# Deploy on the second server as its own Dokploy compose. It runs only the judge, its
+# Docker guard and the language images. RabbitMQ, Mongo and Redis stay on the main server
+# and are reached over Tailscale through the Judge Share stack (docker-compose.judge-share.yml).
+# Any judge consuming the queues takes the next submission or Run, so the two servers share
+# the work with no change to the API.
+#
+# KEEP IN SYNC with judge-service-go and docker-socket-proxy in docker-compose.prod.yml:
+# the environment list below is a copy of it, with only RABBITMQ_HOST, MONGO_URI and
+# REDIS_URI pointing at the other server. (Not `extends`: that would make this server
+# need every secret of the main file, JWT and API keys included.)
+#
+# Needs on this server: Docker, and Tailscale installed on the host and logged in to the
+# same tailnet (the judge container reaches 100.x addresses through the host).
+#
+# Environment (Dokploy -> Environment):
+#   JUDGE_SHARE_HOST   Tailscale address of the "judge-share" node, e.g. 100.101.102.103
+#   RABBITMQ_PASS, MONGO_ROOT_PASS, REDIS_PASS   the SAME values as the main GO Judge stack
+#   MONGO_DB_NAME      only if the main stack sets it
+#   JUDGE_* pool and worker settings, as in docker-compose.prod.yml, sized for THIS server
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+  # The only thing here that touches docker.sock; see docker-compose.prod.yml for what it allows.
+  docker-socket-proxy:
+    build:
+      context: ./judge-service-go
+      dockerfile: Dockerfile.guard
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - judge-net
+
+  judge-service-go:
+    build:
+      context: ./judge-service-go
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    stop_grace_period: 2m
+    volumes:
+      - /tmp:/tmp
+    environment:
+      # Passed as separate fields (not a pre-built amqp:// URL) so passwords
+      # with reserved URL characters (%, $, ^, @, ...) don't break URL parsing.
+      RABBITMQ_USER: user
+      RABBITMQ_PASS: ${RABBITMQ_PASS:?RABBITMQ_PASS is required}
+      RABBITMQ_HOST: ${JUDGE_SHARE_HOST:?JUDGE_SHARE_HOST is required}
+      RABBITMQ_PORT: "5672"
+      MONGO_URI: mongodb://admin:${MONGO_ROOT_PASS:?MONGO_ROOT_PASS is required}@${JUDGE_SHARE_HOST}:27017/${MONGO_DB_NAME:-assessment_db}?authSource=admin
+      MONGO_DB_NAME: ${MONGO_DB_NAME:-assessment_db}
+      REDIS_URI: redis://:${REDIS_PASS}@${JUDGE_SHARE_HOST}:6379
+      REDIS_PASS: ${REDIS_PASS:?REDIS_PASS is required}
+      HEALTH_PORT: "8081"
+      LOG_LEVEL: ${JUDGE_LOG_LEVEL:-info}
+      DEFAULT_POOL_SIZE: ${JUDGE_POOL_SIZE:-2}
+      MAX_EXECUTIONS_PER_CONTAINER: ${JUDGE_MAX_EXECS:-500}
+      # Per-language pool sizing / autoscaling — see docker-compose.prod.yml's header for the full
+      # list of additional per-language and threshold/cooldown vars available but not wired
+      # here by default (their Go-side defaults apply unless set directly in Dokploy env).
+      JUDGE_POOL_MAX_JAVA: ${JUDGE_POOL_MAX_JAVA:-8}
+      JUDGE_POOL_MAX_CPP: ${JUDGE_POOL_MAX_CPP:-8}
+      JUDGE_POOL_GLOBAL_CAP: ${JUDGE_POOL_GLOBAL_CAP:-60}
+      JUDGE_POOL_AUTOSCALE_ENABLED: ${JUDGE_POOL_AUTOSCALE_ENABLED:-false}
+      JUDGE_WORKER_CONCURRENCY: ${JUDGE_WORKER_CONCURRENCY:-24}
+      JUDGE_SANDBOX_RUNTIME: ${JUDGE_SANDBOX_RUNTIME:-}
+      # Every other judge setting is passed through as well. Only variables listed here reach the
+      # container, so a setting added in Dokploy but missing here is silently ignored (this happened
+      # to JUDGE_INTERACTIVE_WORKERS, JUDGE_POOL_MAX_PY and JUDGE_BATCH_THRESHOLD_*). An empty value
+      # means "use the judge's built-in default", so listing them changes nothing until they are set.
+      JUDGE_INTERACTIVE_WORKERS: ${JUDGE_INTERACTIVE_WORKERS:-}
+      JUDGE_INTERACTIVE_RESERVE: ${JUDGE_INTERACTIVE_RESERVE:-}
+      JUDGE_BATCH_THRESHOLD_PY: ${JUDGE_BATCH_THRESHOLD_PY:-}
+      JUDGE_BATCH_THRESHOLD_JS: ${JUDGE_BATCH_THRESHOLD_JS:-}
+      JUDGE_BATCH_THRESHOLD_JAVA: ${JUDGE_BATCH_THRESHOLD_JAVA:-}
+      JUDGE_BATCH_THRESHOLD_CPP: ${JUDGE_BATCH_THRESHOLD_CPP:-}
+      JUDGE_POOL_MAX_PY: ${JUDGE_POOL_MAX_PY:-}
+      JUDGE_POOL_MAX_JS: ${JUDGE_POOL_MAX_JS:-}
+      JUDGE_POOL_MAX_TS: ${JUDGE_POOL_MAX_TS:-}
+      JUDGE_POOL_MAX_C: ${JUDGE_POOL_MAX_C:-}
+      JUDGE_POOL_MAX_CS: ${JUDGE_POOL_MAX_CS:-}
+      JUDGE_POOL_MAX_GO: ${JUDGE_POOL_MAX_GO:-}
+      JUDGE_POOL_MAX_RS: ${JUDGE_POOL_MAX_RS:-}
+      JUDGE_POOL_MAX_RB: ${JUDGE_POOL_MAX_RB:-}
+      JUDGE_POOL_MAX_PHP: ${JUDGE_POOL_MAX_PHP:-}
+      JUDGE_POOL_MAX_KT: ${JUDGE_POOL_MAX_KT:-}
+      JUDGE_POOL_MIN_PY: ${JUDGE_POOL_MIN_PY:-}
+      JUDGE_POOL_MIN_JS: ${JUDGE_POOL_MIN_JS:-}
+      JUDGE_POOL_MIN_TS: ${JUDGE_POOL_MIN_TS:-}
+      JUDGE_POOL_MIN_JAVA: ${JUDGE_POOL_MIN_JAVA:-}
+      JUDGE_POOL_MIN_C: ${JUDGE_POOL_MIN_C:-}
+      JUDGE_POOL_MIN_CPP: ${JUDGE_POOL_MIN_CPP:-}
+      JUDGE_POOL_MIN_CS: ${JUDGE_POOL_MIN_CS:-}
+      JUDGE_POOL_MIN_GO: ${JUDGE_POOL_MIN_GO:-}
+      JUDGE_POOL_MIN_RS: ${JUDGE_POOL_MIN_RS:-}
+      JUDGE_POOL_MIN_RB: ${JUDGE_POOL_MIN_RB:-}
+      JUDGE_POOL_MIN_PHP: ${JUDGE_POOL_MIN_PHP:-}
+      JUDGE_POOL_MIN_KT: ${JUDGE_POOL_MIN_KT:-}
+      JUDGE_POOL_AUTOSCALE_INTERVAL: ${JUDGE_POOL_AUTOSCALE_INTERVAL:-}
+      JUDGE_POOL_SCALE_UP_THRESHOLD_MS: ${JUDGE_POOL_SCALE_UP_THRESHOLD_MS:-}
+      JUDGE_POOL_SCALE_DOWN_THRESHOLD_MS: ${JUDGE_POOL_SCALE_DOWN_THRESHOLD_MS:-}
+      JUDGE_POOL_SCALE_UP_COOLDOWN: ${JUDGE_POOL_SCALE_UP_COOLDOWN:-}
+      JUDGE_POOL_SCALE_DOWN_COOLDOWN: ${JUDGE_POOL_SCALE_DOWN_COOLDOWN:-}
+      JUDGE_CENTRAL_COMPARE_PY: "true"
+      JUDGE_CENTRAL_COMPARE_JS: "true"
+      JUDGE_CENTRAL_COMPARE_JAVA: "true"
+      JUDGE_CENTRAL_COMPARE_CPP: "true"
+      JUDGE_CENTRAL_COMPARE_C: "true"
+      DOCKER_HOST: tcp://docker-socket-proxy:2375
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8081/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+    # RabbitMQ, Mongo and Redis are on the other server: nothing local to wait for. If they
+    # can't be reached the judge exits and restarts until they can.
+    depends_on:
+      docker-socket-proxy:
+        condition: service_started
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+    networks:
+      - judge-net
+
+  # ── Language images the judge starts its sandboxes from (built on this server) ──
+  judge-java:
+    build:
+      context: ./judge-service-go/environments/java
+      dockerfile: Dockerfile
+    image: judge-java-env
+    networks:
+      - judge-net
+
+  judge-js:
+    build:
+      context: ./judge-service-go/environments/javascript
+      dockerfile: Dockerfile
+    image: judge-js-env
+    networks:
+      - judge-net
+
+  judge-py:
+    build:
+      context: ./judge-service-go/environments/python
+      dockerfile: Dockerfile
+    image: judge-py-env
+    networks:
+      - judge-net
+
+  judge-c:
+    build:
+      context: ./judge-service-go/environments/c
+      dockerfile: Dockerfile
+    image: judge-c-env
+    networks:
+      - judge-net
+
+  judge-cpp:
+    build:
+      context: ./judge-service-go/environments/cpp
+      dockerfile: Dockerfile
+    image: judge-cpp-env
+    networks:
+      - judge-net
+
+  judge-csharp:
+    build:
+      context: ./judge-service-go/environments/csharp
+      dockerfile: Dockerfile
+    image: judge-csharp-env
+    networks:
+      - judge-net
+
+  judge-go:
+    build:
+      context: ./judge-service-go/environments/go
+      dockerfile: Dockerfile
+    image: judge-go-env
+    networks:
+      - judge-net
+
+  judge-rust:
+    build:
+      context: ./judge-service-go/environments/rust
+      dockerfile: Dockerfile
+    image: judge-rust-env
+    networks:
+      - judge-net
+
+  judge-ruby:
+    build:
+      context: ./judge-service-go/environments/ruby
+      dockerfile: Dockerfile
+    image: judge-ruby-env
+    networks:
+      - judge-net
+
+  judge-php:
+    build:
+      context: ./judge-service-go/environments/php
+      dockerfile: Dockerfile
+    image: judge-php-env
+    networks:
+      - judge-net
+
+  judge-kotlin:
+    build:
+      context: ./judge-service-go/environments/kotlin
+      dockerfile: Dockerfile
+    image: judge-kotlin-env
+    networks:
+      - judge-net
+
+networks:
+  judge-net:
+    driver: bridge
