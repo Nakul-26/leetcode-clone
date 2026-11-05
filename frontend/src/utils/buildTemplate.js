@@ -61,6 +61,56 @@ export function getDefinitionsSnippet(language, parameters = [], returnType = ''
   }
 }
 
+// A value of the declared return type, so the untouched starter code compiles and runs
+// (it then just gets Wrong Answer). Null means the language needs no return statement.
+export function defaultReturnValue(language, returnType = '') {
+  const kind = ((returnType || 'void').trim().match(/^([a-z]+)/) || [])[1] || 'void';
+  if (kind === 'void') return null;
+  const lang = (language || '').toLowerCase();
+  const nothing = { tree: true, linkedlist: true, graph: true }[kind];
+  const mapped = mapType(lang, returnType);
+  switch (lang) {
+    case 'java':
+    case 'csharp':
+      if (nothing) return 'null';
+      if (kind === 'array' || kind === 'matrix') {
+        // int[] -> new int[0], int[][] -> new int[0][]
+        return `new ${mapped.replace('[]', '[0]')}`;
+      }
+      return { number: '0', string: '""', boolean: 'false' }[kind] ?? 'null';
+    case 'cpp':
+      if (nothing) return 'nullptr';
+      return { number: '0', string: '""', boolean: 'false' }[kind] ?? '{}';
+    case 'c':
+      return mapped.includes('*') ? 'NULL' : { boolean: 'false' }[kind] ?? '0';
+    case 'go':
+      if (nothing || kind === 'array' || kind === 'matrix') return 'nil';
+      return { number: '0', string: '""', boolean: 'false' }[kind] ?? 'nil';
+    case 'kotlin':
+      if (nothing) return 'null';
+      if (kind === 'array' || kind === 'matrix') return 'arrayOf()';
+      return { number: '0', string: '""', boolean: 'false' }[kind] ?? 'null';
+    case 'rust':
+      if (nothing) return 'None';
+      if (kind === 'array' || kind === 'matrix') return 'Vec::new()';
+      return { number: '0', string: 'String::new()', boolean: 'false' }[kind] ?? 'Default::default()';
+    case 'typescript':
+      if (nothing) return 'null';
+      if (kind === 'array' || kind === 'matrix') return '[]';
+      return { number: '0', string: '""', boolean: 'false' }[kind] ?? 'null';
+    default:
+      return null;
+  }
+}
+
+// "        return 0;" (with the language's own line ending), or '' when none is needed.
+function returnLine(language, returnType, indent) {
+  const value = defaultReturnValue(language, returnType);
+  if (value === null) return '';
+  const semi = ['go', 'kotlin'].includes((language || '').toLowerCase()) ? '' : ';';
+  return `\n${indent}return ${value}${semi}`;
+}
+
 export default function buildTemplate(language, functionName, parameters = [], returnType = '') {
   const { tree: usesTree, list: usesList, graph: usesGraph } = detectUses(parameters, returnType);
   const paramNames = (parameters || []).map(p => p.name || 'arg');
@@ -92,7 +142,7 @@ export default function buildTemplate(language, functionName, parameters = [], r
     if (usesList) defs += `/*\nclass ListNode {\n  val: number;\n  next: ListNode | null;\n  constructor(val=0, next=null) { this.val = val; this.next = next; }\n}\n*/\n\n`;
     if (usesTree) defs += `/*\nclass TreeNode {\n  val: number;\n  left: TreeNode | null;\n  right: TreeNode | null;\n  constructor(val=0, left=null, right=null) { this.val = val; this.left = left; this.right = right; }\n}\n*/\n\n`;
     if (usesGraph) defs += `/*\nclass Node {\n  val: number;\n  neighbors: Node[];\n  constructor(val=0, neighbors: Node[] = []) { this.val = val; this.neighbors = neighbors; }\n}\n*/\n\n`;
-    defs += `function ${functionName}(${tsParams}): ${tsReturnType} {\n  // your code here\n}`;
+    defs += `function ${functionName}(${tsParams}): ${tsReturnType} {\n  // your code here${returnLine('typescript', returnType, '  ')}\n}`;
     return defs;
   }
 
@@ -109,7 +159,7 @@ export default function buildTemplate(language, functionName, parameters = [], r
     if (usesGraph) {
       defs += `/*\nclass Node {\n    public int val;\n    public List<Node> neighbors;\n    public Node() { val = 0; neighbors = new ArrayList<>(); }\n    public Node(int val) { this.val = val; neighbors = new ArrayList<>(); }\n    public Node(int val, List<Node> neighbors) { this.val = val; this.neighbors = neighbors; }\n}\n*/\n\n`;
     }
-    defs += `class Solution {\n    public ${javaReturnType} ${functionName}(${javaParams}) {\n        // your code here\n    }\n}`;
+    defs += `class Solution {\n    public ${javaReturnType} ${functionName}(${javaParams}) {\n        // your code here${returnLine('java', returnType, '        ')}\n    }\n}`;
     return defs;
   }
   const lang = (language || '').toLowerCase();
@@ -129,7 +179,7 @@ export default function buildTemplate(language, functionName, parameters = [], r
     if (usesTree) {
       template += `/*\nstruct TreeNode {\n    int val;\n    TreeNode *left;\n    TreeNode *right;\n    TreeNode(int x) : val(x), left(nullptr), right(nullptr) {}\n};\n*/\n\n`;
     }
-    template += `class Solution {\npublic:\n    ${cppReturn} ${functionName}(${cppParams}) {\n        // your code here\n    }\n};`;
+    template += `class Solution {\npublic:\n    ${cppReturn} ${functionName}(${cppParams}) {\n        // your code here${returnLine('cpp', returnType, '        ')}\n    }\n};`;
     return template;
   }
 
@@ -141,7 +191,7 @@ export default function buildTemplate(language, functionName, parameters = [], r
     if (usesList) defsCS += `/*\npublic class ListNode { public int val; public ListNode next; public ListNode(int x=0) { val = x; next = null; } }\n*/\n\n`;
     if (usesTree) defsCS += `/*\npublic class TreeNode { public int val; public TreeNode left; public TreeNode right; public TreeNode(int x=0) { val = x; left = right = null; } }\n*/\n\n`;
     if (usesGraph) defsCS += `/*\npublic class Node { public int val; public List<Node> neighbors; public Node() { neighbors = new List<Node>(); } public Node(int v) { val = v; neighbors = new List<Node>(); } }\n*/\n\n`;
-    defsCS += `public class Solution {\n    public ${csReturn} ${functionName}(${csParams}) {\n        // your code here\n    }\n}`;
+    defsCS += `public class Solution {\n    public ${csReturn} ${functionName}(${csParams}) {\n        // your code here${returnLine('csharp', returnType, '        ')}\n    }\n}`;
     return defsCS;
   }
 
@@ -153,7 +203,7 @@ export default function buildTemplate(language, functionName, parameters = [], r
     if (usesList) defsGo += `/*\ntype ListNode struct { Val int; Next *ListNode }\n*/\n\n`;
     if (usesTree) defsGo += `/*\ntype TreeNode struct { Val int; Left *TreeNode; Right *TreeNode }\n*/\n\n`;
     if (usesGraph) defsGo += `/*\ntype Node struct { Val int; Neighbors []*Node }\n*/\n\n`;
-    defsGo += `func ${functionName}(${goParams}) ${goReturn} {\n    // your code here\n    return ${goReturn === 'string' ? '""' : goReturn === 'bool' ? 'false' : goReturn.includes('[]') ? 'nil' : '0'}\n}`;
+    defsGo += `func ${functionName}(${goParams}) ${goReturn} {\n    // your code here${returnLine('go', returnType, '    ')}\n}`;
     return defsGo;
   }
 
@@ -184,7 +234,7 @@ export default function buildTemplate(language, functionName, parameters = [], r
     if (usesTree) defsC += `/*\nstruct TreeNode {\n    int val;\n    struct TreeNode *left;\n    struct TreeNode *right;\n};\n*/\n\n`;
     if (usesGraph) defsC += `/*\nstruct Node {\n    int val;\n    int numNeighbors;\n    struct Node **neighbors;\n};\n*/\n\n`;
     
-    defsC += `${cReturn} ${functionName}(${cParams}) {\n    // your code here\n    return ${cReturn.includes('*') ? 'NULL' : '0'};\n}`;
+    defsC += `${cReturn} ${functionName}(${cParams}) {\n    // your code here${returnLine('c', returnType, '    ')}\n}`;
     return defsC;
   }
 
@@ -214,7 +264,7 @@ export default function buildTemplate(language, functionName, parameters = [], r
     if (usesList) defsKt += `/*\nclass ListNode(var \`val\`: Int = 0) {\n    var next: ListNode? = null\n}\n*/\n\n`;
     if (usesTree) defsKt += `/*\nclass TreeNode(var \`val\`: Int = 0) {\n    var left: TreeNode? = null\n    var right: TreeNode? = null\n}\n*/\n\n`;
     if (usesGraph) defsKt += `/*\nclass Node(var \`val\`: Int = 0) {\n    var neighbors: MutableList<Node> = mutableListOf()\n}\n*/\n\n`;
-    defsKt += `class Solution {\n    fun ${functionName}(${ktParams}): ${ktReturnType} {\n        // your code here\n    }\n}`;
+    defsKt += `class Solution {\n    fun ${functionName}(${ktParams}): ${ktReturnType} {\n        // your code here${returnLine('kotlin', returnType, '        ')}\n    }\n}`;
     return defsKt;
   }
 
@@ -225,7 +275,7 @@ export default function buildTemplate(language, functionName, parameters = [], r
     if (usesList) defsRs += `/*\npub struct ListNode {\n    pub val: i32,\n    pub next: Option<Box<ListNode>>,\n}\n*/\n\n`;
     if (usesTree) defsRs += `/*\npub struct TreeNode {\n    pub val: i32,\n    pub left: Option<Rc<RefCell<TreeNode>>>,\n    pub right: Option<Rc<RefCell<TreeNode>>>,\n}\n*/\n\n`;
     if (usesGraph) defsRs += `/*\npub struct Node {\n    pub val: i32,\n    pub neighbors: Vec<Option<Rc<RefCell<Node>>>>,\n}\n*/\n\n`;
-    defsRs += `struct Solution;\n\nimpl Solution {\n    pub fn ${functionName}(&self, ${rustParams}) -> ${rustReturnType} {\n        // your code here\n    }\n}`;
+    defsRs += `struct Solution;\n\nimpl Solution {\n    pub fn ${functionName}(&self, ${rustParams}) -> ${rustReturnType} {\n        // your code here${returnLine('rust', returnType, '        ')}\n    }\n}`;
     return defsRs;
   }
 

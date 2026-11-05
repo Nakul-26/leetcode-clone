@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams, Link, useLocation } from 'react-router-dom';
 import Editor from '@monaco-editor/react';
-import { Play, Send, ChevronLeft, Info, History, Settings2, Terminal, AlertCircle, ChevronDown, ChevronUp, Loader2, Trash2, CheckCircle2, X, Edit2, Lock } from 'lucide-react';
+import { Play, Send, ChevronLeft, Info, History, Settings2, Terminal, AlertCircle, ChevronDown, ChevronUp, Loader2, Trash2, CheckCircle2, X, Edit2, Lock, RotateCcw } from 'lucide-react';
 import api, { problems } from '../api';
 import SubmissionOutput from '../components/SubmissionOutput';
 import { starterCode } from '../utils/buildTemplate';
+import { switchLanguage, hasOwnWork, loadPracticeCode, savePracticeCode } from '../utils/codeDrafts';
 import { SUPPORTED_LANGUAGES } from '../utils/languages';
 import { defineModernDarkTheme, MONACO_EDITOR_OPTIONS } from '../utils/editorTheme';
 import { buildCustomTests, initialTestCases, emptyTestCase, isStdinProblem, MAX_CUSTOM_TESTS } from '../utils/buildCustomTests';
@@ -17,6 +18,9 @@ const ProblemPage = ({ user }) => {
   const [successMsg, setSuccessMsg] = useState(location.state?.successMessage || '');
   const [stats, setStats] = useState(null);
   const [code, setCode] = useState('');
+  const [codeByLang, setCodeByLang] = useState({}); // language -> code, for languages not on screen
+  const restoredRef = useRef(null); // problem id whose saved code is loaded; saving waits for it
+  const [confirmReset, setConfirmReset] = useState(false);
   const [selectedLanguage, setSelectedLanguage] = useState('python');
   const [activeTab, setActiveTab] = useState('description');
   const [consoleTab, setConsoleTab] = useState('testcases');
@@ -79,11 +83,44 @@ const ProblemPage = ({ user }) => {
     };
   }, [_id]);
 
+  // Open the problem where the student left it: their last language and its code.
   useEffect(() => {
-    if (problem) {
-      setCode(starterCode(selectedLanguage, problem));
+    if (!problem) return;
+    const saved = loadPracticeCode(user?.id, problem._id);
+    const lang = SUPPORTED_LANGUAGES.includes(saved?.language) ? saved.language : selectedLanguage;
+    const byLang = saved?.byLang || {};
+    setCodeByLang(byLang);
+    setSelectedLanguage(lang);
+    setCode(typeof byLang[lang] === 'string' ? byLang[lang] : starterCode(lang, problem));
+    restoredRef.current = problem._id;
+  }, [problem, user?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Save as the student types (after a short pause), for this problem and language.
+  useEffect(() => {
+    if (!problem || restoredRef.current !== problem._id) return;
+    const timeout = setTimeout(() => {
+      savePracticeCode(user?.id, problem._id, selectedLanguage, { ...codeByLang, [selectedLanguage]: code });
+    }, 500);
+    return () => clearTimeout(timeout);
+  }, [code, selectedLanguage, codeByLang, problem, user?.id]);
+
+  const handleLanguageChange = (lang) => {
+    const next = switchLanguage(codeByLang, selectedLanguage, code, lang, problem);
+    setCodeByLang(next.byLang);
+    setSelectedLanguage(lang);
+    setCode(next.code);
+  };
+
+  // Two clicks: the first arms the button, so one stray click never wipes the code.
+  const handleReset = () => {
+    if (hasOwnWork(code, selectedLanguage, problem) && !confirmReset) {
+      setConfirmReset(true);
+      setTimeout(() => setConfirmReset(false), 4000);
+      return;
     }
-  }, [selectedLanguage, problem]);
+    setConfirmReset(false);
+    setCode(starterCode(selectedLanguage, problem));
+  };
 
   // Underline the lines the latest result points at (cleared when a new run starts).
   const shownResult = runResult || submission;
@@ -371,16 +408,25 @@ const ProblemPage = ({ user }) => {
               <span style={{ fontSize: '0.75rem', fontWeight: '700', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Language</span>
               <select
                 value={selectedLanguage}
-                onChange={(e) => setSelectedLanguage(e.target.value)}
+                onChange={(e) => handleLanguageChange(e.target.value)}
                 style={{ width: 'auto', padding: '4px 8px', fontSize: '0.85rem', background: 'var(--bg)' }}
               >
                 {SUPPORTED_LANGUAGES.map(lang => <option key={lang} value={lang}>{lang}</option>)}
               </select>
             </div>
-            <div className="flex-center gap-2">
+            <div className="flex-center gap-2" title="Your code is saved in this browser for each language">
               <Settings2 size={16} className="text-muted" />
               <span className="text-muted" style={{ fontSize: '0.85rem' }}>Auto-save</span>
             </div>
+            <button
+              type="button"
+              onClick={handleReset}
+              className="button button-outline"
+              title="Replace the code with the starter code for this language"
+              style={{ height: '30px', padding: '0 10px', fontSize: '0.8rem', borderColor: confirmReset ? 'var(--error)' : 'rgba(255,255,255,0.1)', color: confirmReset ? 'var(--error)' : undefined }}
+            >
+              <RotateCcw size={13} /> {confirmReset ? 'Click again to reset' : 'Reset'}
+            </button>
           </div>
           <div className="flex-center gap-2">
             {!isAuthed && <span style={{ color: 'var(--error)', fontSize: '0.8rem' }}>Login to run code</span>}

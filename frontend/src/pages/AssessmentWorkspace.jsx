@@ -1,14 +1,18 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import Editor from '@monaco-editor/react';
-import { Clock, CheckCircle2, ChevronRight, Terminal, Play, Send, Info, Code2, AlertCircle, ChevronDown, ChevronUp, Loader2, Trash2, Megaphone, AlertTriangle } from 'lucide-react';
+import { Clock, CheckCircle2, ChevronRight, Terminal, Play, Send, Info, Code2, AlertCircle, ChevronDown, ChevronUp, Loader2, Trash2, Megaphone, AlertTriangle, RotateCcw } from 'lucide-react';
 import api, { assessments } from '../api';
 import SubmissionOutput from '../components/SubmissionOutput';
 import { starterCode } from '../utils/buildTemplate';
+import { switchLanguage, hasOwnWork } from '../utils/codeDrafts';
 import { SUPPORTED_LANGUAGES } from '../utils/languages';
 import { applyDiagnosticMarkers, diagnosticsOf, jumpToLine } from '../utils/editorDiagnostics';
 import { defineModernDarkTheme, MONACO_EDITOR_OPTIONS } from '../utils/editorTheme';
 import { buildCustomTests, initialTestCases, emptyTestCase, isStdinProblem, MAX_CUSTOM_TESTS } from '../utils/buildCustomTests';
+
+// Function and stdin problems are both answered with code; mcq and subjective are not.
+const isCodingProblem = (p) => !['mcq', 'subjective'].includes(p?.problemType);
 
 function loadDraft(attemptId) {
   try {
@@ -43,6 +47,8 @@ const AssessmentWorkspace = () => {
 
   const [codeMap, setCodeMap] = useState({}); // problemId -> code
   const [langMap, setLangMap] = useState({}); // problemId -> language
+  const [confirmReset, setConfirmReset] = useState(false);
+  const [codeByLangMap, setCodeByLangMap] = useState({}); // problemId -> { language -> code } for languages switched away from
   const [mcqAnswerMap, setMcqAnswerMap] = useState({}); // problemId -> selected option indexes
   const [subjectiveAnswerMap, setSubjectiveAnswerMap] = useState({}); // problemId -> free-text answer
   const [submissionMap, setSubmissionMap] = useState({}); // problemId -> submission object
@@ -161,6 +167,7 @@ const AssessmentWorkspace = () => {
         }
         const initialCodeMap = { ...(attemptData.codeDrafts?.codeMap || {}), ...(savedDraft.codeMap || {}) };
         const initialLangMap = { ...(attemptData.codeDrafts?.langMap || {}), ...(savedDraft.langMap || {}) };
+        const initialCodeByLang = { ...(attemptData.codeDrafts?.codeByLang || {}), ...(savedDraft.codeByLang || {}) };
         const initialProblemIdx = typeof savedDraft.currentProblemIndex === 'number'
           ? savedDraft.currentProblemIndex
           : (typeof attemptData.codeDrafts?.currentProblemIndex === 'number'
@@ -182,6 +189,7 @@ const AssessmentWorkspace = () => {
         
         setCodeMap(initialCodeMap);
         setLangMap(initialLangMap);
+        setCodeByLangMap(initialCodeByLang);
         setTestCasesMap(initialTestCasesMap);
         setActiveTestCaseIdxMap(initialActiveIdxMap);
         setTabSwitchCount(attemptData.tabSwitchCount || 0);
@@ -209,18 +217,18 @@ const AssessmentWorkspace = () => {
 
   useEffect(() => {
     if (loading || Object.keys(codeMap).length === 0) return;
-    localStorage.setItem(`assessment-draft:${attemptId}`, JSON.stringify({ codeMap, langMap, currentProblemIndex, savedAt: Date.now() }));
+    localStorage.setItem(`assessment-draft:${attemptId}`, JSON.stringify({ codeMap, langMap, codeByLang: codeByLangMap, currentProblemIndex, savedAt: Date.now() }));
 
     const timeout = setTimeout(async () => {
       try {
-        await assessments.saveDraft(attemptId, { codeMap, langMap, currentProblemIndex });
+        await assessments.saveDraft(attemptId, { codeMap, langMap, codeByLang: codeByLangMap, currentProblemIndex });
       } catch (err) {
         console.error('Failed to sync draft with server:', err);
       }
     }, 2000);
 
     return () => clearTimeout(timeout);
-  }, [attemptId, codeMap, langMap, currentProblemIndex, loading]);
+  }, [attemptId, codeMap, langMap, codeByLangMap, currentProblemIndex, loading]);
 
   useEffect(() => () => {
     Object.values(intervalRefs.current).forEach(clearInterval);
@@ -435,12 +443,24 @@ const AssessmentWorkspace = () => {
     setActiveNotification(null);
   };
 
+  // Keeps the code of the language being left, and brings back what was written in the new one.
   const handleLanguageChange = (problemId, lang) => {
+    const next = switchLanguage(codeByLangMap[problemId], langMap[problemId], codeMap[problemId], lang, currentProblem);
+    setCodeByLangMap(prev => ({ ...prev, [problemId]: next.byLang }));
     setLangMap(prev => ({ ...prev, [problemId]: lang }));
-    setCodeMap(prev => ({ 
-      ...prev, 
-      [problemId]: starterCode(lang, currentProblem) 
-    }));
+    setCodeMap(prev => ({ ...prev, [problemId]: next.code }));
+  };
+
+  // Two clicks: the first arms the button, so one stray click never wipes the code.
+  const handleReset = (problemId) => {
+    const lang = langMap[problemId];
+    if (hasOwnWork(codeMap[problemId], lang, currentProblem) && !confirmReset) {
+      setConfirmReset(true);
+      setTimeout(() => setConfirmReset(false), 4000);
+      return;
+    }
+    setConfirmReset(false);
+    setCodeMap(prev => ({ ...prev, [problemId]: starterCode(lang, currentProblem) }));
   };
 
   const handleCodeChange = (problemId, code) => {
@@ -574,7 +594,7 @@ const AssessmentWorkspace = () => {
       const res = await api.post('/api/v1/submissions', payload);
       const newSubmission = res.data;
       setSubmissionMap(prev => ({ ...prev, [problemId]: newSubmission }));
-      if (problemType === 'function') {
+      if (isCodingProblem(currentProblem)) {
         intervalRefs.current[problemId] = setInterval(() => checkStatus(newSubmission._id, problemId), 2000);
       }
     } catch (err) {
@@ -1089,7 +1109,7 @@ const AssessmentWorkspace = () => {
             <div className="workspace-editor" style={{ flex: 1, display: 'flex', flexDirection: 'column', background: 'var(--editor-bg)', boxShadow: 'inset 1px 1px 4px rgba(0,0,0,0.2)', minHeight: 0 }}>
               <div className="ide-toolbar">
                 <div className="flex-center gap-4">
-                  {(currentProblem.problemType || 'function') === 'function' && (
+                  {isCodingProblem(currentProblem) && (
                     <div className="flex-center gap-2">
                       <span style={{ fontSize: '0.75rem', fontWeight: '700', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Language</span>
                       <select
@@ -1102,11 +1122,21 @@ const AssessmentWorkspace = () => {
                           <option key={lang} value={lang}>{lang}</option>
                         ))}
                       </select>
+                      <button
+                        type="button"
+                        onClick={() => handleReset(currentProblem._id)}
+                        disabled={isJudging}
+                        className="button button-outline"
+                        title="Replace the code with the starter code for this language"
+                        style={{ height: '30px', padding: '0 10px', fontSize: '0.8rem', borderColor: confirmReset ? 'var(--error)' : 'rgba(255,255,255,0.1)', color: confirmReset ? 'var(--error)' : undefined }}
+                      >
+                        <RotateCcw size={13} /> {confirmReset ? 'Click again to reset' : 'Reset'}
+                      </button>
                     </div>
                   )}
                 </div>
                 <div className="flex-center gap-2">
-                  {(currentProblem.problemType || 'function') === 'function' && (
+                  {isCodingProblem(currentProblem) && (
                     <button onClick={handleRun} disabled={isRunning || isJudging} className="button button-outline" style={{ height: '36px', padding: '0 16px', fontSize: '0.85rem', borderColor: 'rgba(255,255,255,0.1)' }}>
                       <Play size={14} /> Run
                     </button>
@@ -1118,7 +1148,7 @@ const AssessmentWorkspace = () => {
               </div>
 
               <div style={{ flex: 1, position: 'relative', minHeight: 0, overflowY: 'auto' }}>
-                {(currentProblem.problemType || 'function') === 'function' && (
+                {isCodingProblem(currentProblem) && (
                   <Editor
                     height="100%"
                     language={langMap[currentProblem._id] === 'python' ? 'python' : langMap[currentProblem._id] === 'javascript' ? 'javascript' : langMap[currentProblem._id]}
