@@ -11,6 +11,7 @@
 # on the same host, so anything added there would run twice and clash.
 #
 # Environment (Dokploy -> Environment):
+#   TS_LAN_ENDPOINT       this host's LAN IP + ":41641" (e.g. 172.16.1.135:41641) for a direct link
 #   TS_AUTHKEY            Optional Tailscale auth key (admin console -> Settings -> Keys).
 #                         Without it, `docker exec <tailscale container> tailscale status`
 #                         shows a login link; open it to add the node. Either way the node keeps its identity in the
@@ -27,6 +28,10 @@ services:
     restart: unless-stopped
     environment:
       TS_AUTHKEY: ${TS_AUTHKEY:-}
+      # This host's LAN address and the port below, e.g. 172.16.1.135:41641. Tailscale inside a
+      # container can't see the host's LAN address, so without it two servers on the same
+      # network talk through Tailscale's relay (~60 ms a trip) instead of directly (<1 ms).
+      TS_DEBUG_PRETENDPOINT: ${TS_LAN_ENDPOINT:-}
     # Userspace mode needs no extra privileges or /dev/net/tun. Connections to this node's
     # tailnet address are handed to the forwarders below, which share its network.
     # Not the image's own startup script: it gives `tailscale up` 60 s and then restarts, so a
@@ -35,10 +40,12 @@ services:
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
-        tailscaled --state=/var/lib/tailscale/tailscaled.state --tun=userspace-networking &
+        tailscaled --state=/var/lib/tailscale/tailscaled.state --tun=userspace-networking --port=41641 &
         until [ -S /var/run/tailscale/tailscaled.sock ]; do sleep 1; done
         tailscale up --hostname=judge-share --accept-dns=false $${TS_AUTHKEY:+--auth-key=$$TS_AUTHKEY}
         wait
+    ports:
+      - "41641:41641/udp"   # Tailscale's encrypted WireGuard traffic only
     volumes:
       - ts_state:/var/lib/tailscale
     networks:
