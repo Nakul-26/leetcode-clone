@@ -1,6 +1,6 @@
 # Fewer Docker calls per run (resident sandbox agent)
 
-**Written:** 2026-11-06. **Status:** plan, nothing built yet.
+**Written:** 2026-11-06. **Status:** Phase 0 done (results below); A/B decision pending.
 **Why:** with two judges the peak is ~1.7x one judge (`docs/SECOND_JUDGE.md`). Both servers run out
 of CPU, and the top consumers are `dockerd`, `containerd` and `runc`, not the submissions: every run
 pays for several Docker API calls and several new `runc` processes. Cutting that helps every judge,
@@ -51,6 +51,34 @@ Compiled languages add 1 compile exec; per-test (non-batched) paths add 1 exec p
 - A 30-minute prototype on deploy4 to size the prize before building: in a throwaway sandbox,
   time 200 runs of `python3 -c 'print(1)'` as 200 `docker exec`s vs 200 runs launched by one
   resident process inside the container.
+
+#### Phase 0 results (2026-11-06)
+
+**In production** (deploy4, counters from b951818, load test at x40):
+
+| | Docker calls per job | Docker API time per job | of which |
+|---|---|---|---|
+| Python | 14.0 | 15 ms | 4 execs (create+start+inspect each), 2 stats, 0.01 update |
+| C++ | 20.0 | 34 ms | 6 execs, 2 stats, 0.04 update |
+
+The API calls themselves are quick (1-2 ms each); the cost is what each exec sets off behind
+them: a new `runc` process, namespace entry and cgroup setup in `containerd`/`runc`, which the
+call returns before. The `docker update` skip (1a89886) already removed nearly all updates.
+
+**Prototype** (`docs/bench/exec_vs_resident.sh`, throwaway sandboxes from `judge-py-env` with the pool's restrictions,
+200 Python runs, 10 at a time; host CPU per run minus the `docker` CLI's own startup, which the
+judge doesn't pay):
+
+| Host CPU per run | deploy2 (Ryzen 5 8500G) | deploy4 (i7-8700) |
+|---|---|---|
+| Today's shape (4 execs) | ~270 ms | ~350 ms |
+| Phase 1 shape (2 execs) | ~160 ms | ~190 ms |
+| Resident process, no exec per run | ~65 ms | ~90 ms |
+
+So: Phase 1 cuts host CPU per Python run by ~40%; a resident agent by ~75% (3-4x less), which
+supports the 2-3x Python throughput estimate. The resident figure includes Python's own startup
+and leaves out the root kill and the 2 stats calls, which a real agent keeps (Option B) or drops
+(Option A + Phase 3).
 
 ### Phase 1: merge execs within today's model (1-2 days, low risk)
 
