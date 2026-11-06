@@ -1,6 +1,6 @@
 # Second judge server (JUDGE_FIX_PLAN M2)
 
-**Written:** 2026-11-05. **Status:** files ready, not deployed yet.
+**Written:** 2026-11-05. **Status:** live since 2026-11-06 (Judge Worker on deploy4 / `ssh college-server2`).
 
 ## How it works
 
@@ -40,10 +40,11 @@ server 2), so nothing is installed on the hosts and no sudo is needed. Server 1 
 ### 1. deploy2: Judge Share
 
 1. Dokploy → exam-portal → **Create Service → Compose**, name it `Judge Share`, repository
-   `leetcode-clone`, branch `main`, compose path `./docker-compose.judge-share.yml`. No environment
-   is needed (`TS_AUTHKEY` is optional).
+   `leetcode-clone`, branch `main`, compose path `./docker-compose.judge-share.yml`. Environment:
+   `TS_LAN_ENDPOINT=172.16.1.135:41641` (this host's LAN IP; `TS_AUTHKEY` is optional).
 2. **Deploy.** Then open the login link printed in the tailscale container's log:
    `docker logs examportal-judge-share-*-tailscale-1 2>&1 | grep -o 'https://login.tailscale.com/[^ ]*'`.
+   The container waits for the login as long as needed and remembers it.
    Signing in there adds the node `judge-share` to your tailnet (the first login creates the
    account). In the admin console, open its menu → **Disable key expiry**, and note its
    **100.x address**.
@@ -59,7 +60,13 @@ server 2), so nothing is installed on the hosts and no sudo is needed. Server 1 
    MONGO_ROOT_PASS=<same as GO Judge on deploy2>
    REDIS_PASS=<same as GO Judge on deploy2>
    JUDGE_WORKER_CONCURRENCY=<about 4 x this server's CPU cores>
+   TS_LAN_ENDPOINT=<this host's LAN IP>:41641
    ```
+   `TS_LAN_ENDPOINT` matters: Tailscale inside a container can't see the host's LAN address,
+   and without it two servers on the same network go through Tailscale's relay (~57 ms a trip
+   here, which made the load test *slower* with two judges). With it: direct, <1 ms.
+   Check with `docker exec <judge-link container> tailscale ping <judge-share address>`: it must
+   say `via <LAN IP>:41641`, not `via DERP`.
    Copy the three passwords from deploy2 → GO Judge → Environment. Add `MONGO_DB_NAME` only if
    GO Judge sets it.
 3. **Deploy.** The first build compiles all 11 language images (10-20 min). Open the login link in
@@ -104,3 +111,18 @@ consuming the queues, with no connection errors.
 - Size each server's pool for its own CPU (see `docs/JUDGE_PERFORMANCE_REVIEW.md`). The pool
   limits are per judge, not shared.
 - The System page's judge statistics come from deploy2's judge only.
+
+## Results (2026-11-06)
+
+`npm run loadtest -- full --langs=python,cpp --levels=40,80 --seconds=30`, compared with the
+single judge on 2026-11-05:
+
+| | single judge peak | two judges, x40 | two judges, x80 |
+|---|---|---|---|
+| Python | ~1,690/min | 2,003/min | 2,149/min (+27%) |
+| C++ | ~660/min | 698/min | 744/min (+13%) |
+
+No errors. At 10 concurrent, each judge took exactly half; at 40-80 the split was uneven
+(deploy4 903, deploy2 2,474), so something other than judge CPU now limits throughput (the
+API, Mongo or RabbitMQ on deploy2, or the extra round trips from deploy4). Find that before
+adding a third judge.
