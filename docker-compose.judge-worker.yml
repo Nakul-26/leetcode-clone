@@ -61,28 +61,31 @@ services:
       REDIS_HOST: judge-link:6379
       HEALTH_PORT: "8081"
       LOG_LEVEL: ${JUDGE_LOG_LEVEL:-info}
-      DEFAULT_POOL_SIZE: ${JUDGE_POOL_SIZE:-2}
+      # Defaults below copy the main judge's tuning in deploy2's Dokploy (2026-11-06), so both
+      # judges take the same share of the work. With the stock defaults (4 interactive workers
+      # against 12) the second judge took 27% of the load test's requests.
+      DEFAULT_POOL_SIZE: ${JUDGE_POOL_SIZE:-4}
       MAX_EXECUTIONS_PER_CONTAINER: ${JUDGE_MAX_EXECS:-500}
       # Per-language pool sizing / autoscaling — see docker-compose.prod.yml's header for the full
       # list of additional per-language and threshold/cooldown vars available but not wired
       # here by default (their Go-side defaults apply unless set directly in Dokploy env).
-      JUDGE_POOL_MAX_JAVA: ${JUDGE_POOL_MAX_JAVA:-8}
-      JUDGE_POOL_MAX_CPP: ${JUDGE_POOL_MAX_CPP:-8}
-      JUDGE_POOL_GLOBAL_CAP: ${JUDGE_POOL_GLOBAL_CAP:-60}
-      JUDGE_POOL_AUTOSCALE_ENABLED: ${JUDGE_POOL_AUTOSCALE_ENABLED:-false}
+      JUDGE_POOL_MAX_JAVA: ${JUDGE_POOL_MAX_JAVA:-10}
+      JUDGE_POOL_MAX_CPP: ${JUDGE_POOL_MAX_CPP:-10}
+      JUDGE_POOL_GLOBAL_CAP: ${JUDGE_POOL_GLOBAL_CAP:-100}
+      JUDGE_POOL_AUTOSCALE_ENABLED: ${JUDGE_POOL_AUTOSCALE_ENABLED:-true}
       JUDGE_WORKER_CONCURRENCY: ${JUDGE_WORKER_CONCURRENCY:-24}
       JUDGE_SANDBOX_RUNTIME: ${JUDGE_SANDBOX_RUNTIME:-}
       # Every other judge setting is passed through as well. Only variables listed here reach the
       # container, so a setting added in Dokploy but missing here is silently ignored (this happened
       # to JUDGE_INTERACTIVE_WORKERS, JUDGE_POOL_MAX_PY and JUDGE_BATCH_THRESHOLD_*). An empty value
       # means "use the judge's built-in default", so listing them changes nothing until they are set.
-      JUDGE_INTERACTIVE_WORKERS: ${JUDGE_INTERACTIVE_WORKERS:-}
+      JUDGE_INTERACTIVE_WORKERS: ${JUDGE_INTERACTIVE_WORKERS:-12}
       JUDGE_INTERACTIVE_RESERVE: ${JUDGE_INTERACTIVE_RESERVE:-}
       JUDGE_BATCH_THRESHOLD_PY: ${JUDGE_BATCH_THRESHOLD_PY:-}
       JUDGE_BATCH_THRESHOLD_JS: ${JUDGE_BATCH_THRESHOLD_JS:-}
-      JUDGE_BATCH_THRESHOLD_JAVA: ${JUDGE_BATCH_THRESHOLD_JAVA:-}
-      JUDGE_BATCH_THRESHOLD_CPP: ${JUDGE_BATCH_THRESHOLD_CPP:-}
-      JUDGE_POOL_MAX_PY: ${JUDGE_POOL_MAX_PY:-}
+      JUDGE_BATCH_THRESHOLD_JAVA: ${JUDGE_BATCH_THRESHOLD_JAVA:-1}
+      JUDGE_BATCH_THRESHOLD_CPP: ${JUDGE_BATCH_THRESHOLD_CPP:-1}
+      JUDGE_POOL_MAX_PY: ${JUDGE_POOL_MAX_PY:-10}
       JUDGE_POOL_MAX_JS: ${JUDGE_POOL_MAX_JS:-}
       JUDGE_POOL_MAX_TS: ${JUDGE_POOL_MAX_TS:-}
       JUDGE_POOL_MAX_C: ${JUDGE_POOL_MAX_C:-}
@@ -95,9 +98,9 @@ services:
       JUDGE_POOL_MIN_PY: ${JUDGE_POOL_MIN_PY:-}
       JUDGE_POOL_MIN_JS: ${JUDGE_POOL_MIN_JS:-}
       JUDGE_POOL_MIN_TS: ${JUDGE_POOL_MIN_TS:-}
-      JUDGE_POOL_MIN_JAVA: ${JUDGE_POOL_MIN_JAVA:-}
+      JUDGE_POOL_MIN_JAVA: ${JUDGE_POOL_MIN_JAVA:-8}
       JUDGE_POOL_MIN_C: ${JUDGE_POOL_MIN_C:-}
-      JUDGE_POOL_MIN_CPP: ${JUDGE_POOL_MIN_CPP:-}
+      JUDGE_POOL_MIN_CPP: ${JUDGE_POOL_MIN_CPP:-8}
       JUDGE_POOL_MIN_CS: ${JUDGE_POOL_MIN_CS:-}
       JUDGE_POOL_MIN_GO: ${JUDGE_POOL_MIN_GO:-}
       JUDGE_POOL_MIN_RS: ${JUDGE_POOL_MIN_RS:-}

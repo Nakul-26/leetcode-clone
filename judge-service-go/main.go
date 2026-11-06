@@ -1965,6 +1965,15 @@ func main() {
 	)
 	failOnError(err, "Failed to register a consumer")
 
+	// The interactive consumer may hold only as many unacknowledged messages as it has
+	// workers. With the bulk prefetch (workerConcurrency) a judge with 4 interactive workers
+	// took 24 waiting callers at a time, and with two judges the one with fewer workers sat
+	// on requests the other was free to run. basic.qos with global=false applies to
+	// consumers registered after it on this channel, so the bulk consumer above keeps its own.
+	interactiveWorkers := getIntEnv("JUDGE_INTERACTIVE_WORKERS", defaultInteractiveWorkers)
+	err = ch.Qos(max(interactiveWorkers, 1), 0, false) // 0 would mean "no limit"
+	failOnError(err, "Failed to set interactive QoS")
+
 	interactiveMsgs, err := ch.Consume(
 		interactiveQueueName,
 		interactiveConsumerTag,
@@ -2009,7 +2018,6 @@ func main() {
 	// queue is never even read. These are in addition to numWorkers, not carved out of
 	// it, so bulk throughput is unchanged; they spend nearly all their time blocked on
 	// the sandbox, not on CPU.
-	interactiveWorkers := getIntEnv("JUDGE_INTERACTIVE_WORKERS", defaultInteractiveWorkers)
 	slog.Info("Starting interactive workers", "count", interactiveWorkers, "bulkContainerReserve", bulkContainerReserve)
 	for i := 0; i < interactiveWorkers; i++ {
 		workerWg.Add(1)
