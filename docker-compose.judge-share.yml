@@ -12,8 +12,8 @@
 #
 # Environment (Dokploy -> Environment):
 #   TS_AUTHKEY            Optional Tailscale auth key (admin console -> Settings -> Keys).
-#                         Without it, the tailscale container's log prints a login link once;
-#                         open it to add the node. Either way the node keeps its identity in the
+#                         Without it, `docker exec <tailscale container> tailscale status`
+#                         shows a login link; open it to add the node. Either way the node keeps its identity in the
 #                         ts_state volume, so this happens only on the first deploy.
 #   JUDGE_STACK_NETWORK   The GO Judge stack's network. Default below is what Docker Compose
 #                         names it for the GO Judge compose on deploy2 (checked 2026-11-05 with
@@ -27,12 +27,18 @@ services:
     restart: unless-stopped
     environment:
       TS_AUTHKEY: ${TS_AUTHKEY:-}
-      TS_HOSTNAME: judge-share
-      TS_STATE_DIR: /var/lib/tailscale
-      # Userspace mode needs no extra privileges or /dev/net/tun. Connections to this node's
-      # tailnet address are handed to the forwarders below, which share its network.
-      TS_USERSPACE: "true"
-      TS_ACCEPT_DNS: "false"
+    # Userspace mode needs no extra privileges or /dev/net/tun. Connections to this node's
+    # tailnet address are handed to the forwarders below, which share its network.
+    # Not the image's own startup script: it gives `tailscale up` 60 s and then restarts, so a
+    # login link opened later never sticks. This waits for the login as long as it takes; once
+    # logged in, the state volume keeps the node and later starts don't ask again.
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        tailscaled --state=/var/lib/tailscale/tailscaled.state --tun=userspace-networking &
+        until tailscale status >/dev/null 2>&1 || tailscale status 2>&1 | grep -q -i login; do sleep 1; done
+        tailscale up --hostname=judge-share --accept-dns=false $${TS_AUTHKEY:+--auth-key=$$TS_AUTHKEY}
+        wait
     volumes:
       - ts_state:/var/lib/tailscale
     networks:

@@ -56,6 +56,8 @@ services:
       MONGO_DB_NAME: ${MONGO_DB_NAME:-assessment_db}
       REDIS_URI: redis://:${REDIS_PASS}@judge-link:6379
       REDIS_PASS: ${REDIS_PASS:?REDIS_PASS is required}
+      # The judge's Redis client reads REDIS_HOST (not REDIS_URI); unset it means "redis:6379".
+      REDIS_HOST: judge-link:6379
       HEALTH_PORT: "8081"
       LOG_LEVEL: ${JUDGE_LOG_LEVEL:-info}
       DEFAULT_POOL_SIZE: ${JUDGE_POOL_SIZE:-2}
@@ -141,10 +143,16 @@ services:
     restart: unless-stopped
     environment:
       TS_AUTHKEY: ${TS_AUTHKEY:-}
-      TS_HOSTNAME: judge-worker
-      TS_STATE_DIR: /var/lib/tailscale
-      TS_USERSPACE: "false"
-      TS_ACCEPT_DNS: "false"
+    # Not the image's own startup script: it gives `tailscale up` 60 s and then restarts, so a
+    # login link opened later never sticks. This waits for the login as long as it takes; once
+    # logged in, the state volume keeps the node and later starts don't ask again.
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        tailscaled --state=/var/lib/tailscale/tailscaled.state &
+        until tailscale status >/dev/null 2>&1 || tailscale status 2>&1 | grep -q -i login; do sleep 1; done
+        tailscale up --hostname=judge-worker --accept-dns=false $${TS_AUTHKEY:+--auth-key=$$TS_AUTHKEY}
+        wait
     cap_add: [NET_ADMIN, NET_RAW]
     devices:
       - /dev/net/tun:/dev/net/tun
