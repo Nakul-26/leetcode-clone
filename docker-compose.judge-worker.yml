@@ -63,7 +63,9 @@ services:
       LOG_LEVEL: ${JUDGE_LOG_LEVEL:-info}
       # Defaults below copy the main judge's tuning in deploy2's Dokploy (2026-11-06), so both
       # judges take the same share of the work. With the stock defaults (4 interactive workers
-      # against 12) the second judge took 27% of the load test's requests.
+      # against 12) the second judge took 27% of the load test's requests. Python is raised past
+      # that (20 containers, 24 interactive workers): at ~300 ms a run, 10 Python containers cap
+      # a judge near 34 runs/s while its CPU sits mostly idle (load test 2026-11-06).
       DEFAULT_POOL_SIZE: ${JUDGE_POOL_SIZE:-4}
       MAX_EXECUTIONS_PER_CONTAINER: ${JUDGE_MAX_EXECS:-500}
       # Per-language pool sizing / autoscaling — see docker-compose.prod.yml's header for the full
@@ -79,13 +81,13 @@ services:
       # container, so a setting added in Dokploy but missing here is silently ignored (this happened
       # to JUDGE_INTERACTIVE_WORKERS, JUDGE_POOL_MAX_PY and JUDGE_BATCH_THRESHOLD_*). An empty value
       # means "use the judge's built-in default", so listing them changes nothing until they are set.
-      JUDGE_INTERACTIVE_WORKERS: ${JUDGE_INTERACTIVE_WORKERS:-12}
+      JUDGE_INTERACTIVE_WORKERS: ${JUDGE_INTERACTIVE_WORKERS:-24}
       JUDGE_INTERACTIVE_RESERVE: ${JUDGE_INTERACTIVE_RESERVE:-}
       JUDGE_BATCH_THRESHOLD_PY: ${JUDGE_BATCH_THRESHOLD_PY:-}
       JUDGE_BATCH_THRESHOLD_JS: ${JUDGE_BATCH_THRESHOLD_JS:-}
       JUDGE_BATCH_THRESHOLD_JAVA: ${JUDGE_BATCH_THRESHOLD_JAVA:-1}
       JUDGE_BATCH_THRESHOLD_CPP: ${JUDGE_BATCH_THRESHOLD_CPP:-1}
-      JUDGE_POOL_MAX_PY: ${JUDGE_POOL_MAX_PY:-10}
+      JUDGE_POOL_MAX_PY: ${JUDGE_POOL_MAX_PY:-20}
       JUDGE_POOL_MAX_JS: ${JUDGE_POOL_MAX_JS:-}
       JUDGE_POOL_MAX_TS: ${JUDGE_POOL_MAX_TS:-}
       JUDGE_POOL_MAX_C: ${JUDGE_POOL_MAX_C:-}

@@ -21,6 +21,13 @@ import (
 // Executor holds the Docker client
 type Executor struct {
 	cli *docker.Client
+	// memoryMb remembers the last memory limit set on each container (container ID ->
+	// int64), so a run that asks for the limit the container already has skips the
+	// `docker update` call. A run used to make up to three (set, compile limit, reset to
+	// 1024), usually with the same value, at 30-50 ms each. Entries for removed containers
+	// stay (the pool removes them with its own client); one small entry per container
+	// ever created is negligible, and IDs are never reused.
+	memoryMb sync.Map
 }
 
 // maxCapturedOutputBytes caps how much of a single exec's stdout/stderr this process
@@ -107,6 +114,10 @@ func (e *Executor) UpdateContainerResources(ctx context.Context, containerID str
 		return nil
 	}
 
+	if current, ok := e.memoryMb.Load(containerID); ok && current.(int64) == memoryMb {
+		return nil
+	}
+
 	memoryBytes := memoryMb * 1024 * 1024
 	slog.Info("Updating container resource limits", "containerId", containerID, "memoryMb", memoryMb)
 
@@ -116,8 +127,11 @@ func (e *Executor) UpdateContainerResources(ctx context.Context, containerID str
 		MemorySwap: int(memoryBytes),
 	}
 	if err := e.cli.UpdateContainer(containerID, opts); err != nil {
+		// Unknown now: the next call must really update.
+		e.memoryMb.Delete(containerID)
 		return fmt.Errorf("failed to update container memory limit: %w", err)
 	}
+	e.memoryMb.Store(containerID, memoryMb)
 	return nil
 }
 
