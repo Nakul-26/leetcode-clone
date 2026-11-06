@@ -147,6 +147,7 @@ func Snapshot() map[string]interface{} {
 		lastReconcileRunStr = time.Unix(0, lastReconcileRun).UTC().Format(time.RFC3339)
 	}
 
+	dockerCalls, judged := SnapshotDockerCalls()
 	return map[string]interface{}{
 		"last_gc_run_unix":             lastGCRun,
 		"last_gc_run":                  lastGCRunStr,
@@ -158,5 +159,56 @@ func Snapshot() map[string]interface{} {
 		"reconcile_repairs_total":      atomic.LoadInt64(&reconcileRepairsTotal),
 		"container_replacements_total": atomic.LoadInt64(&containerReplacementsTotal),
 		"acquire_wait":                 SnapshotAcquire(),
+		"docker_calls":                 dockerCalls,
+		"judged_submissions":           judged,
 	}
+}
+
+// Docker API calls made while judging (JUDGE_AGENT_PLAN Phase 0): how many of each kind and
+// how long they took, cumulative since start. With JudgedSubmissions, a diff of two snapshots
+// gives calls and Docker time per submission, the number the agent plan sets out to cut.
+type dockerOpCounters struct {
+	count int64
+	nanos int64
+}
+
+var (
+	dockerOpsMu       sync.Mutex
+	dockerOps         = map[string]*dockerOpCounters{}
+	judgedSubmissions int64
+)
+
+// RecordDockerCall records one Docker API call of the given kind ("exec_create", "stats", ...).
+func RecordDockerCall(op string, d time.Duration) {
+	dockerOpsMu.Lock()
+	c, ok := dockerOps[op]
+	if !ok {
+		c = &dockerOpCounters{}
+		dockerOps[op] = c
+	}
+	dockerOpsMu.Unlock()
+	atomic.AddInt64(&c.count, 1)
+	atomic.AddInt64(&c.nanos, d.Nanoseconds())
+}
+
+// RecordJudgedSubmission counts a submission that reached a container and finished.
+func RecordJudgedSubmission() {
+	atomic.AddInt64(&judgedSubmissions, 1)
+}
+
+// DockerCallSnapshot is one kind of Docker call, cumulative since start.
+type DockerCallSnapshot struct {
+	Count   int64   `json:"count"`
+	TotalMs float64 `json:"total_ms"`
+}
+
+// SnapshotDockerCalls returns the Docker call counters and the judged-submission count.
+func SnapshotDockerCalls() (map[string]DockerCallSnapshot, int64) {
+	dockerOpsMu.Lock()
+	defer dockerOpsMu.Unlock()
+	out := make(map[string]DockerCallSnapshot, len(dockerOps))
+	for op, c := range dockerOps {
+		out[op] = DockerCallSnapshot{Count: atomic.LoadInt64(&c.count), TotalMs: float64(atomic.LoadInt64(&c.nanos)) / 1e6}
+	}
+	return out, atomic.LoadInt64(&judgedSubmissions)
 }

@@ -126,7 +126,7 @@ func (e *Executor) UpdateContainerResources(ctx context.Context, containerID str
 		Memory:     int(memoryBytes),
 		MemorySwap: int(memoryBytes),
 	}
-	if err := e.cli.UpdateContainer(containerID, opts); err != nil {
+	if err := e.updateContainer(containerID, opts); err != nil {
 		// Unknown now: the next call must really update.
 		e.memoryMb.Delete(containerID)
 		return fmt.Errorf("failed to update container memory limit: %w", err)
@@ -215,7 +215,7 @@ func (e *Executor) runExecWithTimeout(ctx context.Context, containerID string, u
 		AttachStderr: true,
 		Context:      ctx,
 	}
-	execObj, err := e.cli.CreateExec(execOpts)
+	execObj, err := e.createExec(execOpts)
 	if err != nil {
 		return "", "", -1, fmt.Errorf("failed to create exec: %w", err)
 	}
@@ -229,7 +229,7 @@ func (e *Executor) runExecWithTimeout(ctx context.Context, containerID string, u
 		ErrorStream:  stderrBuf,
 		Context:      childCtx,
 	}
-	closeWaiter, err := e.cli.StartExecNonBlocking(execObj.ID, startExecOptions)
+	closeWaiter, err := e.startExec(execObj.ID, startExecOptions)
 	if err != nil {
 		return stdoutBuf.String(), stderrBuf.String(), -1, fmt.Errorf("failed to start exec: %w", err)
 	}
@@ -279,7 +279,7 @@ func (e *Executor) runExecWithTimeout(ctx context.Context, containerID string, u
 	}
 
 	// Inspect exec to get exit code
-	inspect, err := e.cli.InspectExec(execObj.ID)
+	inspect, err := e.inspectExec(execObj.ID)
 	if err != nil {
 		return stdoutBuf.String(), stderrBuf.String(), -1, fmt.Errorf("failed to inspect exec: %w", err)
 	}
@@ -311,7 +311,7 @@ func (e *Executor) runExecWithStdinTimeout(ctx context.Context, containerID stri
 		AttachStderr: true,
 		Context:      ctx,
 	}
-	execObj, err := e.cli.CreateExec(execOpts)
+	execObj, err := e.createExec(execOpts)
 	if err != nil {
 		return "", "", -1, fmt.Errorf("failed to create exec: %w", err)
 	}
@@ -325,7 +325,7 @@ func (e *Executor) runExecWithStdinTimeout(ctx context.Context, containerID stri
 		ErrorStream:  stderrBuf,
 		Context:      childCtx,
 	}
-	closeWaiter, err := e.cli.StartExecNonBlocking(execObj.ID, startExecOptions)
+	closeWaiter, err := e.startExec(execObj.ID, startExecOptions)
 	if err != nil {
 		return stdoutBuf.String(), stderrBuf.String(), -1, fmt.Errorf("failed to start exec: %w", err)
 	}
@@ -372,7 +372,7 @@ func (e *Executor) runExecWithStdinTimeout(ctx context.Context, containerID stri
 		return stdoutBuf.String(), stderrBuf.String(), -1, ctx.Err()
 	}
 
-	inspect, err := e.cli.InspectExec(execObj.ID)
+	inspect, err := e.inspectExec(execObj.ID)
 	if err != nil {
 		return stdoutBuf.String(), stderrBuf.String(), -1, fmt.Errorf("failed to inspect exec: %w", err)
 	}
@@ -472,7 +472,7 @@ func (e *Executor) runExecStreamWithTimeout(ctx context.Context, containerID str
 		AttachStderr: true,
 		Context:      ctx,
 	}
-	execObj, err := e.cli.CreateExec(execOpts)
+	execObj, err := e.createExec(execOpts)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create exec: %w", err)
 	}
@@ -486,7 +486,7 @@ func (e *Executor) runExecStreamWithTimeout(ctx context.Context, containerID str
 		ErrorStream:  stderrWriter,
 		Context:      childCtx,
 	}
-	closeWaiter, err := e.cli.StartExecNonBlocking(execObj.ID, startExecOptions)
+	closeWaiter, err := e.startExec(execObj.ID, startExecOptions)
 	if err != nil {
 		cancel()
 		_ = stdoutWriter.Close()
@@ -561,7 +561,7 @@ func (e *Executor) runExecStreamWithTimeout(ctx context.Context, containerID str
 			return
 		}
 
-		inspect, err := e.cli.InspectExec(execObj.ID)
+		inspect, err := e.inspectExec(execObj.ID)
 		if err != nil {
 			waitResult.err = fmt.Errorf("failed to inspect exec: %w", err)
 			stream.waitCh <- waitResult
@@ -858,7 +858,7 @@ func (e *Executor) runExecWithStdin(ctx context.Context, containerID string, use
 		AttachStderr: true,
 		Context:      ctx,
 	}
-	execObj, err := e.cli.CreateExec(execOpts)
+	execObj, err := e.createExec(execOpts)
 	if err != nil {
 		return "", "", -1, fmt.Errorf("failed to create exec: %w", err)
 	}
@@ -872,7 +872,7 @@ func (e *Executor) runExecWithStdin(ctx context.Context, containerID string, use
 		ErrorStream:  stderrBuf,
 		Context:      childCtx,
 	}
-	closeWaiter, err := e.cli.StartExecNonBlocking(execObj.ID, startExecOptions)
+	closeWaiter, err := e.startExec(execObj.ID, startExecOptions)
 	if err != nil {
 		return stdoutBuf.String(), stderrBuf.String(), -1, fmt.Errorf("failed to start exec: %w", err)
 	}
@@ -919,7 +919,7 @@ func (e *Executor) runExecWithStdin(ctx context.Context, containerID string, use
 		return stdoutBuf.String(), stderrBuf.String(), -1, ctx.Err()
 	}
 
-	inspect, err := e.cli.InspectExec(execObj.ID)
+	inspect, err := e.inspectExec(execObj.ID)
 	if err != nil {
 		return stdoutBuf.String(), stderrBuf.String(), -1, fmt.Errorf("failed to inspect exec: %w", err)
 	}

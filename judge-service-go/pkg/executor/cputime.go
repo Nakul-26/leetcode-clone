@@ -38,7 +38,9 @@ func (e *Executor) ContainerCPUTime(ctx context.Context, containerID string) (ti
 	if err != nil {
 		return 0, err
 	}
+	statsStart := time.Now()
 	resp, err := e.cli.HTTPClient.Do(req)
+	recordSince("stats", statsStart)
 	if err != nil {
 		return 0, fmt.Errorf("container stats: %w", err)
 	}

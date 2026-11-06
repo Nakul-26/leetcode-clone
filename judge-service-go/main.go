@@ -920,6 +920,8 @@ func StartPeriodicOrphanGC(ctx context.Context, cli *docker.Client, interval tim
 // memory limit), so nothing from one submission is visible to the next. If the reset fails
 // the container cannot be trusted clean and is discarded instead.
 func finishWithContainer(containerPool *pool.ContainerPool, ex *executor.Executor, container *pool.PooledContainer, discard bool, reason string) {
+	// Every job that used a container ends here, so this is the denominator for Docker calls per job.
+	metrics.RecordJudgedSubmission()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	if !discard && ex != nil {
