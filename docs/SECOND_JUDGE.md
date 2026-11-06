@@ -126,3 +126,28 @@ No errors. At 10 concurrent, each judge took exactly half; at 40-80 the split wa
 (deploy4 903, deploy2 2,474), so something other than judge CPU now limits throughput (the
 API, Mongo or RabbitMQ on deploy2, or the extra round trips from deploy4). Find that before
 adding a third judge.
+
+### Why two judges are not 2x (investigated 2026-11-06)
+
+After fixing the worker's settings (it ran on stock defaults: 4 interactive workers vs 12, smaller
+pools, no batching) and the interactive prefetch (each judge grabbed up to 24 waiting requests
+for its interactive workers), the peak went to **Python ~2,800-3,000/min and C++ ~1,100-1,150/min,
+about 1.7x one judge**, 0 errors; deploy4 judges ~40% of requests.
+
+What limits it now:
+
+1. **The servers are not equal.** deploy2 is a Ryzen 5 8500G (2024), deploy4 an Intel i7-8700
+   (2017). Every Docker operation is 1.5-1.8x slower on deploy4 (`docker exec` of a Python
+   one-liner: 67 ms vs 118 ms), so its judge needs ~550 ms per Python request against ~290 ms.
+   With deploy4 worth ~0.6 of deploy2, ~1.6-1.7x is the ceiling for this pair.
+2. **Both hosts run out of CPU, and most of it is Docker itself.** During a Python burst
+   deploy2 was ~85% busy and deploy4 ~78%, led by `dockerd`, `containerd` and `runc`: each run
+   costs several Docker API calls (copy code in, exec, update limits, reset). More containers or
+   workers don't help (deploy4 at 20 Python containers: +10% throughput, 2x the time per run).
+3. **Not the link.** Redis round trip is 0.19 ms locally and 1.03 ms from deploy4 through the
+   relays: a few ms per request at most.
+
+So the next gain is fewer Docker calls per run, which helps both judges: the executor now
+skips `docker update` when the limit is unchanged (it made up to 3 per run). Bigger steps would
+be running several queued requests per exec, or a long-lived runner inside each sandbox that
+takes work without a new `docker exec` each time.
