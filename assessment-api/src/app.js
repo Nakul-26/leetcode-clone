@@ -7,6 +7,7 @@ import { v4 as uuidv4 } from "uuid";
 import routes from "./routes/index.js";
 import { errorHandler } from "./middleware/errorHandler.js";
 import { getAllowedOrigins } from "./config/corsOrigins.js";
+import { rateLimitKey, isApiKeyJudgeRoute } from "./middleware/rateLimitKey.js";
 
 import swaggerUi from "swagger-ui-express";
 import { swaggerSpec } from "./config/swagger.js";
@@ -20,6 +21,8 @@ app.use(helmet());
 const generalLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 10000, // Increased for load testing
+  keyGenerator: rateLimitKey,
+  skip: isApiKeyJudgeRoute,
   standardHeaders: true,
   legacyHeaders: false,
 });
@@ -28,6 +31,7 @@ const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 100, // Still reasonably strict for auth
   message: "Too many attempts, please try again after 15 minutes",
+  keyGenerator: rateLimitKey,
   standardHeaders: true,
   legacyHeaders: false,
 });
@@ -36,6 +40,7 @@ const integrationLimiter = rateLimit({
   windowMs: 1 * 60 * 1000, // 1 minute
   max: 10000, // High limit for the testing platform integration
   message: "Too many integration requests, applying backpressure",
+  keyGenerator: rateLimitKey,
   standardHeaders: true,
   legacyHeaders: false,
 });
@@ -44,6 +49,7 @@ const arventiqLimiter = rateLimit({
   windowMs: 1 * 60 * 1000, // 1 minute
   max: 10000, // High limit — same rationale as integrationLimiter
   message: "Too many Arventiq requests, applying backpressure",
+  keyGenerator: rateLimitKey,
   standardHeaders: true,
   legacyHeaders: false,
 });
@@ -54,6 +60,7 @@ const interviewLinkLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 200,
   message: "Too many requests, please try again later",
+  keyGenerator: rateLimitKey,
   standardHeaders: true,
   legacyHeaders: false,
 });
