@@ -18,7 +18,10 @@
 # the judge reaches RabbitMQ, Mongo and Redis at judge-link:5672/27017/6379.
 #
 # Environment (Dokploy -> Environment):
-#   TS_LAN_ENDPOINT       this host's LAN IP + ":41641" (e.g. 172.16.1.135:41641) for a direct link
+#   TS_LAN_ENDPOINT       this host's LAN IP + ":" + TS_PORT (e.g. 172.16.29.30:41641) for a direct link
+#   TS_PORT               UDP port Tailscale uses on this host (default 41641). A second worker
+#                         stack on the same server needs another one, e.g. 41642.
+#   TS_HOSTNAME           this node's name on the tailnet (default judge-worker)
 #   JUDGE_SHARE_HOST   Tailscale address of the "judge-share" node, e.g. 100.101.102.103
 #   TS_AUTHKEY         optional; without it, judge-link's log prints a login link on first deploy
 #   RABBITMQ_PASS, MONGO_ROOT_PASS, REDIS_PASS   the SAME values as the main GO Judge stack
@@ -78,6 +81,10 @@ services:
       JUDGE_WORKER_CONCURRENCY: ${JUDGE_WORKER_CONCURRENCY:-24}
       JUDGE_SANDBOX_RUNTIME: ${JUDGE_SANDBOX_RUNTIME:-}
       JUDGE_MERGED_EXECS: ${JUDGE_MERGED_EXECS:-false}
+      # Which stack this judge's sandboxes belong to, so a second stack on the same server
+      # (deploy2 runs two) keeps its sandboxes when this one starts. Defaults to the Compose
+      # project name, which Dokploy makes unique per compose.
+      JUDGE_INSTANCE: ${JUDGE_INSTANCE:-${COMPOSE_PROJECT_NAME:-}}
       # Every other judge setting is passed through as well. Only variables listed here reach the
       # container, so a setting added in Dokploy but missing here is silently ignored (this happened
       # to JUDGE_INTERACTIVE_WORKERS, JUDGE_POOL_MAX_PY and JUDGE_BATCH_THRESHOLD_*). An empty value
@@ -146,7 +153,7 @@ services:
   # 100.x addresses directly. Needs /dev/net/tun and NET_ADMIN, nothing on the host.
   judge-link:
     image: tailscale/tailscale:stable
-    hostname: judge-worker
+    hostname: ${TS_HOSTNAME:-judge-worker}
     restart: unless-stopped
     environment:
       TS_AUTHKEY: ${TS_AUTHKEY:-}
@@ -160,15 +167,15 @@ services:
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
-        tailscaled --state=/var/lib/tailscale/tailscaled.state --port=41641 &
+        tailscaled --state=/var/lib/tailscale/tailscaled.state --port=${TS_PORT:-41641} &
         until [ -S /var/run/tailscale/tailscaled.sock ]; do sleep 1; done
-        tailscale up --hostname=judge-worker --accept-dns=false $${TS_AUTHKEY:+--auth-key=$$TS_AUTHKEY}
+        tailscale up --hostname=${TS_HOSTNAME:-judge-worker} --accept-dns=false $${TS_AUTHKEY:+--auth-key=$$TS_AUTHKEY}
         wait
     cap_add: [NET_ADMIN, NET_RAW]
     devices:
       - /dev/net/tun:/dev/net/tun
     ports:
-      - "41641:41641/udp"   # Tailscale's encrypted WireGuard traffic only
+      - "${TS_PORT:-41641}:${TS_PORT:-41641}/udp"   # Tailscale's encrypted WireGuard traffic only
     volumes:
       - ts_state:/var/lib/tailscale
     networks:

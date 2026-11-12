@@ -372,6 +372,10 @@ services:
       JUDGE_WORKER_CONCURRENCY: ${JUDGE_WORKER_CONCURRENCY:-24}
       JUDGE_SANDBOX_RUNTIME: ${JUDGE_SANDBOX_RUNTIME:-}
       JUDGE_MERGED_EXECS: ${JUDGE_MERGED_EXECS:-false}
+      # Which stack this judge's sandboxes belong to, so a second stack on the same server
+      # (deploy2 runs two) keeps its sandboxes when this one starts. Defaults to the Compose
+      # project name, which Dokploy makes unique per compose.
+      JUDGE_INSTANCE: ${JUDGE_INSTANCE:-${COMPOSE_PROJECT_NAME:-}}
       # Every other judge setting is passed through as well. Only variables listed here reach the
       # container, so a setting added in Dokploy but missing here is silently ignored (this happened
       # to JUDGE_INTERACTIVE_WORKERS, JUDGE_POOL_MAX_PY and JUDGE_BATCH_THRESHOLD_*). An empty value

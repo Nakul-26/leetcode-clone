@@ -836,6 +836,9 @@ func (p *ContainerPool) createContainer(ctx context.Context, image string, lang 
 		},
 		HostConfig: hostCfg,
 	}
+	if instance := Instance(); instance != "" {
+		containerOptions.Config.Labels[InstanceLabelKey] = instance
+	}
 
 	// If containerUser configured, set it
 	if containerUser != "" {

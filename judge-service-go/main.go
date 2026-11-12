@@ -823,7 +823,8 @@ func looksLikeContainerFailure(message string) bool {
 }
 
 // cleanupOrphanContainers removes containers left from previous runs that
-// were created by this service (labelled with managed-by=judge-service).
+// were created by this service (labelled with managed-by=judge-service) and by this stack
+// (pool.OwnedByThisInstance): another judge stack on the same host keeps its sandboxes.
 func cleanupOrphanContainers(ctx context.Context, cli *docker.Client) error {
 	filters := map[string][]string{
 		"label": {"managed-by=judge-service"},
@@ -839,6 +840,9 @@ func cleanupOrphanContainers(ctx context.Context, cli *docker.Client) error {
 
 	removed := 0
 	for _, c := range containers {
+		if !pool.OwnedByThisInstance(c.Labels) {
+			continue
+		}
 		slog.Info("Removing orphan container", "id", c.ID, "names", c.Names)
 		if err := cli.RemoveContainer(docker.RemoveContainerOptions{ID: c.ID, Force: true}); err != nil {
 			slog.Error("Failed to remove orphan container", "id", c.ID, "error", err)
@@ -853,7 +857,7 @@ func cleanupOrphanContainers(ctx context.Context, cli *docker.Client) error {
 }
 
 // StartPeriodicOrphanGC starts a background goroutine that periodically
-// removes stopped/dead containers labelled as managed-by=judge-service.
+// removes this stack's stopped/dead containers labelled as managed-by=judge-service.
 func StartPeriodicOrphanGC(ctx context.Context, cli *docker.Client, interval time.Duration) {
 	if interval <= 0 {
 		return
@@ -871,10 +875,17 @@ func StartPeriodicOrphanGC(ctx context.Context, cli *docker.Client, interval tim
 					"status": {"exited", "dead"},
 				}
 				opts := docker.ListContainersOptions{All: true, Filters: filters}
-				containers, err := cli.ListContainers(opts)
+				listed, err := cli.ListContainers(opts)
 				if err != nil {
 					slog.Error("periodic GC: failed to list containers", "error", err)
 					continue
+				}
+				// Another judge stack on this host collects its own.
+				var containers []docker.APIContainers
+				for _, c := range listed {
+					if pool.OwnedByThisInstance(c.Labels) {
+						containers = append(containers, c)
+					}
 				}
 				removed := 0
 				for _, c := range containers {

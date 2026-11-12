@@ -11,7 +11,10 @@
 # on the same host, so anything added there would run twice and clash.
 #
 # Environment (Dokploy -> Environment):
-#   TS_LAN_ENDPOINT       this host's LAN IP + ":41641" (e.g. 172.16.1.135:41641) for a direct link
+#   TS_LAN_ENDPOINT       this host's LAN IP + ":" + TS_PORT (e.g. 172.16.1.135:41641) for a direct link
+#   TS_PORT               UDP port Tailscale uses on this host (default 41641). A second Judge Share
+#                         on the same server needs another one, e.g. 41642.
+#   TS_HOSTNAME           this node's name on the tailnet (default judge-share)
 #   TS_AUTHKEY            Optional Tailscale auth key (admin console -> Settings -> Keys).
 #                         Without it, `docker exec <tailscale container> tailscale status`
 #                         shows a login link; open it to add the node. Either way the node keeps its identity in the
@@ -24,7 +27,7 @@
 services:
   tailscale:
     image: tailscale/tailscale:stable
-    hostname: judge-share
+    hostname: ${TS_HOSTNAME:-judge-share}
     restart: unless-stopped
     environment:
       TS_AUTHKEY: ${TS_AUTHKEY:-}
@@ -40,12 +43,12 @@ services:
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
-        tailscaled --state=/var/lib/tailscale/tailscaled.state --tun=userspace-networking --port=41641 &
+        tailscaled --state=/var/lib/tailscale/tailscaled.state --tun=userspace-networking --port=${TS_PORT:-41641} &
         until [ -S /var/run/tailscale/tailscaled.sock ]; do sleep 1; done
-        tailscale up --hostname=judge-share --accept-dns=false $${TS_AUTHKEY:+--auth-key=$$TS_AUTHKEY}
+        tailscale up --hostname=${TS_HOSTNAME:-judge-share} --accept-dns=false $${TS_AUTHKEY:+--auth-key=$$TS_AUTHKEY}
         wait
     ports:
-      - "41641:41641/udp"   # Tailscale's encrypted WireGuard traffic only
+      - "${TS_PORT:-41641}:${TS_PORT:-41641}/udp"   # Tailscale's encrypted WireGuard traffic only
     volumes:
       - ts_state:/var/lib/tailscale
     networks:

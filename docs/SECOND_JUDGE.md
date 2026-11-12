@@ -106,6 +106,10 @@ consuming the queues, with no connection errors.
 - **Deploy both judges from the same commit.** When judge code changes, deploy GO Judge on
   deploy2 and then Judge Worker on server 2. Until both are on the same version, either may
   take a given submission.
+- **Another stack on the same servers** (the Exam Sandbox copy on deploy2 can get its own
+  second judge): `docs/SECOND_JUDGE_FOR_ANOTHER_STACK.md`. Each judge labels its sandboxes with
+  `JUDGE_INSTANCE` (default: the Dokploy compose name) and cleans up only its own; before
+  2026-11-12 a judge starting up removed every stack's sandboxes on its server.
 - **To stop the second judge**, stop Judge Worker on server 2. Work carries on on deploy2. The
   Judge Share stack can stay.
 - Size each server's pool for its own CPU (see `docs/JUDGE_PERFORMANCE_REVIEW.md`). The pool
