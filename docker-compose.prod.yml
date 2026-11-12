@@ -45,6 +45,10 @@
 #   JUDGE_SANDBOX_RUNTIME  (default: empty = runc) — set to runsc to run submissions under gVisor
 #                          (JUDGE_FIX_PLAN S3). runsc must first be installed and registered as a
 #                          runtime in the host's Docker daemon, or every container create fails.
+#   JUDGE_MERGED_EXECS     (default: false) — true sends a submission's files in the same exec as
+#                          its compile or run, and moves the between-submission wipe into the next
+#                          submission's first exec: 4 -> 2 execs per Python run (JUDGE_AGENT_PLAN
+#                          Phase 1).
 #   JUDGE_WORKER_CONCURRENCY  (default: 24) — how many submissions can be pulled off RabbitMQ
 #                          and processed concurrently. Deliberately set above the host's core
 #                          count: these workers spend most of their time blocked on Docker API
@@ -367,6 +371,7 @@ services:
       JUDGE_POOL_AUTOSCALE_ENABLED: ${JUDGE_POOL_AUTOSCALE_ENABLED:-false}
       JUDGE_WORKER_CONCURRENCY: ${JUDGE_WORKER_CONCURRENCY:-24}
       JUDGE_SANDBOX_RUNTIME: ${JUDGE_SANDBOX_RUNTIME:-}
+      JUDGE_MERGED_EXECS: ${JUDGE_MERGED_EXECS:-false}
       # Every other judge setting is passed through as well. Only variables listed here reach the
       # container, so a setting added in Dokploy but missing here is silently ignored (this happened
       # to JUDGE_INTERACTIVE_WORKERS, JUDGE_POOL_MAX_PY and JUDGE_BATCH_THRESHOLD_*). An empty value

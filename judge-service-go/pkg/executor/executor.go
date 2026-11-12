@@ -28,6 +28,15 @@ type Executor struct {
 	// stay (the pool removes them with its own client); one small entry per container
 	// ever created is negligible, and IDs are never reused.
 	memoryMb sync.Map
+
+	// Merged execs (JUDGE_MERGED_EXECS, JUDGE_AGENT_PLAN Phase 1), per container ID:
+	// wipePending: the last reset killed everything but left the wipe to the next use's first
+	// judge-user exec (see beginPrep). staleLimit: the last reset left a submission's memory
+	// limit in place; the next use restores the default unless it sets a limit of its own.
+	// broken: a deferred wipe or upload failed, so the container must not be reused.
+	wipePending sync.Map
+	staleLimit  sync.Map
+	broken      sync.Map
 }
 
 // maxCapturedOutputBytes caps how much of a single exec's stdout/stderr this process
@@ -113,6 +122,8 @@ func (e *Executor) UpdateContainerResources(ctx context.Context, containerID str
 	if memoryMb <= 0 {
 		return nil
 	}
+	// This use chose its own limit, so the previous use's need not be restored.
+	e.staleLimit.Delete(containerID)
 
 	if current, ok := e.memoryMb.Load(containerID); ok && current.(int64) == memoryMb {
 		return nil
@@ -169,26 +180,69 @@ func (e *Executor) CopyFiles(ctx context.Context, containerID string, hostWorkDi
 // A non-zero exit from either makes the caller discard the container instead of reusing it
 // dirty. Because the reset is what makes reuse safe, a TLE, MLE or crash no longer discards the
 // container (JUDGE_FIX_PLAN T2).
-const containerKillScript = `command -v pkill >/dev/null || { echo "pkill missing"; exit 1; }; ` +
+const containerKillCmds = `command -v pkill >/dev/null || { echo "pkill missing"; exit 1; }; ` +
 	`pkill -9 -u judge; ` +
 	`i=0; while pgrep -u judge >/dev/null && [ $i -lt 40 ]; do sleep 0.05; i=$((i+1)); done; ` +
-	`if pgrep -u judge >/dev/null; then echo "judge processes survived the reset"; exit 1; fi; exit 0`
+	`if pgrep -u judge >/dev/null; then echo "judge processes survived the reset"; exit 1; fi`
 
-const containerWipeScript = `cd /; ` +
+const containerKillScript = containerKillCmds + `; exit 0`
+
+// containerWipeCmds is the wipe without its final exit, so beginPrep can run it ahead of a
+// command. It exits 1 if anything is left. The hook's stdin is /dev/null because in a merged
+// exec stdin carries the upload or the program's input.
+const containerWipeCmds = `cd /; ` +
 	`find /app /tmp -mindepth 1 -maxdepth 1 -exec chmod -R u+rwx {} + 2>/dev/null; ` +
 	`find /app /tmp -mindepth 1 -maxdepth 1 -exec rm -rf {} + 2>/dev/null; ` +
 	`left=$(find /app /tmp -mindepth 1 2>&1 | head -n 5); ` +
 	`if [ -n "$left" ]; then echo "not removed by the reset: $left"; exit 1; fi; ` +
 	// The same hook the pool runs when it creates a container (pool.warmupHookPath).
-	`if [ -x /usr/local/bin/judge-warmup ]; then /usr/local/bin/judge-warmup; fi; exit 0`
+	`if [ -x /usr/local/bin/judge-warmup ]; then /usr/local/bin/judge-warmup </dev/null; fi`
+
+const containerWipeScript = containerWipeCmds + `; exit 0`
+
+// containerUsageScript runs after containerKillScript in merged mode and prints how much the
+// submission left in /app and /tmp (KB, then inodes), which decides whether the wipe can wait.
+// statfs needs no read access to the files, so root without capabilities can run it.
+const containerUsageScript = `echo judge-df-k; df -P -k /app /tmp; echo judge-df-i; df -P -i /app /tmp`
+
+// A deferred wipe runs inside the next submission's first exec, under that submission's memory
+// limit and partly on its clock (it is counted in its first test's CPU time). It is deferred
+// only when there is little to remove; anything bigger is wiped at release as before, so one
+// submission can neither OOM the next one's start nor make it slow by leaving many files.
+const (
+	deferWipeMaxKB     = 8 * 1024
+	deferWipeMaxInodes = 512
+)
+
+// defaultMemoryMb is the limit a container is reset to between submissions.
+const defaultMemoryMb = 1024
+
+// MergedExecsEnabled reports JUDGE_MERGED_EXECS=true (JUDGE_AGENT_PLAN Phase 1): the upload
+// shares an exec with the compile or run that follows it, and the reset's wipe moves to the
+// next submission's first exec. Read on each call so tests can switch it.
+func MergedExecsEnabled() bool {
+	v := strings.ToLower(strings.TrimSpace(os.Getenv("JUDGE_MERGED_EXECS")))
+	return v == "true" || v == "1"
+}
 
 // ResetContainer cleans a container after a submission and restores its default memory limit,
 // before it goes back to the pool. Once per submission, so per-test steps can skip both.
 // An error means the container could not be trusted clean; the caller should discard it.
+//
+// In merged mode the kill still runs here, so nothing of the submission keeps running, but a
+// small wipe is left to the next use (beginPrep), and so is the memory limit: the next use
+// usually sets its own, often the same one, which then costs no `docker update`.
 func (e *Executor) ResetContainer(ctx context.Context, containerID string) error {
+	if reason, ok := e.broken.LoadAndDelete(containerID); ok {
+		e.forget(containerID)
+		return fmt.Errorf("container reset failed: %v", reason)
+	}
+	if MergedExecsEnabled() {
+		return e.resetDeferred(ctx, containerID)
+	}
 	// Restore the limit first: after an MLE the container is still at the problem's limit with
 	// the student's process holding memory, and the reset shell itself could be OOM-killed.
-	if err := e.UpdateContainerResources(ctx, containerID, 1024); err != nil {
+	if err := e.UpdateContainerResources(ctx, containerID, defaultMemoryMb); err != nil {
 		return err
 	}
 	stdout, stderr, exitCode, err := e.runExecWithTimeout(ctx, containerID, "root", "/", []string{"sh", "-c", containerKillScript}, 10*time.Second)
@@ -201,8 +255,87 @@ func (e *Executor) ResetContainer(ctx context.Context, containerID string) error
 	return nil
 }
 
+// resetDeferred is ResetContainer in merged mode. The kill runs under the submission's own
+// limit: the OOM killer frees memory by killing the student's processes, and if what is left
+// (files in memory-backed /tmp) still starves the kill, it fails and the container is discarded.
+func (e *Executor) resetDeferred(ctx context.Context, containerID string) error {
+	stdout, stderr, exitCode, err := e.runExecWithTimeout(ctx, containerID, "root", "/", []string{"sh", "-c", containerKillCmds + "; " + containerUsageScript + "; exit 0"}, 10*time.Second)
+	if err != nil {
+		e.forget(containerID)
+		return fmt.Errorf("container reset failed: %w (exit=%d stdout=%s stderr=%s)", err, exitCode, stdout, stderr)
+	}
+	if kb, inodes, ok := parseUsage(stdout); ok && kb <= deferWipeMaxKB && inodes <= deferWipeMaxInodes {
+		if current, known := e.memoryMb.Load(containerID); known && current.(int64) != defaultMemoryMb {
+			e.staleLimit.Store(containerID, struct{}{})
+		}
+		e.wipePending.Store(containerID, struct{}{})
+		return nil
+	}
+	// Too much to leave for the next submission (or usage unreadable): wipe now, as before.
+	e.wipePending.Delete(containerID)
+	if err := e.UpdateContainerResources(ctx, containerID, defaultMemoryMb); err != nil {
+		e.forget(containerID)
+		return err
+	}
+	stdout, stderr, exitCode, err = e.runExecWithTimeout(ctx, containerID, getJudgeUser(), "/", []string{"sh", "-c", containerWipeScript}, 10*time.Second)
+	if err != nil {
+		e.forget(containerID)
+		return fmt.Errorf("container reset failed: %w (exit=%d stdout=%s stderr=%s)", err, exitCode, stdout, stderr)
+	}
+	return nil
+}
+
+// forget drops the merged-mode state of a container that is being discarded.
+func (e *Executor) forget(containerID string) {
+	e.wipePending.Delete(containerID)
+	e.staleLimit.Delete(containerID)
+}
+
+// parseUsage reads containerUsageScript's output: the used KB and inodes of /app and /tmp
+// summed. ok is false if either table is missing or unreadable.
+func parseUsage(out string) (kb int64, inodes int64, ok bool) {
+	var section string
+	var sawK, sawI bool
+	for _, line := range strings.Split(out, "\n") {
+		line = strings.TrimSpace(line)
+		switch line {
+		case "judge-df-k", "judge-df-i":
+			section = line
+			continue
+		}
+		fields := strings.Fields(line)
+		if section == "" || len(fields) < 6 || fields[0] == "Filesystem" {
+			continue
+		}
+		var used int64
+		if _, err := fmt.Sscanf(fields[2], "%d", &used); err != nil {
+			return 0, 0, false
+		}
+		if section == "judge-df-k" {
+			kb += used
+			sawK = true
+		} else {
+			inodes += used
+			sawI = true
+		}
+	}
+	return kb, inodes, sawK && sawI
+}
+
 // runExecWithTimeout handles the full lifecycle of creating, running, and waiting for an exec instance.
 func (e *Executor) runExecWithTimeout(ctx context.Context, containerID string, user string, workDir string, cmd []string, timeout time.Duration) (string, string, int, error) {
+	return e.runExecWithUpload(ctx, containerID, user, workDir, cmd, timeout, nil)
+}
+
+// runExecWithUpload is runExecWithTimeout that, in merged mode, first extracts upload (a
+// workspace tar, or nil) into workDir in the same exec (see beginPrep).
+func (e *Executor) runExecWithUpload(ctx context.Context, containerID string, user string, workDir string, cmd []string, timeout time.Duration, upload []byte) (stdout string, stderr string, exitCode int, err error) {
+	p, cmd, workDir, err := e.beginPrep(ctx, containerID, user, workDir, cmd, upload)
+	if err != nil {
+		return "", "", -1, err
+	}
+	defer func() { err = e.endPrep(containerID, p, err) }()
+
 	stdoutBuf := &boundedWriter{limit: maxCapturedOutputBytes}
 	stderrBuf := &boundedWriter{limit: maxCapturedOutputBytes}
 
@@ -211,6 +344,7 @@ func (e *Executor) runExecWithTimeout(ctx context.Context, containerID string, u
 		User:         user,
 		Cmd:          cmd,
 		WorkingDir:   workDir,
+		AttachStdin:  upload != nil && p != nil,
 		AttachStdout: true,
 		AttachStderr: true,
 		Context:      ctx,
@@ -226,8 +360,11 @@ func (e *Executor) runExecWithTimeout(ctx context.Context, containerID string, u
 
 	startExecOptions := docker.StartExecOptions{
 		OutputStream: stdoutBuf,
-		ErrorStream:  stderrBuf,
+		ErrorStream:  p.stderr(stderrBuf),
 		Context:      childCtx,
+	}
+	if execOpts.AttachStdin {
+		startExecOptions.InputStream = bytes.NewReader(upload)
 	}
 	closeWaiter, err := e.startExec(execObj.ID, startExecOptions)
 	if err != nil {
@@ -297,7 +434,13 @@ func (e *Executor) runExecWithTimeout(ctx context.Context, containerID string, u
 // (rather than adding a stdin parameter to runExecWithTimeout) so the
 // function-mode path — covered by the existing test suite — is provably
 // untouched.
-func (e *Executor) runExecWithStdinTimeout(ctx context.Context, containerID string, user string, workDir string, cmd []string, stdinInput string, timeout time.Duration) (string, string, int, error) {
+func (e *Executor) runExecWithStdinTimeout(ctx context.Context, containerID string, user string, workDir string, cmd []string, stdinInput string, timeout time.Duration) (stdout string, stderr string, exitCode int, err error) {
+	p, cmd, workDir, err := e.beginPrep(ctx, containerID, user, workDir, cmd, nil)
+	if err != nil {
+		return "", "", -1, err
+	}
+	defer func() { err = e.endPrep(containerID, p, err) }()
+
 	stdoutBuf := &boundedWriter{limit: maxCapturedOutputBytes}
 	stderrBuf := &boundedWriter{limit: maxCapturedOutputBytes}
 
@@ -322,7 +465,7 @@ func (e *Executor) runExecWithStdinTimeout(ctx context.Context, containerID stri
 	startExecOptions := docker.StartExecOptions{
 		InputStream:  strings.NewReader(stdinInput),
 		OutputStream: stdoutBuf,
-		ErrorStream:  stderrBuf,
+		ErrorStream:  p.stderr(stderrBuf),
 		Context:      childCtx,
 	}
 	closeWaiter, err := e.startExec(execObj.ID, startExecOptions)
@@ -388,41 +531,16 @@ func (e *Executor) copyFilesToContainer(ctx context.Context, containerID string,
 	if len(files) == 0 {
 		return nil
 	}
-
-	if err := workspace.ValidateNoExternalSymlinks(hostWorkDir); err != nil {
+	tarData, err := buildWorkspaceTar(hostWorkDir, files)
+	if err != nil {
 		return err
 	}
-
-	var buf bytes.Buffer
-	tw := tar.NewWriter(&buf)
-	for _, name := range files {
-		path, err := workspace.SafeJoin(hostWorkDir, name)
-		if err != nil {
-			_ = tw.Close()
-			return fmt.Errorf("invalid workspace path %s: %w", name, err)
+	if MergedExecsEnabled() {
+		// An exec of its own still, but it also runs any wipe the last reset left pending.
+		if _, stderr, _, err := e.runExecWithUpload(ctx, containerID, getJudgeUser(), containerWorkDir, []string{"true"}, 20*time.Second, tarData); err != nil {
+			return fmt.Errorf("failed to extract files into container: %w (stderr=%s)", err, stderr)
 		}
-		data, info, err := workspace.ReadRegularFile(hostWorkDir, name)
-		if err != nil {
-			_ = tw.Close()
-			return fmt.Errorf("failed to read %s: %w", path, err)
-		}
-		hdr := &tar.Header{
-			Name:    name,
-			Mode:    int64(info.Mode().Perm()),
-			Size:    int64(len(data)),
-			ModTime: info.ModTime(),
-		}
-		if err := tw.WriteHeader(hdr); err != nil {
-			_ = tw.Close()
-			return fmt.Errorf("failed to write tar header for %s: %w", name, err)
-		}
-		if _, err := tw.Write(data); err != nil {
-			_ = tw.Close()
-			return fmt.Errorf("failed to write tar data for %s: %w", name, err)
-		}
-	}
-	if err := tw.Close(); err != nil {
-		return fmt.Errorf("failed to close tar writer: %w", err)
+		return nil
 	}
 
 	// Docker's archive-copy API (UploadToContainer, i.e. `docker cp`) does not work
@@ -439,12 +557,66 @@ func (e *Executor) copyFilesToContainer(ctx context.Context, containerID string,
 	// the workspace is its own: the reset wipes /app as that user and must be able to
 	// remove everything in it (see containerWipeScript). /app is world-writable and
 	// sticky (pool.go), so the user can create the directory. chmod -R 0777 keeps the
-	// world-writable workspace the host-side staging dir also uses.
+	// world-writable workspace the host-side staging dir also uses. prepScript extracts
+	// the same way in merged mode.
 	extractCmd := []string{"sh", "-c", `mkdir -p "$1" && tar -xf - -C "$1" && chmod -R 0777 "$1"`, "sh", containerWorkDir}
-	if _, stderr, _, err := e.runExecWithStdin(ctx, containerID, getJudgeUser(), "/", extractCmd, 20*time.Second, buf.Bytes()); err != nil {
+	if _, stderr, _, err := e.runExecWithStdin(ctx, containerID, getJudgeUser(), "/", extractCmd, 20*time.Second, tarData); err != nil {
 		return fmt.Errorf("failed to extract files into container: %w (stderr=%s)", err, stderr)
 	}
 	return nil
+}
+
+// stageUpload prepares files for upload. In merged mode it returns the tar for the next exec
+// to extract (beginPrep); otherwise it uploads them now, in an exec of their own, and returns nil.
+func (e *Executor) stageUpload(ctx context.Context, containerID string, hostWorkDir string, containerWorkDir string, files []string) ([]byte, error) {
+	if len(files) == 0 {
+		return nil, nil
+	}
+	if !MergedExecsEnabled() {
+		return nil, e.copyFilesToContainer(ctx, containerID, hostWorkDir, containerWorkDir, files)
+	}
+	return buildWorkspaceTar(hostWorkDir, files)
+}
+
+// buildWorkspaceTar packs files from a submission's host workspace for upload.
+func buildWorkspaceTar(hostWorkDir string, files []string) ([]byte, error) {
+	if err := workspace.ValidateNoExternalSymlinks(hostWorkDir); err != nil {
+		return nil, err
+	}
+
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	for _, name := range files {
+		path, err := workspace.SafeJoin(hostWorkDir, name)
+		if err != nil {
+			_ = tw.Close()
+			return nil, fmt.Errorf("invalid workspace path %s: %w", name, err)
+		}
+		data, info, err := workspace.ReadRegularFile(hostWorkDir, name)
+		if err != nil {
+			_ = tw.Close()
+			return nil, fmt.Errorf("failed to read %s: %w", path, err)
+		}
+		hdr := &tar.Header{
+			Name:    name,
+			Mode:    int64(info.Mode().Perm()),
+			Size:    int64(len(data)),
+			ModTime: info.ModTime(),
+		}
+		if err := tw.WriteHeader(hdr); err != nil {
+			_ = tw.Close()
+			return nil, fmt.Errorf("failed to write tar header for %s: %w", name, err)
+		}
+		if _, err := tw.Write(data); err != nil {
+			_ = tw.Close()
+			return nil, fmt.Errorf("failed to write tar data for %s: %w", name, err)
+		}
+	}
+	if err := tw.Close(); err != nil {
+		return nil, fmt.Errorf("failed to close tar writer: %w", err)
+	}
+
+	return buf.Bytes(), nil
 }
 
 func rewriteCommandForWorkspace(cmd []string, containerWorkDir string) []string {
@@ -462,19 +634,25 @@ func rewriteCommandForWorkspace(cmd []string, containerWorkDir string) []string 
 	return rewritten
 }
 
-func (e *Executor) runExecStreamWithTimeout(ctx context.Context, containerID string, user string, workDir string, cmd []string, timeout time.Duration) (*ExecStream, error) {
+// upload is a workspace tar to extract into workDir first, in merged mode (see beginPrep).
+func (e *Executor) runExecStreamWithTimeout(ctx context.Context, containerID string, user string, workDir string, cmd []string, timeout time.Duration, upload []byte) (*ExecStream, error) {
+	p, cmd, workDir, err := e.beginPrep(ctx, containerID, user, workDir, cmd, upload)
+	if err != nil {
+		return nil, err
+	}
 	execOpts := docker.CreateExecOptions{
 		Container:    containerID,
 		User:         user,
 		Cmd:          cmd,
 		WorkingDir:   workDir,
+		AttachStdin:  upload != nil && p != nil,
 		AttachStdout: true,
 		AttachStderr: true,
 		Context:      ctx,
 	}
 	execObj, err := e.createExec(execOpts)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create exec: %w", err)
+		return nil, e.endPrep(containerID, p, fmt.Errorf("failed to create exec: %w", err))
 	}
 
 	childCtx, cancel := context.WithTimeout(ctx, timeout)
@@ -483,8 +661,11 @@ func (e *Executor) runExecStreamWithTimeout(ctx context.Context, containerID str
 
 	startExecOptions := docker.StartExecOptions{
 		OutputStream: stdoutWriter,
-		ErrorStream:  stderrWriter,
+		ErrorStream:  p.stderr(stderrWriter),
 		Context:      childCtx,
+	}
+	if execOpts.AttachStdin {
+		startExecOptions.InputStream = bytes.NewReader(upload)
 	}
 	closeWaiter, err := e.startExec(execObj.ID, startExecOptions)
 	if err != nil {
@@ -493,7 +674,7 @@ func (e *Executor) runExecStreamWithTimeout(ctx context.Context, containerID str
 		_ = stderrWriter.Close()
 		_ = stdoutReader.Close()
 		_ = stderrReader.Close()
-		return nil, fmt.Errorf("failed to start exec: %w", err)
+		return nil, e.endPrep(containerID, p, fmt.Errorf("failed to start exec: %w", err))
 	}
 
 	stream := &ExecStream{
@@ -502,6 +683,10 @@ func (e *Executor) runExecStreamWithTimeout(ctx context.Context, containerID str
 		waitCh: make(chan execWaitResult, 1),
 	}
 
+	send := func(r execWaitResult) {
+		r.err = e.endPrep(containerID, p, r.err)
+		stream.waitCh <- r
+	}
 	go func() {
 		defer cancel()
 		defer func() {
@@ -531,7 +716,7 @@ func (e *Executor) runExecStreamWithTimeout(ctx context.Context, containerID str
 				} else {
 					waitResult.err = err
 				}
-				stream.waitCh <- waitResult
+				send(waitResult)
 				return
 			}
 		case <-childCtx.Done():
@@ -547,7 +732,7 @@ func (e *Executor) runExecStreamWithTimeout(ctx context.Context, containerID str
 			} else {
 				waitResult.err = childCtx.Err()
 			}
-			stream.waitCh <- waitResult
+			send(waitResult)
 			return
 		case <-ctx.Done():
 			closeExec()
@@ -557,14 +742,14 @@ func (e *Executor) runExecStreamWithTimeout(ctx context.Context, containerID str
 				slog.Warn("exec waiter did not exit promptly after caller cancellation", "containerId", containerID, "cmd", cmd)
 			}
 			waitResult.err = ctx.Err()
-			stream.waitCh <- waitResult
+			send(waitResult)
 			return
 		}
 
 		inspect, err := e.inspectExec(execObj.ID)
 		if err != nil {
 			waitResult.err = fmt.Errorf("failed to inspect exec: %w", err)
-			stream.waitCh <- waitResult
+			send(waitResult)
 			return
 		}
 
@@ -573,7 +758,7 @@ func (e *Executor) runExecStreamWithTimeout(ctx context.Context, containerID str
 			// stderr is still being read here; collectStream re-checks a runtime error once it is.
 			waitResult.err = e.execExitError(containerID, inspect.ExitCode, "")
 		}
-		stream.waitCh <- waitResult
+		send(waitResult)
 	}()
 
 	return stream, nil
@@ -692,7 +877,7 @@ func (e *Executor) RunInContainerWithStdin(ctx context.Context, containerID stri
 
 	runStdout, runStderr, runExit, err := e.runExecWithStdinTimeout(subCtx, containerID, getJudgeUser(), containerWorkDir, rewriteCommandForWorkspace(runCmd, containerWorkDir), stdinInput, timeout)
 
-	if memoryLimitMb > 0 {
+	if memoryLimitMb > 0 && !MergedExecsEnabled() { // merged: left to the reset at release
 		if resetErr := e.UpdateContainerResources(context.Background(), containerID, 1024); resetErr != nil {
 			slog.Error("failed to reset memory limit", "containerId", containerID, "error", resetErr)
 			if err == nil {
@@ -713,7 +898,8 @@ func (e *Executor) CompileInContainer(ctx context.Context, containerID string, f
 	subCtx, cancel := context.WithTimeout(ctx, submissionTimeout)
 	defer cancel()
 
-	if err := e.copyFilesToContainer(subCtx, containerID, hostWorkDir, containerWorkDir, files); err != nil {
+	upload, err := e.stageUpload(subCtx, containerID, hostWorkDir, containerWorkDir, files)
+	if err != nil {
 		return "", "", err
 	}
 
@@ -728,8 +914,11 @@ func (e *Executor) CompileInContainer(ctx context.Context, containerID string, f
 		}
 	}
 
-	compileStdout, compileStderr, _, err := e.runExecWithTimeout(subCtx, containerID, getJudgeUser(), containerWorkDir, rewriteCommandForWorkspace(compileCmd, containerWorkDir), timeout)
+	compileStdout, compileStderr, _, err := e.runExecWithUpload(subCtx, containerID, getJudgeUser(), containerWorkDir, rewriteCommandForWorkspace(compileCmd, containerWorkDir), timeout, upload)
 	if err != nil {
+		if IsContainerLost(err) {
+			return compileStdout, compileStderr, err
+		}
 		return compileStdout, compileStderr, NewExecutionError(ErrCompilationFailed, err.Error(), -1)
 	}
 
@@ -766,11 +955,11 @@ func (e *Executor) RunInContainerStream(ctx context.Context, containerID string,
 	submissionTimeout := timeout * 3
 	subCtx, cancel := context.WithTimeout(ctx, submissionTimeout)
 
-	if len(files) > 0 {
-		if err := e.copyFilesToContainer(subCtx, containerID, hostWorkDir, containerWorkDir, files); err != nil {
-			cancel()
-			return nil, err
-		}
+	// In merged mode the upload goes with the compile, or with the run when there is none.
+	upload, err := e.stageUpload(subCtx, containerID, hostWorkDir, containerWorkDir, files)
+	if err != nil {
+		cancel()
+		return nil, err
 	}
 
 	// Apply a reasonable limit during compilation if a strict limit is requested for run
@@ -786,9 +975,13 @@ func (e *Executor) RunInContainerStream(ctx context.Context, containerID string,
 
 	if len(compileCmd) > 0 {
 		slog.Info("Compiling in container", "containerId", containerID, "cmd", compileCmd)
-		compileStdout, compileStderr, _, err := e.runExecWithTimeout(subCtx, containerID, getJudgeUser(), containerWorkDir, rewriteCommandForWorkspace(compileCmd, containerWorkDir), timeout)
+		compileStdout, compileStderr, _, err := e.runExecWithUpload(subCtx, containerID, getJudgeUser(), containerWorkDir, rewriteCommandForWorkspace(compileCmd, containerWorkDir), timeout, upload)
+		upload = nil
 		if err != nil {
 			cancel()
+			if IsContainerLost(err) {
+				return nil, err
+			}
 			return nil, NewExecutionError(ErrCompilationFailed, fmt.Sprintf("%v | stdout=%s stderr=%s", err, compileStdout, compileStderr), -1)
 		}
 	}
@@ -800,7 +993,7 @@ func (e *Executor) RunInContainerStream(ctx context.Context, containerID string,
 		}
 	}
 
-	stream, err := e.runExecStreamWithTimeout(subCtx, containerID, getJudgeUser(), containerWorkDir, rewriteCommandForWorkspace(runCmd, containerWorkDir), timeout)
+	stream, err := e.runExecStreamWithTimeout(subCtx, containerID, getJudgeUser(), containerWorkDir, rewriteCommandForWorkspace(runCmd, containerWorkDir), timeout, upload)
 	if err != nil {
 		cancel()
 		return nil, err
@@ -819,7 +1012,8 @@ func (e *Executor) RunInContainerStream(ctx context.Context, containerID string,
 		// never be context.Background() unbounded: a stalled Docker daemon call here would
 		// otherwise hang forever, and since the container is only released back to the
 		// pool once this goroutine returns, one hang permanently strands a pooled container.
-		if memoryLimitMb > 0 {
+		// In merged mode the reset at release handles it (resetDeferred), often for free.
+		if memoryLimitMb > 0 && !MergedExecsEnabled() {
 			resetCtx, resetCancel := context.WithTimeout(context.Background(), 10*time.Second)
 			resetErr := e.UpdateContainerResources(resetCtx, containerID, 1024)
 			resetCancel()
@@ -844,7 +1038,13 @@ func (e *Executor) RunInContainerStream(ctx context.Context, containerID string,
 // runExecWithStdin is like runExecWithTimeout but attaches stdin and feeds stdinData
 // to the process, then signals EOF so blocking readers (input()/scanf/Scanner...)
 // unblock once all bytes have been consumed.
-func (e *Executor) runExecWithStdin(ctx context.Context, containerID string, user string, workDir string, cmd []string, timeout time.Duration, stdinData []byte) (string, string, int, error) {
+func (e *Executor) runExecWithStdin(ctx context.Context, containerID string, user string, workDir string, cmd []string, timeout time.Duration, stdinData []byte) (stdout string, stderr string, exitCode int, err error) {
+	p, cmd, workDir, err := e.beginPrep(ctx, containerID, user, workDir, cmd, nil)
+	if err != nil {
+		return "", "", -1, err
+	}
+	defer func() { err = e.endPrep(containerID, p, err) }()
+
 	stdoutBuf := &boundedWriter{limit: maxCapturedOutputBytes}
 	stderrBuf := &boundedWriter{limit: maxCapturedOutputBytes}
 
@@ -869,7 +1069,7 @@ func (e *Executor) runExecWithStdin(ctx context.Context, containerID string, use
 	startExecOptions := docker.StartExecOptions{
 		InputStream:  bytes.NewReader(stdinData),
 		OutputStream: stdoutBuf,
-		ErrorStream:  stderrBuf,
+		ErrorStream:  p.stderr(stderrBuf),
 		Context:      childCtx,
 	}
 	closeWaiter, err := e.startExec(execObj.ID, startExecOptions)
@@ -948,10 +1148,16 @@ func (e *Executor) RunRawWithStdin(ctx context.Context, containerID string, file
 	subCtx, cancel := context.WithTimeout(ctx, submissionTimeout)
 	defer cancel()
 
-	if len(files) > 0 {
-		if err := e.copyFilesToContainer(subCtx, containerID, hostWorkDir, containerWorkDir, files); err != nil {
+	// The run takes the program's stdin, so in merged mode the upload goes with the compile
+	// only; without one it is an exec of its own.
+	var upload []byte
+	if len(compileCmd) > 0 {
+		var err error
+		if upload, err = e.stageUpload(subCtx, containerID, hostWorkDir, containerWorkDir, files); err != nil {
 			return "", "", "", -1, err
 		}
+	} else if err := e.copyFilesToContainer(subCtx, containerID, hostWorkDir, containerWorkDir, files); err != nil {
+		return "", "", "", -1, err
 	}
 
 	if memoryLimitMb > 0 {
@@ -966,7 +1172,10 @@ func (e *Executor) RunRawWithStdin(ctx context.Context, containerID string, file
 
 	if len(compileCmd) > 0 {
 		slog.Info("Compiling raw submission in container", "containerId", containerID, "cmd", compileCmd)
-		compileStdout, compileStderr, _, err := e.runExecWithTimeout(subCtx, containerID, getJudgeUser(), containerWorkDir, rewriteCommandForWorkspace(compileCmd, containerWorkDir), rawCompileTimeout)
+		compileStdout, compileStderr, _, err := e.runExecWithUpload(subCtx, containerID, getJudgeUser(), containerWorkDir, rewriteCommandForWorkspace(compileCmd, containerWorkDir), rawCompileTimeout, upload)
+		if IsContainerLost(err) {
+			return "", "", "", -1, err
+		}
 		if err != nil {
 			combined := compileStdout
 			if compileStderr != "" {
@@ -989,7 +1198,7 @@ func (e *Executor) RunRawWithStdin(ctx context.Context, containerID string, file
 
 	// Reset limit AFTER execution completes. Bounded on its own timeout for the same
 	// reason as RunInContainerStream's equivalent reset — see comment there.
-	if memoryLimitMb > 0 {
+	if memoryLimitMb > 0 && !MergedExecsEnabled() { // merged: left to the reset at release
 		resetCtx, resetCancel := context.WithTimeout(context.Background(), 10*time.Second)
 		resetErr := e.UpdateContainerResources(resetCtx, containerID, 1024)
 		resetCancel()

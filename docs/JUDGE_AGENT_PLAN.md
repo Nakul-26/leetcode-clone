@@ -1,6 +1,7 @@
 # Fewer Docker calls per run (resident sandbox agent)
 
-**Written:** 2026-11-06. **Status:** Phase 0 done (results below); A/B decision pending.
+**Written:** 2026-11-06. **Status:** Phase 0 done; Phase 1 built behind `JUDGE_MERGED_EXECS`
+(2026-11-07, results below), not yet enabled in production; A/B decision for Phase 2 pending.
 **Why:** with two judges the peak is ~1.7x one judge (`docs/SECOND_JUDGE.md`). Both servers run out
 of CPU, and the top consumers are `dockerd`, `containerd` and `runc`, not the submissions: every run
 pays for several Docker API calls and several new `runc` processes. Cutting that helps every judge,
@@ -95,6 +96,53 @@ No new components; same guard, same images.
 
 Expected: 4 → 2 execs per Python run, ~30-40% less Docker CPU per run.
 
+#### Phase 1 as built (2026-11-07)
+
+`JUDGE_MERGED_EXECS=true` (off by default; wired in both prod compose files). Code:
+`pkg/executor/prep.go` (`beginPrep` / `endPrep`), `ResetContainer` / `resetDeferred`.
+
+- **Upload rides with the next exec.** The tar goes on that exec's stdin; a shell extracts it,
+  then execs the compile or the run (whose stdin is `/dev/null`, as before). Interpreted
+  languages: upload + run in one exec. Compiled: upload + compile, then inputs + run. The
+  per-test stdin path and the raw run without a compile still upload in an exec of their own,
+  because the program's input takes stdin there.
+- **Deferred wipe.** The reset still kills every judge-user process at release (verified, as
+  before) and also reports `df` usage of `/app` and `/tmp`. If that is at most 8 MB and 512
+  inodes the wipe runs at the start of the next use's first judge-user exec, before its upload
+  and code; otherwise it runs at release as before, so a submission cannot leave enough behind
+  to OOM or slow the next one's start. A deferred wipe costs the next submission a few ms of
+  test-1 CPU time.
+- **Telling a failed prep from the program.** After the wipe and upload succeed, the shell
+  writes a marker to stderr and only then starts the command. Output before the marker is
+  the prep's own and never reaches the program's output. An exec that ends without the
+  marker failed before the program ran: the error is `ErrContainerUnhealthy` (ContainerLost),
+  the submission gets an internal error, and the next reset refuses the container, which is
+  discarded. A program exiting with any code, or printing the marker itself, cannot fake this.
+- **Memory limit.** The per-run "back to 1024 MB" update is gone; the reset leaves the last
+  limit in place. The next use usually sets its own (often the same: no update); if it sets
+  none, 1024 MB is restored before its first exec.
+- Unchanged: the guard (stdin on an exec was already allowed), images, the root kill, CPU
+  time via stats.
+
+**Measured locally** (Docker Desktop, through docker-guard; `TestMergedExecsCallCount`: a
+3-test stdin submission with a 256 MB limit, 10 runs, reset between runs):
+
+| | execs / submission | updates / submission | wall time / submission |
+|---|---|---|---|
+| Python, off → on | 4 → 2 | 2.0 → 0.1 | 564 → 325 ms (−42%) |
+| C++, off → on | 6 → 3 | 2.1 → 1.9 | 1164 → 934 ms (−20%) |
+
+C++ keeps ~2 updates because it compiles at ≥1024 MB and runs at the problem's limit.
+
+Tests: `TestMergedResetDefersWipe`, `TestMergedResetWipesLargeLeftoversAtOnce`,
+`TestMergedWipeFailureDiscards`, `TestMergedExecsCallCount`, prep filter / `df` parser unit
+tests; full integration suite passes with the flag on and with it off, except
+`TestProcessContamination/python`, which fails the same way on the previous commit (the Python
+wrapper removes the `compile` builtin, so the test's `import subprocess` fails).
+
+Next: enable on deploy4, load test (`full --langs=python,cpp --levels=40,80`), compare
+`/stats` Docker calls per job and the rates with the Phase 0 baseline, then deploy2.
+
 ### Phase 2: resident agent (1-2 weeks)
 
 A small static Go binary, `judge-agent`, in every language image (one shared build stage),
@@ -141,7 +189,7 @@ Docker calls per run. Only after Phase 2 has run in production for a while.
 ## Rollout
 
 1. Phase 0 numbers.
-2. Phase 1 behind `JUDGE_MERGED_EXECS=true`, load test, enable on both judges.
+2. Phase 1 behind `JUDGE_MERGED_EXECS=true` (built 2026-11-07), load test, enable on both judges.
 3. Phase 2: decide A or B; build; enable for Python only on deploy4 first; load test; then all
    languages, then deploy2.
 4. Each step: same `full` load test, compare per-judge rates and the Docker CPU share.

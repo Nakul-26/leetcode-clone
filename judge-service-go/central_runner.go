@@ -517,7 +517,12 @@ func runBatchAttempt(ctx context.Context, exec *executor.Executor, pooledContain
 		attempt.remainingReason, attempt.resumable = "Output Limit Exceeded", true
 	case runErr != nil:
 		runErrText := strings.ToLower(runErr.Error())
-		if strings.Contains(runErrText, "timed out") || strings.Contains(runErrText, "deadline exceeded") {
+		if errors.Is(runErr, executor.ErrContainerUnhealthy) {
+			// The judge's own steps failed (a merged exec's wipe or upload): not the program.
+			attempt.remainingReason = "Runtime Error"
+			attempt.internalError = models.InternalErrorJudge
+			attempt.containerLost = true
+		} else if strings.Contains(runErrText, "timed out") || strings.Contains(runErrText, "deadline exceeded") {
 			attempt.remainingReason = "Time Limit Exceeded"
 		} else if errors.Is(runErr, executor.ErrMemoryLimitExceeded) {
 			attempt.remainingReason = models.SubmissionStatusMemoryLimitExceeded

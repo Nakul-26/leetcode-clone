@@ -86,7 +86,9 @@ func runSubmissionStdinDetailed(ctx context.Context, exec *executor.Executor, po
 		}
 		upload = append(upload, inputFiles...)
 	}
-	if len(upload) > 0 {
+	// Merged mode sends a batched run's files with its first exec (see launch below).
+	mergedUpload := batched && executor.MergedExecsEnabled()
+	if len(upload) > 0 && !mergedUpload {
 		if err := exec.CopyFiles(ctx, pooledContainer.ID, submissionWorkspace.HostPath, submissionWorkspace.ContainerPath, upload); err != nil {
 			return finalizeExecutionFailure(result, err), cleanupFailed, nil
 		}
@@ -96,7 +98,11 @@ func runSubmissionStdinDetailed(ctx context.Context, exec *executor.Executor, po
 			cmd := append([]string{"sh", "-c", stdinRunnerScript, "judge-runner",
 				strconv.Itoa(offset + 1), strconv.Itoa(offset + len(rest.TestCases)),
 				strconv.Itoa(maxTestOutputBytes + 1), strconv.Itoa(maxLogOutputBytes)}, runCmd...)
-			return exec.RunInContainerStream(runCtx, pooledContainer.ID, nil, submissionWorkspace.HostPath, submissionWorkspace.ContainerPath,
+			var files []string
+			if mergedUpload {
+				files, upload = upload, nil // the first attempt uploads, in the run's own exec
+			}
+			return exec.RunInContainerStream(runCtx, pooledContainer.ID, files, submissionWorkspace.HostPath, submissionWorkspace.ContainerPath,
 				nil, cmd, runTimeout, 0) // memory limit applied once above
 		}
 		if err := runBatchedTests(ctx, exec, pooledContainer, submissionMsg, problem, result, launch, stdinBatchedResult, true); err != nil {
