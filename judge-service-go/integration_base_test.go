@@ -96,8 +96,8 @@ func setupIntegration(t *testing.T, languageID string) (*executor.Executor, *poo
 	})
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
-	if err := p.WarmUp(ctx, lang.ID, lang.Image, 1, 1); err != nil {
-		t.Skipf("%s container warm-up failed (is %q image available?): %v", lang.ID, lang.Image, err)
+	if err := p.WarmUp(ctx, lang.ID, lang.ImageRef(), 1, 1); err != nil {
+		t.Skipf("%s container warm-up failed (is %q image available?): %v", lang.ID, lang.ImageRef(), err)
 	}
 
 	pc := p.Acquire(context.Background(), lang.ID)

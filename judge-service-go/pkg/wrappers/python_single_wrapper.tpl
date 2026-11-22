@@ -12,7 +12,11 @@ for module_name in [
     if module_name in globals():
         del globals()[module_name]
 
-restricted_builtins = ['eval', 'exec', 'compile', 'open', 'file', 'input']
+# Not exec, compile or eval: Python's import system calls exec and compile to load any module
+# that has no compiled .pyc (the image has none), and collections.namedtuple calls eval, so
+# removing them broke `from typing import List`, heapq, bisect, decimal and most of the
+# standard library. The container is the sandbox.
+restricted_builtins = ['open', 'file', 'input']
 for builtin_name in restricted_builtins:
     if hasattr(__builtins__, builtin_name):
         delattr(__builtins__, builtin_name)

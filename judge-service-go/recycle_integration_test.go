@@ -24,8 +24,8 @@ func TestRecycleHasNoGap(t *testing.T) {
 	t.Cleanup(func() { p.Shutdown(context.Background()) })
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
-	if err := p.WarmUp(ctx, lang.ID, lang.Image, 1, 1); err != nil {
-		t.Skipf("warm-up failed (is %q available?): %v", lang.Image, err)
+	if err := p.WarmUp(ctx, lang.ID, lang.ImageRef(), 1, 1); err != nil {
+		t.Skipf("warm-up failed (is %q available?): %v", lang.ImageRef(), err)
 	}
 	// Limits of 36-40 runs: the successor is prepared 3-4 runs ahead, ~2 s at 600 ms a run.
 	p.SetMaxExecutions(40)

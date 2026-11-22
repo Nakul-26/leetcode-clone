@@ -31,8 +31,8 @@ func setupJSIntegration(t *testing.T) (*executor.Executor, *pool.ContainerPool, 
 	p := newTestPool(t, exec.Client(), 1)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	if err := p.WarmUp(ctx, lang.ID, lang.Image, 1, 1); err != nil {
-		t.Skipf("javascript container warm-up failed (is %q image available?): %v", lang.Image, err)
+	if err := p.WarmUp(ctx, lang.ID, lang.ImageRef(), 1, 1); err != nil {
+		t.Skipf("javascript container warm-up failed (is %q image available?): %v", lang.ImageRef(), err)
 	}
 
 	pc := p.Acquire(ctx, lang.ID)

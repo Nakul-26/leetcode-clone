@@ -12,7 +12,11 @@ for module_name in [
     if module_name in globals():
         del globals()[module_name]
 
-restricted_builtins = ['eval', 'exec', 'compile', 'open', 'file', 'input']
+# Not exec, compile or eval: Python's import system calls exec and compile to load any module
+# that has no compiled .pyc (the image has none), and collections.namedtuple calls eval, so
+# removing them broke `from typing import List`, heapq, bisect, decimal and most of the
+# standard library. The container is the sandbox.
+restricted_builtins = ['open', 'file', 'input']
 for builtin_name in restricted_builtins:
     if hasattr(__builtins__, builtin_name):
         delattr(__builtins__, builtin_name)
@@ -193,10 +197,18 @@ def run_all():
                 type_str = params[j]["type"] if params and j < len(params) else ""
                 converted_inputs.append(convert_input(val, type_str))
             
+            # A top-level function, or a method of class Solution (a fresh instance per test, as
+            # LeetCode does), the same lookup as the single-test wrapper.
+            target_func = globals().get("{{FUNCTION_NAME}}")
+            if not target_func and "Solution" in globals():
+                target_func = getattr(globals()["Solution"](), "{{FUNCTION_NAME}}", None)
+            if not target_func:
+                raise NameError("Function '{{FUNCTION_NAME}}' not found")
+
             if isinstance(converted_inputs, list):
-                out = {{FUNCTION_NAME}}(*converted_inputs)
+                out = target_func(*converted_inputs)
             else:
-                out = {{FUNCTION_NAME}}(converted_inputs)
+                out = target_func(converted_inputs)
 
             if return_type == "void" and len(converted_inputs) > 0:
                 converted_out = convert_output(converted_inputs[0], params[0]["type"] if params else "")
