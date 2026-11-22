@@ -12,11 +12,8 @@
     "docker:clean": "sh scripts/clean-local-docker.sh"
   },
   "dependencies": {
-    "@monaco-editor/react": "^4.7.0",
     "amqplib": "^0.10.9",
     "bcryptjs": "^3.0.3",
-    "framer-motion": "^12.40.0",
-    "lucide-react": "^1.17.0",
-    "mongoose": "^8.19.1"
+    "mongoose": "^8.24.8"
   }
 }
