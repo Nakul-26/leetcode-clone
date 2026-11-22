@@ -1,7 +1,9 @@
 # Fewer Docker calls per run (resident sandbox agent)
 
 **Written:** 2026-11-06. **Status:** Phase 0 done; Phase 1 built behind `JUDGE_MERGED_EXECS`
-(2026-11-07, results below), not yet enabled in production; A/B decision for Phase 2 pending.
+(2026-11-07, results below). **Enabled on all four judges on 2026-11-22** (testing and production,
+deploy2 and deploy4). Testing load test with two judges: Python 3,731/min, C++ 1,128/min, Java 989/min
+at 40 concurrent, 0 errors, no prep failures. A/B decision for Phase 2 pending.
 **Why:** with two judges the peak is ~1.7x one judge (`docs/judge/SECOND_JUDGE.md`). Both servers run out
 of CPU, and the top consumers are `dockerd`, `containerd` and `runc`, not the submissions: every run
 pays for several Docker API calls and several new `runc` processes. Cutting that helps every judge,
