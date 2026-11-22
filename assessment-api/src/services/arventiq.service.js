@@ -3,6 +3,7 @@ import * as submissionsService from "./submissions.service.js";
 import { HttpError } from "../utils/httpError.js";
 import { resolveArventiqLanguage } from "../config/arventiqLanguages.js";
 import { judgeFetch } from "./judgeClient.service.js";
+import { explainJudgeResult } from "./diagnostics.service.js";
 
 // Translates Arventiq's native `questions` + `test_cases` schema (see
 // docs/arventiq-integration/history/04-arventiq-real-schema-and-payload.md)
@@ -187,7 +188,11 @@ export function mapSubmissionToArventiqVerdict(submission) {
     compile_output: verdict === "compilation_error" ? (submission.output || null) : null,
     passed_count: passed,
     total_count: total,
-    cases
+    cases,
+    // Plain-language explanations of the first error (diagnostics.service.js), e.g. for
+    // EOFError: "input() was called more times than the input has lines". Filled in by
+    // getSubmissionById; [] when nothing failed with an error.
+    diagnostics: Array.isArray(tr.diagnostics) ? tr.diagnostics : []
   };
 }
 
@@ -223,7 +228,10 @@ export async function getArventiqSubmissionResult(submissionId, auth) {
 // leak into the Run response.
 const REAL_RUN_ERROR_TYPES = new Set(["timeout", "runtime", "memory_limit"]);
 
-function mapRunResult(judgeResult) {
+function mapRunResult(rawResult, { language, code, problemType } = {}) {
+  // Workspace paths stripped from stderr, a Python SyntaxError reported as a compile error,
+  // and the diagnostics, as for submissions.
+  const judgeResult = explainJudgeResult(rawResult, { language, code, trustLines: problemType === "stdin" }) || rawResult;
   const detail = Array.isArray(judgeResult?.details) && judgeResult.details.length > 0
     ? judgeResult.details[0]
     : null;
@@ -243,7 +251,8 @@ function mapRunResult(judgeResult) {
     // execution path — always null/0 today; passed through as-is so a future
     // judge change starts showing real values with no Node-side change needed.
     memoryKb: detail?.memoryKb ?? null,
-    exitCode: detail?.exitCode ?? null
+    exitCode: detail?.exitCode ?? null,
+    diagnostics: Array.isArray(judgeResult?.diagnostics) ? judgeResult.diagnostics : []
   };
 }
 
@@ -298,5 +307,5 @@ export async function runArventiqCode({ questionId, code, codeLanguage, customIn
   }
 
   const judgeResult = await response.json();
-  return mapRunResult(judgeResult);
+  return mapRunResult(judgeResult, { language, code, problemType });
 }

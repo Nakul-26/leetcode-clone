@@ -291,7 +291,9 @@ export default function buildTemplate(language, functionName, parameters = [], r
 // Starter code for a stdin problem (JUDGE_FIX_PLAN P8): a whole program that reads the input
 // and prints the answer. There is no function signature to build from.
 const STDIN_TEMPLATES = {
-  python: `import sys\n\ndef main():\n    data = sys.stdin.read().split()\n    # Read the input from data and print the answer\n    print()\n\nmain()\n`,
+  // Line by line with input(), as most students learn it, with the reads they need most: the
+  // usual stdin mistake is int(input()) on a line like "5 3".
+  python: `# Each input() reads one line of the input.\n#   one number on a line:        n = int(input())\n#   several numbers on a line:   a, b = map(int, input().split())\n#   a whole line as a list:      nums = list(map(int, input().split()))\n#   a line of text:              s = input()\n\nn = int(input())\n\n# Print the answer\nprint(n)\n`,
   javascript: `const data = require('fs').readFileSync(0, 'utf8').trim().split(/\\s+/);\n// Read the input from data and print the answer\nconsole.log();\n`,
   typescript: `const data: string[] = require('fs').readFileSync(0, 'utf8').trim().split(/\\s+/);\n// Read the input from data and print the answer\nconsole.log();\n`,
   java: `import java.util.*;\nimport java.io.*;\n\npublic class Main {\n    public static void main(String[] args) throws IOException {\n        BufferedReader in = new BufferedReader(new InputStreamReader(System.in));\n        // Read the input and print the answer\n        System.out.println();\n    }\n}\n`,
