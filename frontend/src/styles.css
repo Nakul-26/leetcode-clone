@@ -766,7 +766,7 @@ code {
   color: var(--warning);
 }
 
-/* What went wrong, at the top of a result (docs/EDITOR_UX_PLAN.md C1). */
+/* What went wrong, at the top of a result (docs/plans/EDITOR_UX_PLAN.md C1). */
 .diagnostics-summary {
   display: flex;
   flex-direction: column;

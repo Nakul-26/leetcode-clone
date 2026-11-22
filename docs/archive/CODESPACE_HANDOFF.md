@@ -2,7 +2,7 @@
 
 ## Session update — 2026-08-09
 
-Short pointer, not a rewrite — full detail lives in `docs/USER_ACTION_ITEMS.md`, which is
+Short pointer, not a rewrite — full detail lives in `docs/plans/USER_ACTION_ITEMS.md`, which is
 now the more current running log:
 
 - **#12 (CI gates) is fully resolved**, superseding the "mostly done, one inconclusive
@@ -17,7 +17,7 @@ now the more current running log:
   floor (Kotlin submissions were silently OOM-killed regardless of data structures), and
   `judge-service-go`'s Dockerfile `ENTRYPOINT` means `docker compose restart` never
   actually applies Go source changes — only `docker compose build` does. See
-  `docs/USER_ACTION_ITEMS.md` §4a for the full writeup.
+  `docs/plans/USER_ACTION_ITEMS.md` §4a for the full writeup.
 
 ## Session update — 2026-08-08
 
@@ -31,11 +31,11 @@ inline at each numbered item):
 - **#9 (docker-socket-proxy): done, not deployed.** Implemented and verified against the
   local dev stack (`docker-compose.yml`), then the identical change was ported to
   `docker-compose.prod.yml`. Both are uncommitted working-tree changes — see
-  `docs/USER_ACTION_ITEMS.md` for what's left for you to commit/deploy.
+  `docs/plans/USER_ACTION_ITEMS.md` for what's left for you to commit/deploy.
 - **#10 (H11 restore drill): done.** Full backup → simulated data loss → restore →
   verify cycle run against the dev Mongo — see the item below for the result.
 - **#11 (H12 scale-out): not started.** Large infra/design work, wasn't in your
-  requested scope — flagged in `docs/USER_ACTION_ITEMS.md` for a scoping decision.
+  requested scope — flagged in `docs/plans/USER_ACTION_ITEMS.md` for a scoping decision.
 - **#12 (CI gates smoke test): mostly done, one inconclusive result.** Simulated every
   CI job locally (lint, unit tests, `npm audit`/`audit-ci`, gitleaks secret scan) —
   found and fixed two real high-severity dependency vulnerabilities that would have
@@ -272,8 +272,8 @@ machine with **no Docker, no Go toolchain, and no browser automation** — so a 
 "implemented but unverified" or "deliberately not attempted because it needs Docker." That
 prior session's chat history and its local memory system do **not** carry over to a fresh
 `claude` terminal session in GitHub Codespace — this doc is the handoff artifact so nothing
-gets lost. Read this first, then `docs/PLATFORM_AUDIT_AND_SAAS_ROADMAP.md` (full findings +
-roadmap) and `docs/LOCAL_TESTING_NOTES.md` (per-item verification recipes) for full detail —
+gets lost. Read this first, then `docs/plans/PLATFORM_AUDIT_AND_SAAS_ROADMAP.md` (full findings +
+roadmap) and `docs/archive/LOCAL_TESTING_NOTES.md` (per-item verification recipes) for full detail —
 both are already up to date as of this handoff.
 
 Repo state at handoff: everything below is **already committed to `main`** (nothing
@@ -385,7 +385,7 @@ Treat any failure as a real bug to fix, not a false alarm.
     (interpreted + compiled, exercising exec + container-update calls) all work through the
     proxy; `GET /networks` and `GET /volumes` correctly 403. `docker-compose.prod.yml` edit is
     validated via `docker compose config` (with dummy secrets) but **not committed/deployed** —
-    see `docs/USER_ACTION_ITEMS.md`.
+    see `docs/plans/USER_ACTION_ITEMS.md`.
 
 10. **H11 remainder — real replication + tested restore path** for Mongo/Redis/RabbitMQ. The
     backup script itself is fixed (see Priority 1 #2); there is still no replication/clustering
@@ -409,7 +409,7 @@ Treat any failure as a real bug to fix, not a false alarm.
     one host (Docker-in-Docker or Kubernetes Jobs-based executor pool).
 
     **🔲 Not started** — large infra/design decision, out of this session's scope. See
-    `docs/USER_ACTION_ITEMS.md`.
+    `docs/plans/USER_ACTION_ITEMS.md`.
 
 12. **CI gates smoke test**. `.github/workflows/ci.yml` now has `security-audit` (npm audit /
     audit-ci), `secret-scan` (gitleaks), and blocking lint on both `assessment-api` and
@@ -451,7 +451,7 @@ Treat any failure as a real bug to fix, not a false alarm.
       (load average hit 4.43). `DOCKER_HOST` was unset in the host shell for this run, so it
       exercised the raw socket, not the new proxy — ruling out the proxy migration as the
       cause. Needs a real run on GitHub's dedicated runners (or a Codespace with the dev stack
-      stopped first) to get a clean signal — flagged in `docs/USER_ACTION_ITEMS.md` rather than
+      stopped first) to get a clean signal — flagged in `docs/plans/USER_ACTION_ITEMS.md` rather than
       guessed at further here.
     - `e2e` (Playwright): not exercised — only runs on push to `main`/`master`, and is heavy
       (fresh `docker-compose up`, browser install); out of scope for a same-session smoke test
@@ -471,7 +471,7 @@ Treat any failure as a real bug to fix, not a false alarm.
 
 - **H3** — integration `/results/:_id` auth is weaker than other integration routes (service-key
   only, no per-assessment scoping). Deliberately left as-is: the documented partner contract
-  (`docs/INTEGRATION_GUIDE.md:86`) says service-key-only is the intended auth for this route,
+  (`docs/guides/INTEGRATION_GUIDE.md:86`) says service-key-only is the intended auth for this route,
   and there's no `externalId`/`createdBy` marker to scope by yet. Real fix needs a per-partner
   key + `externalId` design, not a quick patch — see the H3 entry in the roadmap doc for the
   full reasoning before touching this.
@@ -496,9 +496,9 @@ Treat any failure as a real bug to fix, not a false alarm.
 
 ## Where to look for more detail
 
-- `docs/PLATFORM_AUDIT_AND_SAAS_ROADMAP.md` — the full findings table (every item above has a
+- `docs/plans/PLATFORM_AUDIT_AND_SAAS_ROADMAP.md` — the full findings table (every item above has a
   fuller writeup there, searchable by its ID: C6, H3, H11, H12, etc.) and the phased roadmap.
-- `docs/LOCAL_TESTING_NOTES.md` — per-item "what to run, what to expect" recipes for most of
+- `docs/archive/LOCAL_TESTING_NOTES.md` — per-item "what to run, what to expect" recipes for most of
   the Priority 1 items above (this doc's §1-§7 map onto Priority 1 #2-#7 here).
-- `docs/INTEGRATION_GUIDE.md` — the documented contract for `/api/integration/*`, relevant to
+- `docs/guides/INTEGRATION_GUIDE.md` — the documented contract for `/api/integration/*`, relevant to
   H3.

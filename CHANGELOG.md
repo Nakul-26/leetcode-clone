@@ -1,5 +1,9 @@
 # Changelog
 
+> This file was last kept up to date in 2026-08. Later changes are recorded in the git history and, for the
+> judge, in the dated rows of [`docs/judge/JUDGE_FIX_PLAN.md`](./docs/judge/JUDGE_FIX_PLAN.md) and
+> [`docs/judge/JUDGE_AGENT_PLAN.md`](./docs/judge/JUDGE_AGENT_PLAN.md).
+
 ## Unreleased
 
 ### Added

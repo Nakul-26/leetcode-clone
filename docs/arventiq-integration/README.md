@@ -19,4 +19,4 @@
 
 Related standing docs elsewhere in the repo (not part of this history, kept where they are because they're broader than this integration):
 - [`judge-service-go/ANALYSIS.md`](../../judge-service-go/ANALYSIS.md) — Go judge deep-dive
-- [`docs/INTEGRATION_GUIDE.md`](../INTEGRATION_GUIDE.md) — the existing, separate `/api/integration/*` layer
+- [`docs/guides/INTEGRATION_GUIDE.md`](../guides/INTEGRATION_GUIDE.md) — the existing, separate `/api/integration/*` layer

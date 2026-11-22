@@ -469,7 +469,7 @@ export async function submitSolution({ problemId, code, language, selectedOption
 }
 
 // A submission as its viewer sees it, with a short summary of what went wrong
-// (docs/EDITOR_UX_PLAN.md B4). Computed on read, so older submissions get it too.
+// (docs/plans/EDITOR_UX_PLAN.md B4). Computed on read, so older submissions get it too.
 export async function getSubmissionById(id, auth = {}) {
   const result = await loadSubmissionForViewer(id, auth);
   const submission = result.submission;

@@ -6,7 +6,7 @@
 > through Dokploy as it does today.
 >
 > Last updated: 2026-11-04. The file's history on GitHub
-> (https://github.com/Nakul-26/leetcode-clone/commits/main/docs/EXAM_PORTAL_AGENT_PROMPT.md) shows what's new.
+> (https://github.com/Nakul-26/leetcode-clone/commits/main/docs/plans/EXAM_PORTAL_AGENT_PROMPT.md) shows what's new.
 
 ---
 

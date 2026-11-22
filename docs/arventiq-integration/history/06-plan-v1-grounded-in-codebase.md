@@ -35,7 +35,7 @@ This also needs an answer to a narrower technical question, which should go in D
 
 ### 🔧 Correction — an integration layer already exists
 
-`assessment-api/src/routes/integration.routes.js` + `docs/INTEGRATION_GUIDE.md` already implement a generic "Testing Platform" bridge with a working service-key middleware pattern. It requires a forwarded student JWT on most routes (built for a different, tighter-coupled client than Arventiq will be). Don't build blind next to it — pick one:
+`assessment-api/src/routes/integration.routes.js` + `docs/guides/INTEGRATION_GUIDE.md` already implement a generic "Testing Platform" bridge with a working service-key middleware pattern. It requires a forwarded student JWT on most routes (built for a different, tighter-coupled client than Arventiq will be). Don't build blind next to it — pick one:
 - Mount Arventiq's routes at a distinct prefix (`/api/arventiq`) with its own auth middleware (simpler: shared secret only, no student JWT — see Decision 2), reusing the *pattern* from `integration.mjs` but not its student-JWT requirement, **or**
 - Generalize `integration.mjs` so `verifyService` alone (no student JWT) is sufficient for machine-to-machine callers, and Arventiq becomes a second consumer of the same routes.
 Recommendation: new prefix, new middleware, for now — the two client shapes are different enough (JWT-forwarding vs. none) that forcing them into one code path will produce awkward conditionals. Reassess in Phase 8-equivalent cleanup.

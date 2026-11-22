@@ -1,11 +1,11 @@
 # Judge Fix Plan
 
-**Created:** 2026-10-23 · **Last updated:** 2026-11-02 (R1-R9, T1-T9, T11, F1-F6, C1-C3, P1-P10, P12, S1-S3, M1, P11 done)
+**Created:** 2026-10-23 · **Last updated:** 2026-11-06 (R1-R9, T1-T9, T11, F1-F6, C1-C3, P1-P10, P12, S1-S3, M1, M2, P11 done; further Docker-call work continues in [`JUDGE_AGENT_PLAN.md`](./JUDGE_AGENT_PLAN.md))
 
 The single list of everything found in the 2026-10-23 judge review, plus the open items already recorded in
 [`JUDGE_PERFORMANCE_REVIEW.md`](./JUDGE_PERFORMANCE_REVIEW.md) §5,
 [`JUDGE_UNIFICATION_AND_SCALING_PLAN.md`](./JUDGE_UNIFICATION_AND_SCALING_PLAN.md) §6 and
-[`FRIEND_PORTAL_CHANGES.md`](./FRIEND_PORTAL_CHANGES.md) §7. We work through it one item at a time. When an item
+[`FRIEND_PORTAL_CHANGES.md`](../plans/FRIEND_PORTAL_CHANGES.md) §7. We work through it one item at a time. When an item
 changes state, update its row (status + date + commit) and the "Last updated" date above, so nothing is missed.
 
 Status: `todo` · `in progress` · `done` · `blocked` (needs a decision or access from the owner) · `wontfix`
@@ -81,7 +81,7 @@ b")` and C++ `cout << "x
 | # | Problem | Fix | Size | Status | Date / commit |
 |---|---|---|---|---|---|
 | M1 | `/run` and `/raw-run` are reached by one hostname, so synchronous work cannot spread across judges | Move them onto the queue (the interactive queue already exists), or put a load balancer in front | M | done | 2026-10-31 · /run and /raw-run now go over RabbitMQ request/reply: the API (judgeClient.service.js, judgeFetch) publishes to the durable queue judge_rpc with replyTo amq.rabbitmq.reply-to, a correlation id and the caller's timeout as expiration; any judge consuming it (rpc.go) runs the request through the same HTTP handler in process and replies with its status and body, so callers see exactly what HTTP returned. HTTP stays as the fallback, so either side deploys first: no consumer on the queue (an older judge, checked every 10 s), RabbitMQ unreachable, JUDGE_RPC=off, or a 503 (that judge had no free container). Requests are acked on receipt, so a run is never repeated on another judge; JUDGE_RPC_CONCURRENCY (default 16) caps queued runs per judge. Verified live: queue and HTTP give the same /run and /raw-run results, judge errors (400) pass through; unit tests on both sides |
-| M2 | Second judge server consuming the same queues (perf review §5 / plan Phase 5) | After R1-R6 (redelivery becomes routine with more hosts) | M | done | 2026-11-05 · no judge code change needed (stateless; Run already on the queue since M1). `docker-compose.judge-share.yml` (deploy2: Tailscale container + relays to RabbitMQ/Mongo/Redis, no host ports) and `docker-compose.judge-worker.yml` (server 2: judge + guard + images). Steps in `docs/SECOND_JUDGE.md`. **Live 2026-11-06** (Judge Worker on deploy4, direct LAN link). Peak (x80): Python 2,149/min (+27% vs 1,690 single judge), C++ 744/min (+13% vs 660), 0 errors. Split at x40-x80 was uneven (deploy4 903 vs deploy2 2,474): the remaining limit is not judge CPU alone; find it before adding more judges |
+| M2 | Second judge server consuming the same queues (perf review §5 / plan Phase 5) | After R1-R6 (redelivery becomes routine with more hosts) | M | done | 2026-11-05 · no judge code change needed (stateless; Run already on the queue since M1). `docker-compose.judge-share.yml` (deploy2: Tailscale container + relays to RabbitMQ/Mongo/Redis, no host ports) and `docker-compose.judge-worker.yml` (server 2: judge + guard + images). Steps in `docs/judge/SECOND_JUDGE.md`. **Live 2026-11-06** (Judge Worker on deploy4, direct LAN link). Peak (x80): Python 2,149/min (+27% vs 1,690 single judge), C++ 744/min (+13% vs 660), 0 errors. Split at x40-x80 was uneven (deploy4 903 vs deploy2 2,474): the remaining limit is not judge CPU alone; find it before adding more judges |
 
 ## Phase 6 — Run / Submit modes and correct test cases (added 2026-10-24)
 

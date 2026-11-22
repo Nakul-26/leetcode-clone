@@ -2,7 +2,7 @@
 
 **Written:** 2026-11-06. **Status:** Phase 0 done; Phase 1 built behind `JUDGE_MERGED_EXECS`
 (2026-11-07, results below), not yet enabled in production; A/B decision for Phase 2 pending.
-**Why:** with two judges the peak is ~1.7x one judge (`docs/SECOND_JUDGE.md`). Both servers run out
+**Why:** with two judges the peak is ~1.7x one judge (`docs/judge/SECOND_JUDGE.md`). Both servers run out
 of CPU, and the top consumers are `dockerd`, `containerd` and `runc`, not the submissions: every run
 pays for several Docker API calls and several new `runc` processes. Cutting that helps every judge,
 and is the only way left to get much more out of the same hardware.
@@ -66,7 +66,7 @@ The API calls themselves are quick (1-2 ms each); the cost is what each exec set
 them: a new `runc` process, namespace entry and cgroup setup in `containerd`/`runc`, which the
 call returns before. The `docker update` skip (1a89886) already removed nearly all updates.
 
-**Prototype** (`docs/bench/exec_vs_resident.sh`, throwaway sandboxes from `judge-py-env` with the pool's restrictions,
+**Prototype** (`docs/judge/bench/exec_vs_resident.sh`, throwaway sandboxes from `judge-py-env` with the pool's restrictions,
 200 Python runs, 10 at a time; host CPU per run minus the `docker` CLI's own startup, which the
 judge doesn't pay):
 

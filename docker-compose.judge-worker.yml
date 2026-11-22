@@ -1,6 +1,6 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # Judge Worker: a second judge on another server, taking work from the main stack's queues
-# (JUDGE_FIX_PLAN M2, docs/SECOND_JUDGE.md).
+# (JUDGE_FIX_PLAN M2, docs/judge/SECOND_JUDGE.md).
 #
 # Deploy on the second server as its own Dokploy compose. It runs only the judge, its
 # Docker guard and the language images. RabbitMQ, Mongo and Redis stay on the main server

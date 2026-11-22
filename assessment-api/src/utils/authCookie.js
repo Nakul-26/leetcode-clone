@@ -1,6 +1,6 @@
 // Shared between auth.controller.js (set on login/register/signup) and the logout route
 // (clearCookie needs matching attributes to actually clear it) - see H8 in
-// docs/PLATFORM_AUDIT_AND_SAAS_ROADMAP.md.
+// docs/plans/PLATFORM_AUDIT_AND_SAAS_ROADMAP.md.
 export const AUTH_COOKIE_NAME = "token";
 
 export function getAuthCookieOptions() {

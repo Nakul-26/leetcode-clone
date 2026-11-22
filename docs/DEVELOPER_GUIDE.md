@@ -235,7 +235,7 @@ will not do it for you.
 1. Decide if it is additive (new field: fine) or a change to an existing field (breaks callers).
 2. Run the contract harness before and after.
 3. Record a new baseline only for an intended change, and update [`GO_JUDGE_API.md`](./GO_JUDGE_API.md) and
-   [`FRIEND_PORTAL_CHANGES.md`](./FRIEND_PORTAL_CHANGES.md).
+   [`FRIEND_PORTAL_CHANGES.md`](./plans/FRIEND_PORTAL_CHANGES.md).
 
 ### Add a quota dimension
 
@@ -305,12 +305,15 @@ A document that is wrong is worse than none. When you change the system, update 
 
 | If you change... | Update |
 |---|---|
-| A public endpoint, field, status, limit or error | [`GO_JUDGE_API.md`](./GO_JUDGE_API.md) **and** [`FRIEND_PORTAL_CHANGES.md`](./FRIEND_PORTAL_CHANGES.md) |
+| A public endpoint, field, status, limit or error | [`GO_JUDGE_API.md`](./GO_JUDGE_API.md) **and** [`FRIEND_PORTAL_CHANGES.md`](./plans/FRIEND_PORTAL_CHANGES.md) |
 | An environment variable | The table in [`OPERATIONS_RUNBOOK.md`](./OPERATIONS_RUNBOOK.md) |
 | A request flow, data model field or invariant | [`ARCHITECTURE.md`](./ARCHITECTURE.md) |
 | How a client is set up or limited | [`CLIENT_ONBOARDING.md`](./CLIENT_ONBOARDING.md) |
 | A non-obvious decision | The decision log in `ARCHITECTURE.md` |
 | A new way things go wrong | The playbooks or known risks in the runbook |
+| The second-judge setup (`docker-compose.judge-*.yml`) | [`judge/SECOND_JUDGE.md`](./judge/SECOND_JUDGE.md) **and** [`judge/SECOND_JUDGE_FOR_ANOTHER_STACK.md`](./judge/SECOND_JUDGE_FOR_ANOTHER_STACK.md) |
+| A judge fix or plan item | Its row in [`judge/JUDGE_FIX_PLAN.md`](./judge/JUDGE_FIX_PLAN.md) or [`judge/JUDGE_AGENT_PLAN.md`](./judge/JUDGE_AGENT_PLAN.md) (status, date, commit) |
+| Where a document lives | The index in [`docs/README.md`](./README.md) |
 
 Examples in the API reference are **tested**: they were run, verbatim, against a live stack. Do the same when
 you change them.

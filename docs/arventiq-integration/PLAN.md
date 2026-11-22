@@ -15,7 +15,7 @@
 
 Related, standing (not part of this history — living reference docs elsewhere in the repo):
 - [`judge-service-go/ANALYSIS.md`](../../judge-service-go/ANALYSIS.md) — Go judge deep-dive
-- [`docs/INTEGRATION_GUIDE.md`](../INTEGRATION_GUIDE.md) — the *existing* generic "Testing Platform" integration layer (`/api/integration/*`) — different client, different auth model, see §6 below
+- [`docs/guides/INTEGRATION_GUIDE.md`](../guides/INTEGRATION_GUIDE.md) — the *existing* generic "Testing Platform" integration layer (`/api/integration/*`) — different client, different auth model, see §6 below
 
 ---
 
@@ -207,7 +207,7 @@ Guiding principle throughout: implement the subset required for the current inte
 
 ## 6. Integration layer (Arventiq bridge)
 
-- New `/api/arventiq/*` prefix — **not** the existing `/api/integration/*` (see `docs/INTEGRATION_GUIDE.md`), which was built for a different client with student-JWT-forwarding assumptions Arventiq doesn't need.
+- New `/api/arventiq/*` prefix — **not** the existing `/api/integration/*` (see `docs/guides/INTEGRATION_GUIDE.md`), which was built for a different client with student-JWT-forwarding assumptions Arventiq doesn't need.
 - Auth: shared secret only (`Authorization: Bearer <ARVENTIQ_SECRET>`), no per-candidate JWT. One shared service-account `User` for all Arventiq submissions (mirrors the existing `verifyService` pattern in `integration.mjs`); candidate/exam identifiers travel as opaque metadata (`externalStudentId`, `externalAssessmentId`) for traceability only, not auth.
 - Problem Sync API: upserts a `problemType`-aware `Problem` doc, ahead of or alongside submission.
 - Submission Translator (not "Payload Mapper" — it resolves problems, maps languages, sets `problemType`, handles limits precedence, not just reshapes JSON): stored `Problem` limits win over any request-supplied limits.

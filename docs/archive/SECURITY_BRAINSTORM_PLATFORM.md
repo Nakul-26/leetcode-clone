@@ -1,3 +1,9 @@
+# Security brainstorm: this platform
+
+> **Archived.** An early AI-chat checklist of vulnerability classes, kept for reference. The findings that
+> mattered, and their fixes, are in `docs/plans/PLATFORM_AUDIT_AND_SAAS_ROADMAP.md` and
+> `docs/judge/JUDGE_FIX_PLAN.md` (S1-S3).
+
 Absolutely, bro. For **your coding assessment platform**, the threat model is quite different from a normal CRUD website because you're accepting **untrusted source code and executing it**. That makes the judge/container layer one of the highest-risk components.
 
 Based on your architecture — **React → Node/Express API → RabbitMQ → Go judge → Docker containers → MongoDB/Redis**, plus the Arventiq integration — I'd audit it across these areas:

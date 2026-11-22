@@ -2,7 +2,7 @@
 /**
  * judge_contract_check.mjs — contract/regression harness for the judge's external API.
  *
- * Why this exists: the plan in docs/JUDGE_UNIFICATION_AND_SCALING_PLAN.md routes the
+ * Why this exists: the plan in docs/judge/JUDGE_UNIFICATION_AND_SCALING_PLAN.md routes the
  * GO Judge shim through the queue and adds real tokens + a batch endpoint. The whole point
  * is that an external platform pointing JUDGE_URL at us should need little or no change.
  * The only way to be sure of that is to pin the *observable* behaviour now, before the

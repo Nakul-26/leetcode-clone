@@ -19,6 +19,7 @@ For whoever keeps the platform running. Assumes you have read [`ARCHITECTURE.md`
 | **Local** | `docker compose up -d --build` from the repo root. The judge builds from source on start (the `dev` Dockerfile stage), so editing Go code and restarting the container is enough |
 | **Production: GO Judge** | The stack that serves clients. Redeployed **manually** in Dokploy (auto-deploy on push is not working) |
 | **Production: Exam Sandbox** | A second stack built from the **same** compose file, used for exams. Also redeployed manually, by its owner |
+| **Second judges (deploy4)** | Each stack can have a second judge on deploy4 taking work from the same queues: GO Judge's `Judge Worker` is live since 2026-11-06. Set up and run as in [Second Judge](./judge/SECOND_JUDGE.md) (and [for another stack](./judge/SECOND_JUDGE_FOR_ANOTHER_STACK.md)). When judge code changes, redeploy the stack on deploy2, then its worker on deploy4, from the same commit |
 
 Deployments are managed in Dokploy. **Only the GO Judge project is ours to change.** Other projects on the
 same Dokploy instance belong to other people. Do not edit or redeploy them.
@@ -118,6 +119,13 @@ Per-key limits are set on the key itself (`PATCH /api/admin/api-clients/:id`) an
 | `MAX_EXECUTIONS_PER_CONTAINER` | 100 | A container is replaced after this many runs, to limit drift |
 | `JUDGE_BATCH_THRESHOLD_{PY,JS,JAVA,CPP}` | 20 | Stored **function-mode** problems with at least this many tests run them in one batched execution. Does not affect the stdin or public-API path |
 | `JUDGE_CENTRAL_COMPARE_{PY,JS,JAVA,CPP,C}` | | Toggles for moving result comparison into the judge for a language |
+| `JUDGE_STDIN_BATCH` | on | Stdin problems run all their tests in one exec. `0` goes back to one exec per test |
+| `JUDGE_MERGED_EXECS` | `false` | `true` sends a submission's files in the same exec as its compile or run, and moves the wipe between submissions into the next submission's first exec (4 -> 2 execs per Python run, [Agent Plan](./judge/JUDGE_AGENT_PLAN.md) Phase 1). Turn it on for one judge first and load test |
+| `JUDGE_INSTANCE` | the Dokploy compose name (`COMPOSE_PROJECT_NAME`) | Labels this judge's sandboxes. A judge cleans up only its own, so two stacks' judges can share a server. Leave it unset unless two judges on one server have the same compose name |
+| `JUDGE_RPC_CONCURRENCY` | 16 | Run, reference checks and raw runs this judge takes at once from the `judge_rpc` queue |
+| `JUDGE_SANDBOX_RUNTIME` | empty (runc) | `runsc` runs submissions under gVisor. Install and register runsc in the host's Docker first, or every sandbox create fails |
+| `JUDGE_USER` | `judge` | The user submissions run as inside a sandbox. Must exist in the language images |
+| `GUARD_MAX_MEMORY_MB` | 4096 | Docker guard (`cmd/docker-guard`): largest memory limit a sandbox may be created or updated with. `GUARD_LISTEN` (`:2375`) and `GUARD_DOCKER_SOCKET` (`/var/run/docker.sock`) set where it listens and what it forwards to |
 | `SUBMISSION_QUEUE` | `submission_queue` | Name of the bulk queue (the fast queue is `<name>_fast`) |
 | `MONGO_URI`, `MONGO_DB_NAME`, `REDIS_URI`, `RABBITMQ_*` | | Same services as the API. `MONGO_DB_NAME` must match the API's or the judge reads the wrong database |
 | `HEALTH_PORT` | 8081 | Internal HTTP (`/health`, `/stats`, `/raw-run`). **Never expose publicly** |

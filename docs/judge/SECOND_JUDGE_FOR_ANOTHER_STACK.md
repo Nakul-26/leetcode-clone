@@ -3,10 +3,10 @@
 **Written:** 2026-11-12. For the owner of the second copy of this stack on deploy2 (the Exam
 Sandbox compose in Dokploy project `exam-portal`), to get the same setup as GO Judge: the main
 stack on deploy2 and a second judge on deploy4 taking work from the same queues
-(`docs/SECOND_JUDGE.md` explains how it works and why).
+(`docs/judge/SECOND_JUDGE.md` explains how it works and why).
 
 Both servers already run one copy of this setup (GO Judge's). Yours runs **beside** it, so the
-only differences from `docs/SECOND_JUDGE.md` are a few values that must not clash with it.
+only differences from `docs/judge/SECOND_JUDGE.md` are a few values that must not clash with it.
 
 ## What you deploy
 
@@ -102,7 +102,7 @@ name. Check the judge log: `Startup cleanup` must no longer remove GO Judge's co
   from the same commit. Until both match, either judge may take a given submission.
 - To stop the second judge, stop your Judge Worker on deploy4; deploy2 carries on alone.
 - deploy4's CPU is shared by both workers. Under load at the same time, each gets less than in
-  the single-stack numbers in `docs/SECOND_JUDGE.md` (+27% Python, +13% C++).
+  the single-stack numbers in `docs/judge/SECOND_JUDGE.md` (+27% Python, +13% C++).
 - Security: your RabbitMQ, Mongo and Redis are reachable only on your tailnet, and still need
   their passwords. deploy4 holds your stack's passwords and runs your users' code, like it does
-  for GO Judge. `docs/SECOND_JUDGE.md` → Security shows how to let only the worker reach the share.
+  for GO Judge. `docs/judge/SECOND_JUDGE.md` → Security shows how to let only the worker reach the share.

@@ -1,4 +1,4 @@
-// Shows the judge's diagnostics (docs/EDITOR_UX_PLAN.md C1) in the Monaco editor: a red
+// Shows the judge's diagnostics (docs/plans/EDITOR_UX_PLAN.md C1) in the Monaco editor: a red
 // underline on each line that has one, with the message and hint on hover, and a way to jump
 // to a line from the result panel. Shared by the practice page and the exam workspace.
 

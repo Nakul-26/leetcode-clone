@@ -12,7 +12,7 @@ import * as auditService from "./audit.service.js";
 // superadmin operates across colleges; everyone else is scoped to their own. Mirrors
 // assessments.service.js's collegeScopeFor exactly, including the same "known gap left
 // open on purpose" for legacy admins with no collegeId (see C2 in
-// docs/PLATFORM_AUDIT_AND_SAAS_ROADMAP.md) — falls back to unscoped rather than
+// docs/plans/PLATFORM_AUDIT_AND_SAAS_ROADMAP.md) — falls back to unscoped rather than
 // scoped-to-nothing.
 function collegeScopeFor(user) {
   if (!user || user.role === 'superadmin') return undefined;
@@ -329,7 +329,7 @@ export async function resetUserPassword(userId, newPassword, adminUser, auditInf
 
 // Single-user seat-management counterpart to bulkRegister — for adding one user to an
 // existing college outside the CSV/bulk-import flow (see
-// docs/PLATFORM_AUDIT_AND_SAAS_ROADMAP.md Phase 2: "an admin console for seat-level
+// docs/plans/PLATFORM_AUDIT_AND_SAAS_ROADMAP.md Phase 2: "an admin console for seat-level
 // management... is still open"). A non-superadmin caller is always scoped to their own
 // college and can never assign the superadmin role (privilege escalation guard).
 export async function adminCreateUser({ name, email, password, role, usn, section }, requestingUser, auditInfo = {}) {

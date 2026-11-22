@@ -54,7 +54,7 @@ fairly, and accountably, on a few CPU cores?*
                            | submission_queue  |             |  worker pool, runner |
                            |   _fast  (+retry) |             +----------+-----------+
                            +-------------------+                        | Docker API
-                                                              (via docker-socket-proxy)
+                                                                (via docker-guard)
                                                                          v
                                                     +----------------------------------------+
                                                     | pooled sandbox containers, one image   |
@@ -71,11 +71,18 @@ fairly, and accountably, on a few CPU cores?*
 | Redis | | Quota counters, caches, submission result cache. **Not** a source of truth |
 | RabbitMQ | | Durable work queues between the API and the judge |
 | `docker-socket-proxy` | | docker-guard (`judge-service-go/cmd/docker-guard`): lets the judge create and drive only its own locked-down sandboxes; every other Docker request gets 403 |
-| Language images | One per language (12) | The sandboxes: `judge-<lang>-env` |
+| Language images | One per language (11) | The sandboxes: `judge-<lang>-env` |
 | `coturn` | Prod only | TURN relay for WebRTC interview video |
 
 The API never executes code. It validates, attributes and enqueues; the judge executes. They share only
 the queue and the database, so they scale and fail independently.
+
+**Several judges.** The judge keeps no state of its own, so any number of judges can consume the same
+queues. Production runs two per stack: one beside the stack on deploy2 and one on deploy4, reaching
+RabbitMQ, Mongo and Redis over a private Tailscale link ([Second Judge](./judge/SECOND_JUDGE.md)). Run,
+reference-solution checks and raw runs travel over the `judge_rpc` queue too, so whichever judge is free
+answers; the API falls back to HTTP (`JUDGE_SERVICE_URL`) when no judge consumes it. Each judge labels its
+sandboxes with `JUDGE_INSTANCE` and cleans up only its own.
 
 ---
 

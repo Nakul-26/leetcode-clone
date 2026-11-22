@@ -2,7 +2,7 @@ import mongoose from "mongoose";
 const { Schema } = mongoose;
 
 // A machine caller of the external API surfaces (/integration/*, /arventiq/*,
-// /codeAssess/*). Phase 1 of docs/JUDGE_UNIFICATION_AND_SCALING_PLAN.md.
+// /codeAssess/*). Phase 1 of docs/judge/JUDGE_UNIFICATION_AND_SCALING_PLAN.md.
 //
 // Before this model, all three surfaces authenticated against a single global
 // shared secret read from env (TESTING_PLATFORM_KEY / ARVENTIQ_SECRET /

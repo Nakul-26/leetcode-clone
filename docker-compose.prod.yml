@@ -257,7 +257,7 @@ services:
       # college during a live exam (only 30 submissions/min *total* for the whole college).
       # Recommend COLLEGE_SUBMISSION_QUOTA=300 once judge capacity (pool autoscaling,
       # language mix — see judge-service-go's env vars above) has been sized for that
-      # cohort; see docs/PLATFORM_AUDIT_AND_SAAS_ROADMAP.md capacity notes. This still isn't
+      # cohort; see docs/plans/PLATFORM_AUDIT_AND_SAAS_ROADMAP.md capacity notes. This still isn't
       # the judge's own throughput ceiling — see STUDENT_SUBMISSION_QUOTA below for the
       # per-student companion that keeps the larger shared pool from being monopolized.
       COLLEGE_SUBMISSION_QUOTA: ${COLLEGE_SUBMISSION_QUOTA:-}
@@ -336,7 +336,7 @@ services:
     # needs. Do NOT add `user: root` back here or bind-mount docker.sock directly
     # — either would still let arbitrary code executed via an RCE in this service
     # reach the rest of the host/containers, just no longer through the Docker API
-    # (see docs/PLATFORM_AUDIT_AND_SAAS_ROADMAP.md).
+    # (see docs/plans/PLATFORM_AUDIT_AND_SAAS_ROADMAP.md).
     build:
       context: ./judge-service-go
       dockerfile: Dockerfile    # multi-stage build → slim alpine runtime image

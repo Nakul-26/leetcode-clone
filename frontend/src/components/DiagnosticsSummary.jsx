@@ -1,7 +1,7 @@
 import React from 'react';
 import { AlertTriangle, Clock, Cpu, Lightbulb, XCircle } from 'lucide-react';
 
-// The short "what went wrong" list at the top of a result (docs/EDITOR_UX_PLAN.md C1): at most
+// The short "what went wrong" list at the top of a result (docs/plans/EDITOR_UX_PLAN.md C1): at most
 // three entries, each with its line, the compiler's message and a plain-language hint. The raw
 // output stays available below it.
 

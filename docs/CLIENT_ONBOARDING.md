@@ -4,7 +4,7 @@ How to bring on a new client, whichever part of the platform they want.
 
 **Audience:** the platform operator (you). Client-facing material is linked where it exists:
 [`GO_JUDGE_API.md`](./GO_JUDGE_API.md) for developers using the judge, and the
-[Faculty](./FACULTY_GUIDE.md), [Admin](./ADMIN_GUIDE.md) and [Student](./STUDENT_GUIDE.md) guides for
+[Faculty](./guides/FACULTY_GUIDE.md), [Admin](./guides/ADMIN_GUIDE.md) and [Student](./guides/STUDENT_GUIDE.md) guides for
 people using the full platform.
 
 - [1. Which product does the client want?](#1-which-product-does-the-client-want)
@@ -109,8 +109,8 @@ receive output; they compare it with the expected answer themselves.
 
 A tenant (college) on our platform: their own admins, faculty and students; a problem bank; assessments
 with timed attempts, proctoring events, announcements and analytics; placement drives and interview
-slots; results export. See the [Faculty](./FACULTY_GUIDE.md), [Admin](./ADMIN_GUIDE.md) and
-[Student](./STUDENT_GUIDE.md) guides.
+slots; results export. See the [Faculty](./guides/FACULTY_GUIDE.md), [Admin](./guides/ADMIN_GUIDE.md) and
+[Student](./guides/STUDENT_GUIDE.md) guides.
 
 ### Roles
 
@@ -162,7 +162,7 @@ Two surfaces exist. Pick by what the client sends:
 
 | Surface | Auth | Shape | Use when |
 |---|---|---|---|
-| `/api/integration/*` | `x-service-key` **plus** the student's JWT, forwarded | Create assessments, start attempts, submit solutions, fetch results. Reference: [`INTEGRATION_GUIDE.md`](./INTEGRATION_GUIDE.md) | The client wants us to run assessments |
+| `/api/integration/*` | `x-service-key` **plus** the student's JWT, forwarded | Create assessments, start attempts, submit solutions, fetch results. Reference: [`INTEGRATION_GUIDE.md`](./guides/INTEGRATION_GUIDE.md) | The client wants us to run assessments |
 | `/api/arventiq/*` | `Authorization: Bearer <secret>`, where the secret is the legacy shared secret or an `arventiq`-scoped API key | Sync a problem, run code, submit, fetch a result. Built for one partner's stdin/stdout problem model | Only for that partner's integration. A new client should use `/api/integration` or the judge API |
 
 ### What makes this expensive

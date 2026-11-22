@@ -1,6 +1,6 @@
 # Things only you can do
 
-This is the running list of items from `docs/CODESPACE_HANDOFF.md` that need an action
+This is the running list of items from `docs/archive/CODESPACE_HANDOFF.md` that need an action
 only you can take — prod DB access, `git commit`/push, Dokploy redeploy, or a scoping
 decision. Everything else in that checklist is done/verified in this Codespace. Update
 this list as items get done or new ones come up; don't let it go stale.
@@ -285,8 +285,8 @@ Untouched, no action needed yet: H3 integration-route auth scoping, IDE run/subm
 dedup between `AssessmentWorkspace.jsx`/`ProblemPage.jsx`, other language adapters'
 `CompileCommand`/`RunCommand` dedup, secrets rotation mechanism, structured logging,
 no in-repo frontend prod deploy config, and the aspirational Phase 4 multi-model plan.
-See `docs/CODESPACE_HANDOFF.md`'s Priority 3 section and
-`docs/PLATFORM_AUDIT_AND_SAAS_ROADMAP.md` for full detail on each.
+See `docs/archive/CODESPACE_HANDOFF.md`'s Priority 3 section and
+`docs/plans/PLATFORM_AUDIT_AND_SAAS_ROADMAP.md` for full detail on each.
 
 ## Housekeeping note
 

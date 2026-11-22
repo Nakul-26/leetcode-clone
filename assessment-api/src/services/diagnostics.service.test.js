@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { analyze, explainJudgeResult, stripWorkspacePaths, findUnclosedBrace, didYouMean, isPythonSyntaxError, describeSignal } from "./diagnostics.service.js";
 
 // Fixtures are real outputs captured on the exam portal and the testing stack on 2026-11-04
-// (docs/EDITOR_UX_PLAN.md, "Realistic mistakes"), with the workspace ids as the judge printed them.
+// (docs/plans/EDITOR_UX_PLAN.md, "Realistic mistakes"), with the workspace ids as the judge printed them.
 const P = "/app/sub-raw-1793764557356411094-3867768528/";
 
 describe("stripWorkspacePaths", () => {

@@ -1,6 +1,6 @@
 # Judge Unification and Scaling Plan
 
-**Status:** Phases 0-4 built and verified locally, nothing deployed. Phase 5 (scale-out) remains. Written 2026-10-16.
+**Status:** Phases 0-4 built and deployed to production. Phase 5 (scale-out) done: a second judge on deploy4, live since 2026-11-06 ([Second Judge](./SECOND_JUDGE.md)). Written 2026-10-16; status updated 2026-11-22.
 **Goal:** one execution pipeline behind every API surface, with per-client identity,
 metering and burst handling, supporting both LeetCode-style (`function`) and
 stdin/stdout (`stdin`) problems — so the judge can be sold as a service.
@@ -228,7 +228,7 @@ Two defects were found only by running the real stack, not by unit tests:
 
 The remaining wait (about one in-flight submission) is a floor: nothing here preempts a running container.
 
-What the exam portal may need to change is in `docs/FRIEND_PORTAL_CHANGES.md`.
+What the exam portal may need to change is in `docs/plans/FRIEND_PORTAL_CHANGES.md`.
 
 ### Phase 3 — GO Judge batch endpoint with same-source coalescing
 
@@ -317,6 +317,8 @@ it), and the IP-limiter proxy question, which is recorded as a known risk in the
 
 ### Phase 5 — horizontal scale-out (existing H12)
 
+**Done 2026-11-06** as M2 in the [Fix Plan](./JUDGE_FIX_PLAN.md): see [Second Judge](./SECOND_JUDGE.md) for the setup and the measured gain (about 1.7x one judge).
+
 CPU is the ceiling once the above is done. The judge is a stateless worker over
 RabbitMQ + Mongo + Redis, so scaling out is mostly operational: run N judge workers on
 N hosts, each with its own Docker daemon and container pool. The blocker is that each
@@ -336,7 +338,7 @@ and may remove the need entirely for current load.
 - **`wait=true` must keep returning a result synchronously** for existing callers.
 - **One compose file serves two deployed stacks** (GO Judge and Exam Sandbox, both
   autodeploying from `main`). Any change to `docker-compose.prod.yml` lands on both —
-  see `docs/USER_ACTION_ITEMS.md` section 5b.
+  see `docs/plans/USER_ACTION_ITEMS.md` section 5b.
 - **Do not deploy near an exam window.** Exams run on the sandbox stack, and a push to
   `main` restarts it.
 

@@ -1,6 +1,6 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # Judge Share: lets judge workers on other servers reach this stack's RabbitMQ, Mongo and
-# Redis, over Tailscale only (JUDGE_FIX_PLAN M2, docs/SECOND_JUDGE.md).
+# Redis, over Tailscale only (JUDGE_FIX_PLAN M2, docs/judge/SECOND_JUDGE.md).
 #
 # Deploy on the SAME server as the GO Judge stack, as its own Dokploy compose. It publishes
 # no host port: a Tailscale container joins your tailnet as "judge-share" and three small

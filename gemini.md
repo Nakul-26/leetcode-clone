@@ -17,6 +17,7 @@ Main entrypoints:
 - `frontend/src/main.jsx`: The React frontend application.
 
 ## 2) Project Structure
+Full documentation index: `docs/README.md` (architecture, runbook with every setting, developer guide).
 - `assessment-api/`: Node.js Express API.
   - `src/`: Controllers, services, models, routes.
   - `scripts/`: Maintenance and seeding scripts.
@@ -52,13 +53,14 @@ Hard constraints:
 When proposing a change:
 1. Identify and run relevant tests:
     - **Frontend:** `cd frontend && npm test`
-    - **Go Judge Service (Unit):** `cd judge-service-go && go test ./...`
-    - **Go Judge Service (Integration):** `cd judge-service-go && go test -v -tags=integration .` (requires Docker)
+    - **API:** `cd assessment-api && npx vitest run` (in-memory Mongo, no Docker needed)
+    - **Go Judge Service (Unit):** `cd judge-service-go && go test . ./pkg/... -count=1`
+    - **Go Judge Service (Integration):** `cd judge-service-go && go test -tags integration -count=1 ./...` (requires Docker and the sandbox images)
     - **E2E tests:** `npm run test:submission:docker` (runs the full harness in the compose network)
 2. If new logic is added, include corresponding unit or integration tests.
 3. Run linters and formatters:
-    - **Frontend:** `cd frontend && npm run lint`
-    - **Go Judge Service:** `cd judge-service-go && make fmt && make vet`
+    - **API and frontend:** `npm run lint` in `assessment-api` and in `frontend` (CI runs both)
+    - **Go Judge Service:** `cd judge-service-go && gofmt -l . && go vet .`
 4. Before finalizing, ensure the entire application builds and runs with `docker-compose build` and `docker-compose up`.
 
 ## 7) Files & folders to avoid touching unless explicitly requested
@@ -80,10 +82,10 @@ When reporting a bug, include:
 
 ## 10) Dev environment hot-reload behavior
 - **Assessment API (Node.js):** Uses `node --watch` (`npm run dev`). Auto-reloads on file changes.
-- **Judge Service (Go):** Uses `air` for hot reload. Auto-reloads on file changes.
+- **Judge Service (Go):** Not hot-reloading. The `dev` image compiles from source each time the container starts, so restart `judge-service-go` after a Go change.
 - **Frontend (React):** Automatically reloads via Vite dev server.
 
-Assistant rule: Do not suggest restarting these services unless the change affects Docker builds or environment configuration.
+Assistant rule: Do not suggest restarting the API or frontend unless the change affects Docker builds or environment configuration.
 
 ## 11) Stability rule
 - Do not modify code that is already working correctly unless explicitly requested.

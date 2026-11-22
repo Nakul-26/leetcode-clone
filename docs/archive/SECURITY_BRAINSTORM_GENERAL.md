@@ -1,3 +1,9 @@
+# Security brainstorm: websites in general
+
+> **Archived.** An early AI-chat checklist of vulnerability classes, kept for reference. The findings that
+> mattered, and their fixes, are in `docs/plans/PLATFORM_AUDIT_AND_SAAS_ROADMAP.md` and
+> `docs/judge/JUDGE_FIX_PLAN.md` (S1-S3).
+
 Bro, a website can have **a huge number of security vulnerabilities**, but most fall into a few major categories. If you're building full-stack applications, I'd learn these in roughly this order.
 
 ### 🔴 1. Broken Authentication

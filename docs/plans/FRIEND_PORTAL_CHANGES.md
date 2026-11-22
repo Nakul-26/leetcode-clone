@@ -1,8 +1,8 @@
 # Changes the exam portal may need for GO Judge
 
-**Written:** 2026-10-16. **Status:** none of this is deployed. Everything below is built and tested
-locally, on branch `phase-cd-wip`. Nothing should reach the live stacks until after the current exam
-window; see "Rollout" at the end.
+**Written:** 2026-10-16. **Status (2026-11-22):** the judge side of everything below is on `main`
+(branch `phase-cd-wip` was merged) and deployed with the GO Judge stack, so section 1 already applies.
+The portal-side items marked **VERIFY** are for the exam portal's owner and are not tracked here.
 
 **Audience:** whoever maintains the exam portal's judge client (`runOnJudge()` in
 `exam-platform/workers/student-workerjs/src/judge.js`). That file is not in this repo, so each item
@@ -133,7 +133,7 @@ When a limit is hit, the request is refused **before anything runs**, is not cha
 
 Also new: `wall_time_limit` / `cpu_time_limit` are capped at 60 s and `memory_limit` at 2 GB (as `/raw-run` always did).
 
-Full detail and examples: [`GO_JUDGE_API.md`](./GO_JUDGE_API.md).
+Full detail and examples: [`GO_JUDGE_API.md`](../GO_JUDGE_API.md).
 
 ---
 
@@ -152,7 +152,7 @@ anything**, so the portal can catch those mistakes before students see the quest
 Same `x-rapidapi-key` header, `language_id` values and base64 rules as `/submissions`; up to 100 test
 cases per call, counted against the quota like runs. Send the question's time and memory limits too, so
 a reference solution that is too slow is caught as well. Full request, response and a Node.js example:
-[`GO_JUDGE_API.md` "Check or generate test cases"](./GO_JUDGE_API.md#check-or-generate-test-cases).
+[`GO_JUDGE_API.md` "Check or generate test cases"](../GO_JUDGE_API.md#check-or-generate-test-cases).
 
 Suggested portal change: on "save question", call `check`; refuse to publish unless `all_match` is
 true, and show each mismatch next to its test case.

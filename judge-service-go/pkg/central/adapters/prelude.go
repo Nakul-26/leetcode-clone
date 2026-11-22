@@ -7,7 +7,7 @@ import (
 )
 
 // Prelude adds the standard-library includes and imports a stdin program uses but forgot
-// (docs/EDITOR_UX_PLAN.md A1). Students shouldn't have to remember that strlen needs
+// (docs/plans/EDITOR_UX_PLAN.md A1). Students shouldn't have to remember that strlen needs
 // <string.h> or that Scanner needs java.util: a forgotten header is the most common compile
 // error on the exam portal, and since GCC 14 an implicit declaration in C is an error rather
 // than a warning.

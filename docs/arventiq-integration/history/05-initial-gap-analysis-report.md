@@ -20,7 +20,7 @@ You already built **half of this plan**, under a different name, for a *differen
 | Phase 7 — Backward compatible, dual API surface | ✅ Already true | `/api/integration/*` is additive; nothing in the native `/api/v1/*` surface was touched |
 | Phase 8 — Future refactor | N/A (deferred by design, correctly) | — |
 
-**The core issue:** what exists today (`/api/integration/*`, documented in `docs/INTEGRATION_GUIDE.md`) is a **generic "Testing Platform" passthrough**, built to your own team's data model, requiring a per-student JWT the caller must already hold. It is not a **Judge0-compatible facade**. Arventiq, per your plan, expects to talk to something that *looks like Judge0* — different endpoint shapes, different field names, different auth model, and (implicitly) no requirement that Arventiq mint or forward your JWTs.
+**The core issue:** what exists today (`/api/integration/*`, documented in `docs/guides/INTEGRATION_GUIDE.md`) is a **generic "Testing Platform" passthrough**, built to your own team's data model, requiring a per-student JWT the caller must already hold. It is not a **Judge0-compatible facade**. Arventiq, per your plan, expects to talk to something that *looks like Judge0* — different endpoint shapes, different field names, different auth model, and (implicitly) no requirement that Arventiq mint or forward your JWTs.
 
 These are two different integration contracts. Below is why that distinction matters and a concrete plan to close the gap without breaking what's already there.
 
@@ -29,7 +29,7 @@ These are two different integration contracts. Below is why that distinction mat
 ## 2. What currently exists (Phase 1, Node side)
 
 ### 2.1 `/api/integration/*` — existing "Testing Platform" bridge
-File: `assessment-api/src/routes/integration.routes.js`, guarded by `assessment-api/src/middleware/integration.mjs`, documented in `docs/INTEGRATION_GUIDE.md`.
+File: `assessment-api/src/routes/integration.routes.js`, guarded by `assessment-api/src/middleware/integration.mjs`, documented in `docs/guides/INTEGRATION_GUIDE.md`.
 
 | Route | Auth | Delegates to |
 |---|---|---|
@@ -135,7 +135,7 @@ Unchanged from the plan — correctly deferred.
 
 - `plan` (root) — original plan document
 - `judge-service-go/ANALYSIS.md` — existing Go judge deep-dive (already in your working tree, untracked)
-- `docs/INTEGRATION_GUIDE.md` — existing "Testing Platform" integration docs
+- `docs/guides/INTEGRATION_GUIDE.md` — existing "Testing Platform" integration docs
 - `assessment-api/src/routes/integration.routes.js`, `src/middleware/integration.mjs`
 - `assessment-api/src/services/submissions.service.js`, `src/services/judge.service.js`
 - `assessment-api/src/config/env.js`

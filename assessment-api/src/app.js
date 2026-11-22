@@ -80,7 +80,7 @@ app.use((req, res, next) => {
 // combined with credentials:true - the combination previously here was silently a no-op
 // for any credentialed/cookie request). No hardcoded production origin: there is no
 // deployed frontend yet, so CORS_ALLOWED_ORIGINS stays unset until one exists - see
-// docs/PLATFORM_AUDIT_AND_SAAS_ROADMAP.md, H8.
+// docs/plans/PLATFORM_AUDIT_AND_SAAS_ROADMAP.md, H8.
 const allowedOrigins = getAllowedOrigins();
 
 const corsOptions = {

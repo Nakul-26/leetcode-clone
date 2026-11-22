@@ -1,7 +1,7 @@
 import mongoose from 'mongoose';
 
 // One-time (idempotent) migration: stamps a collegeId onto every existing document that
-// predates the tenant-scoping work (C2 in docs/PLATFORM_AUDIT_AND_SAAS_ROADMAP.md), and
+// predates the tenant-scoping work (C2 in docs/plans/PLATFORM_AUDIT_AND_SAAS_ROADMAP.md), and
 // creates the College row that anchors it if one doesn't exist yet. Safe to re-run: every
 // update only targets documents where collegeId is still unset.
 //

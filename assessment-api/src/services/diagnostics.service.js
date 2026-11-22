@@ -1,5 +1,5 @@
 // Turns raw compiler and interpreter output into a short list of what went wrong, for a
-// student to read (docs/EDITOR_UX_PLAN.md, B1-B2).
+// student to read (docs/plans/EDITOR_UX_PLAN.md, B1-B2).
 //
 // Raw output buries the cause: printing a vector with cout is 107 lines of overload
 // candidates, sort() on a set reports its first error inside stl_algo.h, a missing ';' is

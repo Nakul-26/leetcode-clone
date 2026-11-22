@@ -44,7 +44,7 @@ const STATUS_DESCRIPTIONS = {
 };
 
 /**
- * Makes a finished GO Judge result readable for a student (docs/EDITOR_UX_PLAN.md B3), on
+ * Makes a finished GO Judge result readable for a student (docs/plans/EDITOR_UX_PLAN.md B3), on
  * plain (not base64) fields. Used by both the synchronous and the queue-backed paths.
  *
  * - Removes the judge's workspace paths from stderr and compile_output.
