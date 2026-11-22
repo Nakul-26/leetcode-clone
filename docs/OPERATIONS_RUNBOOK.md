@@ -121,7 +121,7 @@ Per-key limits are set on the key itself (`PATCH /api/admin/api-clients/:id`) an
 | `JUDGE_POOL_MIN_<ABBR>`, `JUDGE_POOL_MAX_<ABBR>` | per language | Pool bounds. `<ABBR>` is `PY JS TS JAVA C CPP CS GO RS RB PHP KT` |
 | `JUDGE_POOL_GLOBAL_CAP` | 60 | Most containers across all languages. **The real ceiling is CPU, not this** |
 | `JUDGE_POOL_AUTOSCALE_INTERVAL`, `..._SCALE_UP/DOWN_THRESHOLD_MS`, `..._COOLDOWN` | 15 s, 150/20 ms, 20/180 s | Autoscaler tuning |
-| `MAX_EXECUTIONS_PER_CONTAINER` | 100 | A container is replaced after this many runs, to limit drift |
+| `MAX_EXECUTIONS_PER_CONTAINER` (`JUDGE_MAX_EXECS` in Dokploy) | 500 in the compose files, 100 without them | A container is replaced after about this many runs, to limit drift. Each container retires somewhere between 90% and 100% of it, so they don't all go at once, and its successor is created ahead of time (at 90% of its limit) and takes its place the moment it retires: no wait for a new container |
 | `JUDGE_BATCH_THRESHOLD_{PY,JS,JAVA,CPP}` | 20 | Stored **function-mode** problems with at least this many tests run them in one batched execution. Does not affect the stdin or public-API path |
 | `JUDGE_CENTRAL_COMPARE_{PY,JS,JAVA,CPP,C}` | | Toggles for moving result comparison into the judge for a language |
 | `JUDGE_STDIN_BATCH` | on | Stdin problems run all their tests in one exec. `0` goes back to one exec per test |

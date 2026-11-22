@@ -5,10 +5,12 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math/rand"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	docker "github.com/fsouza/go-dockerclient"
@@ -24,7 +26,24 @@ type PooledContainer struct {
 	Busy           bool
 	WorkDir        string
 	ExecutionCount int32
+
+	// Recycling (see CountExecution). limit is this container's own run limit, set at its
+	// first run; the fields below it are guarded by the pool's mu.
+	limit          int32
+	successorState successorState
+	successor      *PooledContainer
+	retired        bool
 }
+
+// successorState tracks the container prepared to take a retiring container's place.
+type successorState int
+
+const (
+	successorNone    successorState = iota
+	successorPending                // being created
+	successorReady                  // created, held in ContainerPool.standby
+	successorFailed                 // creation failed: Discard replaces the usual way
+)
 
 // LangLimits is one language's configured pool bounds. target (tracked separately on
 // ContainerPool, not here) is always kept within [Min, Max] — Min containers exist
@@ -46,6 +65,8 @@ type ContainerPool struct {
 	images     map[string]string                // language -> image name
 	claims     map[string]int                   // language -> bulk workers holding or waiting for one of its containers
 	runtime    string                           // OCI runtime for new containers; "" is the daemon default (runc)
+	maxExecs   int32                            // runs before a container is replaced; 0 = never (SetMaxExecutions)
+	standby    map[string]*PooledContainer      // successors created ahead of their container's retirement
 }
 
 // NewPool creates a new container pool. globalCap bounds the total container count summed
@@ -61,6 +82,137 @@ func NewPool(cli *docker.Client, globalCap int) *ContainerPool {
 		globalCap:  globalCap,
 		images:     make(map[string]string),
 		claims:     make(map[string]int),
+		standby:    make(map[string]*PooledContainer),
+	}
+}
+
+// SetMaxExecutions sets how many runs a container does before it is replaced
+// (MAX_EXECUTIONS_PER_CONTAINER). 0 or less never replaces a container for its run count.
+func (p *ContainerPool) SetMaxExecutions(n int) {
+	if n < 0 {
+		n = 0
+	}
+	atomic.StoreInt32(&p.maxExecs, int32(n))
+}
+
+// Recycling without a gap. A container is replaced after its run limit, to bound drift. The
+// replacement used to be created only once the last run had finished: a few seconds on an idle
+// host, far longer under load. And since a language's containers are created together and used
+// in turn, they all reached the limit within a few runs of each other, leaving the language with
+// almost no containers while every replacement queued for Docker at once (gaps of up to ~40 s
+// were seen). Now:
+//   - each container gets its own limit between 90% and 100% of the setting, so they retire at
+//     different times;
+//   - successorAhead runs before its limit, the container's successor is created in the
+//     background and held ready; when the container retires, the successor takes its place in
+//     the pool at once;
+//   - a replacement that fails to start is retried within seconds, not at the reconciler's next
+//     run a minute later.
+
+// successorAhead is how many runs before its limit a container's successor is prepared: 10% of
+// the limit (at 90 of 100), at least one.
+func successorAhead(limit int32) int32 {
+	if a := limit / 10; a > 1 {
+		return a
+	}
+	return 1
+}
+
+// jitteredLimit is a container's own run limit: max minus up to 10%.
+func jitteredLimit(max int32) int32 {
+	spread := max / 10
+	if spread <= 0 {
+		return max
+	}
+	return max - rand.Int31n(spread+1)
+}
+
+// CountExecution records one run on c and reports whether c has reached its limit, in which case
+// the caller discards it once the run is done. Close to the limit it starts preparing c's
+// successor. Call it once per run, after acquiring c.
+func (p *ContainerPool) CountExecution(c *PooledContainer) (count int32, retire bool) {
+	count = atomic.AddInt32(&c.ExecutionCount, 1)
+	max := atomic.LoadInt32(&p.maxExecs)
+	if max <= 0 {
+		return count, false
+	}
+	limit := atomic.LoadInt32(&c.limit)
+	if limit == 0 {
+		atomic.CompareAndSwapInt32(&c.limit, 0, jitteredLimit(max))
+		limit = atomic.LoadInt32(&c.limit)
+	}
+	if count >= limit-successorAhead(limit) {
+		p.prepareSuccessor(c)
+	}
+	return count, count >= limit
+}
+
+// prepareSuccessor creates c's successor in the background, once.
+func (p *ContainerPool) prepareSuccessor(c *PooledContainer) {
+	p.mu.Lock()
+	if c.successorState != successorNone || c.retired {
+		p.mu.Unlock()
+		return
+	}
+	c.successorState = successorPending
+	image := p.images[c.Language]
+	p.mu.Unlock()
+
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		defer cancel()
+		succ, err := p.newPooledContainer(ctx, image, c.Language)
+		p.mu.Lock()
+		defer p.mu.Unlock()
+		if err != nil {
+			slog.Warn("Could not prepare a container's successor; it will be replaced when it retires",
+				"containerId", c.ID, "language", c.Language, "error", err)
+			c.successorState = successorFailed
+			if c.retired {
+				// Discard saw it pending and left the replacement to us.
+				go p.replaceDiscarded(image, c, p.availChans[c.Language])
+			}
+			return
+		}
+		if c.retired {
+			// c retired while its successor was being created: the successor goes in now.
+			c.successorState = successorNone
+			p.pushLocked(succ, c.ID)
+			return
+		}
+		c.successor = succ
+		c.successorState = successorReady
+		p.standby[succ.ID] = succ
+	}()
+}
+
+// retireLocked marks c retired outside Discard (health check, scale-down) and hands back its
+// prepared successor, if one is ready, for the caller to use or remove. Call with p.mu held.
+func (p *ContainerPool) retireLocked(c *PooledContainer) *PooledContainer {
+	c.retired = true
+	if c.successorState != successorReady {
+		return nil
+	}
+	succ := c.successor
+	c.successor, c.successorState = nil, successorNone
+	delete(p.standby, succ.ID)
+	return succ
+}
+
+// pushLocked adds a new container to its language's idle channel. Call with p.mu held.
+func (p *ContainerPool) pushLocked(c *PooledContainer, replacing string) {
+	ch, ok := p.availChans[c.Language]
+	if !ok {
+		go p.removeContainer(c)
+		return
+	}
+	select {
+	case ch <- c:
+		metrics.AddContainerReplacement(1)
+		slog.Info("Replaced container", "oldId", replacing, "newId", c.ID, "language", c.Language)
+	default:
+		slog.Warn("Container pool channel full during replacement", "language", c.Language)
+		go p.removeContainer(c)
 	}
 }
 
@@ -255,22 +407,36 @@ func (p *ContainerPool) Discard(ctx context.Context, container *PooledContainer,
 	}
 
 	p.mu.Lock()
-	_, wasInUse := p.inUse[container.ID]
-	if wasInUse {
-		delete(p.inUse, container.ID)
-	}
-	image := p.images[container.Language]
-	ch := p.availChans[container.Language]
-	p.mu.Unlock()
-
-	if !wasInUse {
+	if _, wasInUse := p.inUse[container.ID]; !wasInUse {
+		p.mu.Unlock()
 		slog.Warn("Ignoring discard for container that is not in use", "containerId", container.ID, "language", container.Language, "reason", reason)
 		return
 	}
+	delete(p.inUse, container.ID)
+	image := p.images[container.Language]
+	ch := p.availChans[container.Language]
+	container.retired = true
+	replace := true
+	switch container.successorState {
+	case successorReady:
+		// Its successor is already running: it takes the container's place before the
+		// container is even removed.
+		succ := container.successor
+		container.successor = nil
+		delete(p.standby, succ.ID)
+		p.pushLocked(succ, container.ID)
+		replace = false
+	case successorPending:
+		replace = false // prepareSuccessor puts it in (or replaces) when it finishes
+	}
+	p.mu.Unlock()
 
 	slog.Warn("Discarding pooled container", "containerId", container.ID, "language", container.Language, "reason", reason)
 	p.removeContainer(container)
 
+	if !replace {
+		return
+	}
 	if image == "" {
 		slog.Error("Cannot replace discarded container; image is unknown", "language", container.Language)
 		return
@@ -279,12 +445,29 @@ func (p *ContainerPool) Discard(ctx context.Context, container *PooledContainer,
 	go p.replaceDiscarded(image, container, ch)
 }
 
+// replaceAttempts is how many times replaceDiscarded tries to create a replacement.
+const replaceAttempts = 3
+
 // replaceDiscarded creates and pools a replacement for a discarded container. It runs on its
 // own context because the discarding caller's context ends as soon as Discard returns.
 func (p *ContainerPool) replaceDiscarded(image string, old *PooledContainer, ch chan *PooledContainer) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
-	replacement, err := p.newPooledContainer(ctx, image, old.Language)
+	var replacement *PooledContainer
+	var err error
+	// A failed create is retried within seconds: otherwise the language stays a container short
+	// until the reconciler's next run, up to a minute later.
+	for attempt, wait := 1, time.Second; ; attempt, wait = attempt+1, wait*2 {
+		replacement, err = p.newPooledContainer(ctx, image, old.Language)
+		if err == nil || attempt == replaceAttempts || ctx.Err() != nil {
+			break
+		}
+		slog.Warn("Failed to replace discarded container; retrying", "language", old.Language, "attempt", attempt, "error", err)
+		select {
+		case <-ctx.Done():
+		case <-time.After(wait):
+		}
+	}
 	if err != nil {
 		slog.Error("Failed to replace discarded container", "language", old.Language, "error", err)
 		return
@@ -387,6 +570,11 @@ func (p *ContainerPool) Shutdown(ctx context.Context) {
 		wg.Add(1)
 		go remove(c)
 		delete(p.inUse, id)
+	}
+	for id, c := range p.standby {
+		wg.Add(1)
+		go remove(c)
+		delete(p.standby, id)
 	}
 	p.mu.Unlock()
 
@@ -543,7 +731,13 @@ func (p *ContainerPool) convergeLang(ctx context.Context, lang string) {
 			for i := 0; i < excess; i++ {
 				select {
 				case c := <-ch:
+					p.mu.Lock()
+					succ := p.retireLocked(c)
+					p.mu.Unlock()
 					p.removeContainer(c)
+					if succ != nil {
+						p.removeContainer(succ)
+					}
 				default:
 					// no more idle containers to remove
 				}
@@ -709,9 +903,16 @@ func (p *ContainerPool) checkHealth(ctx context.Context) {
 				}
 			} else {
 				slog.Warn("Container found unhealthy, removing", "containerId", c.ID, "language", lang)
+				p.mu.Lock()
+				succ := p.retireLocked(c)
+				p.mu.Unlock()
 				p.removeContainer(c)
 
-				if image != "" {
+				if succ != nil {
+					p.mu.Lock()
+					p.pushLocked(succ, c.ID)
+					p.mu.Unlock()
+				} else if image != "" {
 					replacement, err := p.newPooledContainer(ctx, image, lang)
 					if err == nil {
 						select {

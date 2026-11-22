@@ -192,15 +192,9 @@ func getDurationSecondsEnv(name string, def time.Duration) time.Duration {
 	return def
 }
 
-// MaxExecutionsPerContainer controls how many times a pooled container may be
-// used before being evicted. Can be changed at startup from env.
-// It is a safety net now, not cleanup: containers are reset after every submission
-// (finishWithContainer). Recycling also replaces anything a reset cannot undo.
 // bulkContainerReserve is how many idle containers per language bulk work leaves untouched
 // for interactive callers. Set from JUDGE_INTERACTIVE_RESERVE at startup.
 var bulkContainerReserve = 1
-
-var MaxExecutionsPerContainer int32 = 500
 
 // consumersHealthy is true while the judge is consuming from RabbitMQ. /health reports it.
 var consumersHealthy atomic.Bool
@@ -613,8 +607,8 @@ func handleRawRun(containerPool *pool.ContainerPool, ex *executor.Executor, usag
 		}
 		discardContainer := false
 		discardReason := ""
-		// Recycle after MaxExecutionsPerContainer runs, same as the queue path.
-		if cnt := atomic.AddInt32(&pooledContainer.ExecutionCount, 1); cnt >= atomic.LoadInt32(&MaxExecutionsPerContainer) {
+		// Recycle after MAX_EXECUTIONS_PER_CONTAINER runs, same as the queue path.
+		if cnt, retire := containerPool.CountExecution(pooledContainer); retire {
 			discardContainer = true
 			discardReason = fmt.Sprintf("max executions reached: %d", cnt)
 		}
@@ -1304,8 +1298,7 @@ func processSubmission(interactive bool, d amqp.Delivery, ch *amqp.Channel, retr
 	discardContainer := false
 	discardReason := ""
 	// Increment execution count and mark for discard if it exceeded the threshold
-	cnt := atomic.AddInt32(&pooledContainer.ExecutionCount, 1)
-	if cnt >= atomic.LoadInt32(&MaxExecutionsPerContainer) {
+	if cnt, retire := containerPool.CountExecution(pooledContainer); retire {
 		slog.Info("Container reached max executions; will be discarded after use", "containerId", pooledContainer.ID, "count", cnt)
 		discardContainer = true
 		discardReason = fmt.Sprintf("max executions reached: %d", cnt)
@@ -1560,8 +1553,8 @@ func startHealthServer(ctx context.Context, containerPool *pool.ContainerPool, p
 		}
 		discardContainer := false
 		discardReason := ""
-		// Recycle after MaxExecutionsPerContainer runs, same as the queue path.
-		if cnt := atomic.AddInt32(&pooledContainer.ExecutionCount, 1); cnt >= atomic.LoadInt32(&MaxExecutionsPerContainer) {
+		// Recycle after MAX_EXECUTIONS_PER_CONTAINER runs, same as the queue path.
+		if cnt, retire := containerPool.CountExecution(pooledContainer); retire {
 			discardContainer = true
 			discardReason = fmt.Sprintf("max executions reached: %d", cnt)
 		}
@@ -1744,7 +1737,9 @@ func main() {
 		}
 	}
 
-	// Max executions per pooled container before eviction
+	// Runs per pooled container before it is replaced. A safety net, not cleanup: containers are
+	// reset after every submission (finishWithContainer); recycling also replaces anything a
+	// reset cannot undo. The pool prepares each replacement ahead (pool.CountExecution).
 	maxExecs := 100
 	if val := os.Getenv("MAX_EXECUTIONS_PER_CONTAINER"); val != "" {
 		if parsed, err := strconv.Atoi(val); err == nil && parsed > 0 {
@@ -1752,7 +1747,6 @@ func main() {
 			slog.Info("Using configured max executions per container", "maxExecs", maxExecs)
 		}
 	}
-	atomic.StoreInt32(&MaxExecutionsPerContainer, int32(maxExecs))
 
 	// Initialize Docker Executor
 	executor, err := executor.NewExecutor()
@@ -1760,6 +1754,7 @@ func main() {
 
 	// Initialize Container Pool
 	containerPool := pool.NewPool(executor.Client(), globalCap)
+	containerPool.SetMaxExecutions(maxExecs)
 	sandboxRuntime := strings.TrimSpace(os.Getenv("JUDGE_SANDBOX_RUNTIME"))
 	failOnError(containerPool.SetRuntime(sandboxRuntime), "Invalid JUDGE_SANDBOX_RUNTIME")
 	if sandboxRuntime != "" {
