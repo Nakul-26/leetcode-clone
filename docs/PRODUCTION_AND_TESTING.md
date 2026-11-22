@@ -1,14 +1,14 @@
 # Production and testing stacks
 
-**Written:** 2026-11-22. Two complete copies of the platform run on the same two servers, from the
+**Written:** 2026-11-22. **Status:** set up and verified 2026-11-22 (testing load test: Python 3,731/min, C++ 1,128/min at 40 concurrent, 0 errors, split 52/48). Two complete copies of the platform run on the same two servers, from the
 same code, without touching each other:
 
 | | Production | Testing |
 |---|---|---|
 | Who uses it | Real exams (the exam portal) | Trying changes, load tests |
-| deploy2: stack | **Exam Sandbox** (`examportal-exam-sandbox-eyazdd`), site `examjudge.fortifyhub.net` | **GO Judge** (`examportal-go-judge-ifal7h`), sites `assess.fortifyhub.net`, `coding2.fortifyhub.net` |
-| deploy2: share for the second judge | **Exam Judge Share** (`examportal-exam-judge-share-grzcft`), Tailscale `exam-judge-share`, UDP 41642 | **Judge Share** (`examportal-judge-share-6pogpk`), Tailscale `judge-share`, UDP 41641 |
-| deploy4: second judge | **Judge Worker** (`judge-judge-worker-9v8lfl`), Tailscale `judge-worker`, UDP 41641 | **Testing Judge Worker** (new), Tailscale `testing-judge-worker`, UDP 41642 |
+| deploy2: stack | **Exam Sandbox** (`examportal-exam-sandbox-eyazdd`), site `examjudge.fortifyhub.net` | **Test GO Judge** (`examportal-go-judge-ifal7h`), sites `assess.fortifyhub.net`, `coding2.fortifyhub.net` |
+| deploy2: share for the second judge | **Exam Judge Share** (`examportal-exam-judge-share-grzcft`), Tailscale `exam-judge-share`, UDP 41642 | **Test Judge Share** (`examportal-judge-share-6pogpk`), Tailscale `test-judge-share` (100.118.238.10), UDP 41641 |
+| deploy4: second judge | **Judge Worker** (`judge-judge-worker-9v8lfl`), Tailscale `judge-worker`, UDP 41641 | **test-judge-worker** (`test-judge-worker-test-judge-worker-5peykz`), Tailscale `test-judge-worker`, UDP 41642 |
 | Branch | `production` | `main` |
 | Deploys | By hand, after testing | On every push to `main` (deploy4 autodeploys; click Deploy on deploy2) |
 
@@ -25,7 +25,7 @@ same code, without touching each other:
 
 ## Moving a change to production
 
-1. Push to `main`. The Testing Judge Worker on deploy4 deploys itself; click **Deploy** on GO Judge on deploy2.
+1. Push to `main`. test-judge-worker on deploy4 deploys itself; click **Deploy** on Test GO Judge on deploy2.
 2. Test on `assess.fortifyhub.net`: `npm run loadtest -- smoke`, then whatever the change needs.
 3. When it is good, and no exam is running:
    ```bash
@@ -81,7 +81,7 @@ JUDGE_SHARE_HOST=100.118.238.10
 RABBITMQ_PASS=<GO Judge's>
 MONGO_ROOT_PASS=<GO Judge's>
 REDIS_PASS=<GO Judge's>
-TS_HOSTNAME=testing-judge-worker
+TS_HOSTNAME=test-judge-worker
 TS_PORT=41642
 TS_LAN_ENDPOINT=172.16.29.30:41642
 JUDGE_WORKER_CONCURRENCY=12
@@ -90,7 +90,7 @@ JUDGE_WORKER_CONCURRENCY=12
 Copy the three passwords from deploy2 → GO Judge → Environment (and `MONGO_DB_NAME` if GO Judge sets one).
 **Deploy**: it builds its own image copy (10-20 min). Then open the login link in its `judge-link`
 container's log (`docker logs <container> 2>&1 | grep login.tailscale.com`), log in with the same Tailscale
-account as `judge-share`, and disable key expiry for `testing-judge-worker` in the admin console.
+account as `judge-share`, and disable key expiry for `test-judge-worker` in the admin console.
 
 ### 6. Check
 
