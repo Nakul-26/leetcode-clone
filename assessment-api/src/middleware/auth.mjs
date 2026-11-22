@@ -1,5 +1,6 @@
 import jwt from "jsonwebtoken";
 import { env } from "../config/env.js";
+import { resolveSessionUser } from "../services/session.service.js";
 
 // Cookie first (browser sessions, H8), then Authorization header fallback (external
 // server-to-server callers - /api/integration/*, /api/codeAssess/* - never send cookies and
@@ -19,30 +20,36 @@ function normalizeUser(user) {
   return user;
 }
 
-export function verifyToken(req, res, next) {
-  const token = extractToken(req);
-  if (!token) return res.status(401).json({ message: "No token" });
-
+function decode(token) {
   try {
-    const decoded = jwt.verify(token, env.JWT_SECRET);
-    req.user = normalizeUser(decoded);
-    next();
+    return jwt.verify(token, env.JWT_SECRET);
   } catch {
-    return res.status(401).json({ message: "Invalid token" });
+    return null;
   }
 }
 
-export function optionalVerifyToken(req, res, next) {
+export async function verifyToken(req, res, next) {
   const token = extractToken(req);
-  if (!token) return next();
+  if (!token) return res.status(401).json({ message: "No token" });
 
-  try {
-    const decoded = jwt.verify(token, env.JWT_SECRET);
-    req.user = normalizeUser(decoded);
-  } catch {
-    // Ignore invalid optional token and proceed as anonymous.
-  }
+  const decoded = decode(token);
+  if (!decoded) return res.status(401).json({ message: "Invalid token" });
 
+  // A valid signature is not enough: the account may since have been deleted or signed out
+  // everywhere (session.service.js).
+  const user = await resolveSessionUser(decoded);
+  if (!user) return res.status(401).json({ message: "Session expired" });
+
+  req.user = normalizeUser(user);
+  next();
+}
+
+export async function optionalVerifyToken(req, res, next) {
+  const token = extractToken(req);
+  const decoded = token && decode(token);
+  // An invalid or revoked optional token means anonymous.
+  const user = decoded && (await resolveSessionUser(decoded));
+  if (user) req.user = normalizeUser(user);
   next();
 }
 

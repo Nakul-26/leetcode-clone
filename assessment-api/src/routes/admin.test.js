@@ -254,8 +254,9 @@ describe('Admin Routes, Bulk Import, and Rejudge API', () => {
 
       const backupData = backupRes.body;
 
-      // 2. Clear users DB manually to simulate data loss
-      await User.deleteMany({});
+      // 2. Lose the students to simulate data loss (not the superadmin: deleting an account
+      // ends its sessions, so the restore below would be refused)
+      await User.deleteMany({ role: 'student' });
 
       // 3. Restore Backup
       const restoreRes = await request(app)

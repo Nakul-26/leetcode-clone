@@ -81,7 +81,8 @@ describe("Per-API-client admission control (plan Phase 4)", () => {
     it("does nothing when no limit is set, so existing clients are unaffected", async () => {
       const { id } = await makeClient();
       for (let i = 0; i < 50; i++) expect((await admitApiClient(id, 5)).allowed).toBe(true);
-      expect(store.size).toBe(0);
+      // No quota keys (the session cache shares this fake Redis)
+      expect([...store.keys()].filter((k) => k.startsWith("apiclient_"))).toEqual([]);
     });
 
     it("counts test cases, not requests, against the per-minute limit", async () => {

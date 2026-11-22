@@ -21,7 +21,10 @@ const userSchema = new mongoose.Schema(
     collegeId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "College"
-    }
+    },
+    // Goes into every login token; bumping it ends all of the user's sessions
+    // (src/services/session.service.js).
+    tokenVersion: { type: Number, default: 0 }
   },
   { timestamps: true }
 );

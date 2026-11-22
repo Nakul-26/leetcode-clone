@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import request from 'supertest';
 import app from '../app.js';
 import { env } from '../config/env.js';
@@ -9,7 +9,9 @@ describe('Integration API', () => {
   let studentToken;
   const serviceKey = env.TESTING_PLATFORM_KEY || 'testing_platform_secret';
 
-  beforeAll(async () => {
+  // beforeEach, not beforeAll: the global setup empties the database before every test, and a
+  // token whose account is gone is refused.
+  beforeEach(async () => {
     // Create a student directly in the database
     const user = await User.create({
       name: 'Integration Student',

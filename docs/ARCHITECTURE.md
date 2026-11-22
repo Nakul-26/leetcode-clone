@@ -189,6 +189,13 @@ expected output is compared with `comparator.CompareText`. The public API always
 | Partner (keyed) | `ak_<8 hex>_<token>` | `ApiClient` | `/integration`, `/arventiq`, `/codeAssess` |
 | Partner (legacy) | A shared secret from the environment | nothing | Same routes; **unattributable, unmetered** |
 
+A person's JWT lasts 7 days but can be taken back. It carries the user's `tokenVersion` as `tv`, and
+`verifyToken` compares it with the current value on every request (`services/session.service.js`,
+cached in Redis for 5 minutes, dropped on change). Deleting the account or resetting its password
+ends its sessions immediately. Role and `collegeId` come from that lookup, not from the token. Deleting a
+user or resetting a password is allowed only on someone ranked below the caller (student < faculty
+< admin < superadmin); a superadmin may act on anyone.
+
 `apiClientAuth` (`middleware/apiClient.mjs`) is the single authenticator for all keyed callers. Each
 surface supplies its own header and keeps its own 401 body, because those are part of a contract with
 callers we do not control. A key has **scopes** (`integration`, `arventiq`, `codeassess`); a wrong-scope,

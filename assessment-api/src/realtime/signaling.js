@@ -3,6 +3,7 @@ import jwt from "jsonwebtoken";
 import { env } from "../config/env.js";
 import { getAllowedOrigins } from "../config/corsOrigins.js";
 import { resolveSlotForParticipant } from "../services/interviewSlots.service.js";
+import { resolveSessionUser } from "../services/session.service.js";
 
 // Mesh WebRTC ceiling (see the Phase D plan notes) - every participant connects directly
 // to every other, which stops scaling gracefully well before this, but real interview
@@ -20,19 +21,23 @@ function parseCookie(header, name) {
 // request, so it can't reuse that middleware directly. An external interviewer has no
 // JWT at all - they carry the Phase C signed slot token instead, passed explicitly since
 // it's already public-ish (scoped to one slot, not a session credential).
-function authenticateSocket(socket) {
+async function authenticateSocket(socket) {
   const { accessToken, token: authToken } = socket.handshake.auth || {};
   if (accessToken) return { accessToken };
 
   const raw = parseCookie(socket.handshake.headers.cookie, "token") || authToken;
   if (!raw) return {};
 
+  let decoded;
   try {
-    const decoded = jwt.verify(raw, env.JWT_SECRET);
-    return { user: decoded.id ? { ...decoded, _id: decoded.id } : decoded };
+    decoded = jwt.verify(raw, env.JWT_SECRET);
   } catch {
     return {};
   }
+  // Same revocation check as the HTTP middleware.
+  const user = await resolveSessionUser(decoded);
+  if (!user) return {};
+  return { user: user.id ? { ...user, _id: user.id } : user };
 }
 
 function roomName(slotId) {
@@ -58,13 +63,14 @@ export function attachSignaling(httpServer) {
   });
 
   io.on("connection", (socket) => {
-    socket.authContext = authenticateSocket(socket);
+    // A promise, awaited where it is used; a failed lookup counts as unauthenticated.
+    socket.authContext = authenticateSocket(socket).catch(() => ({}));
 
     socket.on("join-room", async ({ slotId } = {}, ack) => {
       const reply = typeof ack === "function" ? ack : () => {};
       try {
         if (!slotId) return reply({ error: "slotId is required" });
-        const { slot, identity } = await resolveSlotForParticipant(slotId, socket.authContext);
+        const { slot, identity } = await resolveSlotForParticipant(slotId, await socket.authContext);
         if (slot.status !== "Scheduled") return reply({ error: "This interview is not active" });
 
         const room = roomName(slotId);

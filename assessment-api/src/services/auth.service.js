@@ -8,6 +8,7 @@ import { getPlan } from "../config/plans.js";
 import { HttpError } from "../utils/httpError.js";
 import { escapeRegex } from "../utils/escapeRegex.js";
 import * as auditService from "./audit.service.js";
+import { tokenClaims, revokeSessions, forgetSession } from "./session.service.js";
 
 // superadmin operates across colleges; everyone else is scoped to their own. Mirrors
 // assessments.service.js's collegeScopeFor exactly, including the same "known gap left
@@ -84,11 +85,7 @@ export async function register({ name, email, password, role, collegeId, usn, se
     collegeId: normalizedCollegeId || undefined
   });
 
-  const token = jwt.sign(
-    { id: user._id.toString(), role: user.role, email: user.email, name: user.name, collegeId: user.collegeId || null },
-    env.JWT_SECRET,
-    { expiresIn: "7d" }
-  );
+  const token = jwt.sign(tokenClaims(user), env.JWT_SECRET, { expiresIn: "7d" });
 
   return { token, user: toPublicUser(user) };
 }
@@ -235,11 +232,7 @@ export async function login({ email, password }, auditInfo = {}) {
     throw new HttpError(401, "Invalid credentials", { message: "Invalid credentials" });
   }
 
-  const token = jwt.sign(
-    { id: user._id.toString(), role: user.role, email: user.email, name: user.name, collegeId: user.collegeId || null },
-    env.JWT_SECRET,
-    { expiresIn: "7d" }
-  );
+  const token = jwt.sign(tokenClaims(user), env.JWT_SECRET, { expiresIn: "7d" });
 
   await auditService.logEvent({
     event: "LOGIN_SUCCESS",
@@ -308,13 +301,28 @@ function assertTargetInScope(targetUser, requestingUser) {
   }
 }
 
+const ROLE_RANK = { student: 0, faculty: 1, admin: 2, superadmin: 3 };
+
+// Resetting a password or deleting an account is allowed only on someone ranked below the
+// caller (a superadmin may act on anyone). Without it a faculty member could reset their
+// admin's password and sign in as the admin.
+function assertOutranks(targetUser, requestingUser) {
+  if (requestingUser.role === 'superadmin') return;
+  if ((ROLE_RANK[targetUser.role] ?? 0) >= (ROLE_RANK[requestingUser.role] ?? 0)) {
+    throw new HttpError(403, "Forbidden", { message: `A ${requestingUser.role} cannot manage a ${targetUser.role} account` });
+  }
+}
+
 export async function resetUserPassword(userId, newPassword, adminUser, auditInfo = {}) {
   const user = await User.findById(userId);
   if (!user) throw new HttpError(404, "User not found");
   assertTargetInScope(user, adminUser);
+  assertOutranks(user, adminUser);
 
   const hashed = await bcrypt.hash(newPassword, 10);
   await User.updateOne({ _id: userId }, { password: hashed });
+  // A reset usually means the password leaked: sign the user out everywhere.
+  await revokeSessions(userId);
 
   await auditService.logEvent({
     event: "USER_PASSWORD_RESET",
@@ -362,11 +370,10 @@ export async function deleteUser(userId, requestingUser, auditInfo = {}) {
   if (String(user._id) === String(requestingUser._id)) {
     throw new HttpError(400, "Cannot delete your own account");
   }
-  if (user.role === 'superadmin' && requestingUser.role !== 'superadmin') {
-    throw new HttpError(403, "Forbidden", { message: "Only a superadmin can delete a superadmin account" });
-  }
+  assertOutranks(user, requestingUser);
 
   await User.deleteOne({ _id: userId });
+  await forgetSession(userId);
 
   await auditService.logEvent({
     event: "USER_DELETED",
