@@ -16,6 +16,7 @@ Start with the row that matches what you are doing.
 | **Integrate with GO Judge** (a client developer) | [GO Judge API Reference](./GO_JUDGE_API.md) |
 | **See what the exam portal may need to change** | [Exam Portal Changes](./plans/FRIEND_PORTAL_CHANGES.md) |
 | **Add or run a second judge server** | [Second Judge](./judge/SECOND_JUDGE.md) |
+| **Move a change from testing to production** | [Production and Testing](./PRODUCTION_AND_TESTING.md) |
 
 ## For the people using the platform
 

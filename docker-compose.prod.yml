@@ -376,6 +376,11 @@ services:
       # (deploy2 runs two) keeps its sandboxes when this one starts. Defaults to the Compose
       # project name, which Dokploy makes unique per compose.
       JUDGE_INSTANCE: ${JUDGE_INSTANCE:-${COMPOSE_PROJECT_NAME:-}}
+      # Which tag of the language images this stack builds and runs. Two stacks on one server
+      # (production and testing) would otherwise build the same judge-<lang>-env:latest, and
+      # deploying either replaced the images the other's judge runs. Keep it equal to the
+      # image: tags below (same expression).
+      JUDGE_IMAGE_TAG: ${JUDGE_IMAGE_TAG:-${COMPOSE_PROJECT_NAME:-latest}}
       # Every other judge setting is passed through as well. Only variables listed here reach the
       # container, so a setting added in Dokploy but missing here is silently ignored (this happened
       # to JUDGE_INTERACTIVE_WORKERS, JUDGE_POOL_MAX_PY and JUDGE_BATCH_THRESHOLD_*). An empty value
@@ -480,7 +485,7 @@ services:
     build:
       context: ./judge-service-go/environments/java
       dockerfile: Dockerfile
-    image: judge-java-env
+    image: judge-java-env:${JUDGE_IMAGE_TAG:-${COMPOSE_PROJECT_NAME:-latest}}
     networks:
       - assessment-net
 
@@ -488,7 +493,7 @@ services:
     build:
       context: ./judge-service-go/environments/javascript
       dockerfile: Dockerfile
-    image: judge-js-env
+    image: judge-js-env:${JUDGE_IMAGE_TAG:-${COMPOSE_PROJECT_NAME:-latest}}
     networks:
       - assessment-net
 
@@ -496,7 +501,7 @@ services:
     build:
       context: ./judge-service-go/environments/python
       dockerfile: Dockerfile
-    image: judge-py-env
+    image: judge-py-env:${JUDGE_IMAGE_TAG:-${COMPOSE_PROJECT_NAME:-latest}}
     networks:
       - assessment-net
 
@@ -504,7 +509,7 @@ services:
     build:
       context: ./judge-service-go/environments/c
       dockerfile: Dockerfile
-    image: judge-c-env
+    image: judge-c-env:${JUDGE_IMAGE_TAG:-${COMPOSE_PROJECT_NAME:-latest}}
     networks:
       - assessment-net
 
@@ -512,7 +517,7 @@ services:
     build:
       context: ./judge-service-go/environments/cpp
       dockerfile: Dockerfile
-    image: judge-cpp-env
+    image: judge-cpp-env:${JUDGE_IMAGE_TAG:-${COMPOSE_PROJECT_NAME:-latest}}
     networks:
       - assessment-net
 
@@ -520,7 +525,7 @@ services:
     build:
       context: ./judge-service-go/environments/csharp
       dockerfile: Dockerfile
-    image: judge-csharp-env
+    image: judge-csharp-env:${JUDGE_IMAGE_TAG:-${COMPOSE_PROJECT_NAME:-latest}}
     networks:
       - assessment-net
 
@@ -528,7 +533,7 @@ services:
     build:
       context: ./judge-service-go/environments/go
       dockerfile: Dockerfile
-    image: judge-go-env
+    image: judge-go-env:${JUDGE_IMAGE_TAG:-${COMPOSE_PROJECT_NAME:-latest}}
     networks:
       - assessment-net
 
@@ -536,7 +541,7 @@ services:
     build:
       context: ./judge-service-go/environments/rust
       dockerfile: Dockerfile
-    image: judge-rust-env
+    image: judge-rust-env:${JUDGE_IMAGE_TAG:-${COMPOSE_PROJECT_NAME:-latest}}
     networks:
       - assessment-net
 
@@ -544,7 +549,7 @@ services:
     build:
       context: ./judge-service-go/environments/ruby
       dockerfile: Dockerfile
-    image: judge-ruby-env
+    image: judge-ruby-env:${JUDGE_IMAGE_TAG:-${COMPOSE_PROJECT_NAME:-latest}}
     networks:
       - assessment-net
 
@@ -552,7 +557,7 @@ services:
     build:
       context: ./judge-service-go/environments/php
       dockerfile: Dockerfile
-    image: judge-php-env
+    image: judge-php-env:${JUDGE_IMAGE_TAG:-${COMPOSE_PROJECT_NAME:-latest}}
     networks:
       - assessment-net
 
@@ -560,7 +565,7 @@ services:
     build:
       context: ./judge-service-go/environments/kotlin
       dockerfile: Dockerfile
-    image: judge-kotlin-env
+    image: judge-kotlin-env:${JUDGE_IMAGE_TAG:-${COMPOSE_PROJECT_NAME:-latest}}
     networks:
       - assessment-net
 

@@ -103,6 +103,8 @@ consuming the queues, with no connection errors.
 
 ## Running it
 
+- **Production and testing** each have their own pair (deploy2 stack + deploy4 worker); which is
+  which, and how they are kept apart: [`../PRODUCTION_AND_TESTING.md`](../PRODUCTION_AND_TESTING.md).
 - **Deploy both judges from the same commit.** When judge code changes, deploy GO Judge on
   deploy2 and then Judge Worker on server 2. Until both are on the same version, either may
   take a given submission.

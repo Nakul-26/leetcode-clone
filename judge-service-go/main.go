@@ -1789,7 +1789,7 @@ func main() {
 			defer wg.Done()
 			cfg := poolConfigs[l.ID]
 			slog.Info("Warming up pool", "language", l.ID, "min", cfg.Min, "max", cfg.Max)
-			err := containerPool.WarmUp(ctx, l.ID, l.Image, cfg.Min, cfg.Max)
+			err := containerPool.WarmUp(ctx, l.ID, l.ImageRef(), cfg.Min, cfg.Max)
 			if err != nil {
 				slog.Error("Failed to warm up pool", "language", l.ID, "error", err)
 			}

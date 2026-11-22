@@ -290,3 +290,18 @@ func TestGuardListsOnlyJudgeContainers(t *testing.T) {
 		t.Fatalf("filters = %v", filters)
 	}
 }
+
+// Each stack runs its own tag of the language images (JUDGE_IMAGE_TAG, the Compose project name).
+func TestGuardImageNames(t *testing.T) {
+	g := newGuard(&url.URL{Scheme: "http", Host: "docker"}, http.DefaultTransport)
+	for _, name := range []string{"judge-py-env", "judge-py-env:latest", "judge-cpp-env:examportal-go-judge-ifal7h", "judge-js-env:judge-judge-worker-9v8lfl"} {
+		if !g.imageRE.MatchString(name) {
+			t.Errorf("%q refused", name)
+		}
+	}
+	for _, name := range []string{"mongo:6.0", "judge-py-env:x/../y", "evil/judge-py-env:latest", "judge-py-env:a b"} {
+		if g.imageRE.MatchString(name) {
+			t.Errorf("%q allowed", name)
+		}
+	}
+}

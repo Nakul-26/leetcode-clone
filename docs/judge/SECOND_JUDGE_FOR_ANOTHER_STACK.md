@@ -25,9 +25,9 @@ server, so redeploying either stack on deploy2 broke submissions running in the 
 
 - **Redeploy both stacks on deploy2 at a quiet time** (no exam running), first GO Judge, then
   yours: until both run the new code, a judge starting up can still remove the other's sandboxes.
-- **Keep both stacks on the same commit.** Both build the language images under the same names
-  (`judge-py-env`, `judge-cpp-env`...) on each server, so the last stack built decides which
-  version every judge on that server runs.
+- **Language images:** since 2026-11-22 each stack builds its own tagged copy
+  (`judge-py-env:<compose name>`), so the two stacks can run different commits. Before that,
+  both built `judge-py-env:latest` and the last stack built decided what every judge ran.
 - **Tailscale:** use your own Tailscale account (free plan is enough). Your Judge Share and your
   Judge Worker must log in to the **same** account. Using your own keeps your nodes apart from
   GO Judge's.

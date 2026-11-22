@@ -17,18 +17,23 @@ For whoever keeps the platform running. Assumes you have read [`ARCHITECTURE.md`
 | Environment | What it is |
 |---|---|
 | **Local** | `docker compose up -d --build` from the repo root. The judge builds from source on start (the `dev` Dockerfile stage), so editing Go code and restarting the container is enough |
-| **Production: GO Judge** | The stack that serves clients. Redeployed **manually** in Dokploy (auto-deploy on push is not working) |
-| **Production: Exam Sandbox** | A second stack built from the **same** compose file, used for exams. Also redeployed manually, by its owner |
-| **Second judges (deploy4)** | Each stack can have a second judge on deploy4 taking work from the same queues: GO Judge's `Judge Worker` is live since 2026-11-06. Set up and run as in [Second Judge](./judge/SECOND_JUDGE.md) (and [for another stack](./judge/SECOND_JUDGE_FOR_ANOTHER_STACK.md)). When judge code changes, redeploy the stack on deploy2, then its worker on deploy4, from the same commit |
+| **Production: Exam Sandbox** | The stack real exams run on (`examjudge.fortifyhub.net`), deployed by hand from the `production` branch, plus its second judge on deploy4 |
+| **Testing: GO Judge** | The same code from `main` (`assess.fortifyhub.net`), with its own second judge on deploy4. For trying changes and load tests |
+| **Second judges (deploy4)** | Each stack has a second judge on deploy4 taking work from its own queues ([Second Judge](./judge/SECOND_JUDGE.md)) |
 
-Deployments are managed in Dokploy. **Only the GO Judge project is ours to change.** Other projects on the
-same Dokploy instance belong to other people. Do not edit or redeploy them.
+How the two stacks are kept apart, and how a change moves from testing to production:
+[Production and Testing](./PRODUCTION_AND_TESTING.md).
+
+Deployments are managed in Dokploy. The Exam Sandbox services are run by their owner (a friend with access
+to this repo): agree production deploys with him. Other projects on the same Dokploy instances (alumni,
+resume, print-helper, render-box...) belong to other people. Do not edit or redeploy them.
 
 ### The rules that have already cost us
 
-1. **Both stacks are built from the same compose file.** A push does not deploy by itself, but whoever redeploys next gets every change on `main`, so any change to
-   `docker-compose.prod.yml` lands on the exam stack too.
-2. **Never push near an exam window.** A deploy restarts the stack. Check the exam calendar first.
+1. **Both stacks are built from the same compose file**, production from the `production` branch and testing
+   from `main`. A change to `docker-compose.prod.yml` reaches production when `production` is moved forward.
+2. **Never deploy production near an exam window.** A deploy restarts the stack. Check the exam calendar
+   first. Load tests on the testing stack also slow production: both use the same CPUs.
 3. **Work on a branch; merge deliberately.** The long-lived work branch carries large unreleased changes. Pushing
    it as is would deploy all of them. Cherry-pick or merge only what you mean to ship.
 4. **Re-verify C/C++ question outputs before deploying a judge change** that alters compile flags.
@@ -121,6 +126,7 @@ Per-key limits are set on the key itself (`PATCH /api/admin/api-clients/:id`) an
 | `JUDGE_CENTRAL_COMPARE_{PY,JS,JAVA,CPP,C}` | | Toggles for moving result comparison into the judge for a language |
 | `JUDGE_STDIN_BATCH` | on | Stdin problems run all their tests in one exec. `0` goes back to one exec per test |
 | `JUDGE_MERGED_EXECS` | `false` | `true` sends a submission's files in the same exec as its compile or run, and moves the wipe between submissions into the next submission's first exec (4 -> 2 execs per Python run, [Agent Plan](./judge/JUDGE_AGENT_PLAN.md) Phase 1). Turn it on for one judge first and load test |
+| `JUDGE_IMAGE_TAG` | the Dokploy compose name (`COMPOSE_PROJECT_NAME`) | Tag of the language images this stack builds and runs (`judge-<lang>-env:<tag>`), so two stacks on one server don't replace each other's images. Must equal the `image:` tags in the compose file, which use the same default |
 | `JUDGE_INSTANCE` | the Dokploy compose name (`COMPOSE_PROJECT_NAME`) | Labels this judge's sandboxes. A judge cleans up only its own, so two stacks' judges can share a server. Leave it unset unless two judges on one server have the same compose name |
 | `JUDGE_RPC_CONCURRENCY` | 16 | Run, reference checks and raw runs this judge takes at once from the `judge_rpc` queue |
 | `JUDGE_SANDBOX_RUNTIME` | empty (runc) | `runsc` runs submissions under gVisor. Install and register runsc in the host's Docker first, or every sandbox create fails |
