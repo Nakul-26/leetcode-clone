@@ -99,6 +99,14 @@ const ProblemSchema = new Schema({
   tags: [String],
   isPremium: { type: Boolean, default: false },
 
+  // Who may see and change it (src/services/problemAccess.js). public: every college can use
+  // and edit it, only the owning college deletes it. private: only the owning college sees or
+  // touches it. collegeId is the owning college, set from the author's account, never the
+  // request; problems from before this, and Arventiq's synced ones, have none and are public.
+  visibility: { type: String, enum: ['public', 'private'], default: 'public' },
+  collegeId: { type: Schema.Types.ObjectId, ref: 'College' },
+  createdBy: { type: Schema.Types.ObjectId, ref: 'User' },
+
   submissionCount: { type: Number, default: 0 },
   acceptedCount: { type: Number, default: 0 },
 
@@ -107,5 +115,7 @@ const ProblemSchema = new Schema({
   // updatedAt versions the cached reference outputs for students' Run tests.
   timestamps: { createdAt: false, updatedAt: true }
 });
+
+ProblemSchema.index({ visibility: 1, collegeId: 1 });
 
 export default mongoose.model('Problem', ProblemSchema);

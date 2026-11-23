@@ -2,7 +2,10 @@ import * as assessmentsRepo from "../repositories/assessments.repo.js";
 import * as attemptsRepo from "../repositories/assessmentAttempts.repo.js";
 import Submission from "../../models/Submission.mjs";
 import User from "../../models/User.mjs";
+import mongoose from "mongoose";
+import Problem from "../../models/Problem.mjs";
 import { HttpError } from "../utils/httpError.js";
+import { canSeeProblem } from "./problemAccess.js";
 import * as auditService from "./audit.service.js";
 
 // superadmin operates across colleges; everyone else is scoped to their own.
@@ -50,6 +53,20 @@ export async function getMyAssessmentAttempt(assessmentId, userId) {
   return attemptsRepo.findOne({ assessmentId, studentId: userId });
 }
 
+// An assessment may only use problems its college can see: public ones and its own private
+// ones (problemAccess.js). Its students could not open another college's private problem.
+async function assertProblemsUsable(problems, collegeId) {
+  const ids = (problems || []).map((p) => p.problemId).filter((id) => mongoose.isValidObjectId(id));
+  if (ids.length === 0) return;
+  const found = await Problem.find({ _id: { $in: ids } }).select("visibility collegeId title");
+  const blocked = found.filter((p) => !canSeeProblem(p, { collegeId }));
+  if (blocked.length > 0) {
+    throw new HttpError(400, "Problem not available", {
+      error: `These problems are private to another college: ${blocked.map((p) => p.title).join(", ")}`
+    });
+  }
+}
+
 export async function createAssessment(payload, user) {
   validateAssessmentPayload(payload);
   const data = {
@@ -59,12 +76,18 @@ export async function createAssessment(payload, user) {
     // request body, so a faculty/admin can't stamp another tenant's id onto their own data.
     collegeId: user.role === 'superadmin' ? (payload.collegeId || undefined) : (user.collegeId || undefined)
   };
+  await assertProblemsUsable(data.problems, data.collegeId);
   return assessmentsRepo.create(data);
 }
 
 export async function updateAssessment(id, payload, user) {
   validateAssessmentPayload(payload);
   const { collegeId, ...safePayload } = payload; // collegeId is immutable post-creation via this path
+  if (safePayload.problems) {
+    const current = await assessmentsRepo.findById(id, collegeScopeFor(user));
+    if (!current) throw new HttpError(404, "Assessment not found");
+    await assertProblemsUsable(safePayload.problems, current.collegeId);
+  }
   const assessment = await assessmentsRepo.updateById(id, safePayload, collegeScopeFor(user));
   if (!assessment) throw new HttpError(404, "Assessment not found");
   return assessment;

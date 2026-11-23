@@ -10,6 +10,7 @@ import { checkPlanUsageLimit, collegeAllowsPremium } from "./billing.service.js"
 import { HttpError } from "../utils/httpError.js";
 import { admitApiClient } from "./apiClientQuota.service.js";
 import { explainJudgeResult } from "./diagnostics.service.js";
+import { canSeeProblem } from "./problemAccess.js";
 
 function validateSubmissionMessage(msg) {
   if (!msg || typeof msg !== "object") return false;
@@ -333,7 +334,7 @@ export function sanitizeSubmissionForStudent(submission, problem) {
   return normalized;
 }
 
-export async function submitSolution({ problemId, code, language, selectedOptions = null, answerText = null, userId, collegeId = null, assessmentId = null, attemptId = null, requestId = null, externalStudentId = null, externalAssessmentId = null, apiClientId = null, stopOnFirstFailure = false }) {
+export async function submitSolution({ problemId, code, language, selectedOptions = null, answerText = null, userId, collegeId = null, role = null, assessmentId = null, attemptId = null, requestId = null, externalStudentId = null, externalAssessmentId = null, apiClientId = null, stopOnFirstFailure = false }) {
   await validateAssessmentSubmission({ problemId, language, userId, assessmentId, attemptId });
 
   // Checked before any submission record is created so a rejected request never
@@ -368,7 +369,8 @@ export async function submitSolution({ problemId, code, language, selectedOption
   }
 
   const problem = await problemsRepo.findById(problemId);
-  if (!problem) {
+  // Another college's private problem does not exist for this submitter (problemAccess.js).
+  if (!problem || !canSeeProblem(problem, { role, collegeId })) {
     return { notFound: true };
   }
 

@@ -7,6 +7,11 @@ import { judgeFetch } from "./judgeClient.service.js";
 import { explainJudgeResult } from "./diagnostics.service.js";
 import { collegeAllowsPremium } from "./billing.service.js";
 import { escapeRegex } from "../utils/escapeRegex.js";
+import mongoose from "mongoose";
+import {
+  canSeeProblem, canEditProblem, canDeleteProblem, visibleProblemsFilter,
+  assertCanSetVisibility, assertNotInUse
+} from "./problemAccess.js";
 
 function isPrivilegedRole(role) {
   return role === "admin" || role === "faculty" || role === "superadmin";
@@ -270,12 +275,16 @@ function buildProblemFilter(query) {
   if (query.search) {
     filter.title = { $regex: escapeRegex(query.search), $options: 'i' };
   }
+
+  // The catalog page's Public / Private filter.
+  if (query.visibility === "private") filter.visibility = "private";
+  if (query.visibility === "public") filter.visibility = { $ne: "private" };
   
   return filter;
 }
 
 export async function listProblems(query = {}, user = null) {
-  const filter = buildProblemFilter(query);
+  const filter = { ...buildProblemFilter(query), ...visibleProblemsFilter(user) };
   const options = parsePagination(query);
   const problems = await problemsRepo.findAllWithoutTests(filter, options);
 
@@ -297,7 +306,8 @@ export async function getProblemById(id, user = null) {
   const privileged = isPrivilegedRole(user && user.role);
   // Staff editing a problem need its reference solution; students must never receive it.
   const problem = privileged ? await problemsRepo.findByIdWithReference(id) : await problemsRepo.findById(id);
-  if (!problem) return null;
+  // Another college's private problem does not exist for this user.
+  if (!problem || !canSeeProblem(problem, user)) return null;
 
   if (privileged) {
     return { ...(typeof problem.toObject === "function" ? problem.toObject() : problem), locked: false };
@@ -308,38 +318,41 @@ export async function getProblemById(id, user = null) {
   return { ...sanitized, locked: Boolean(problem.isPremium) && !allowsPremium };
 }
 
-export async function getProblemStats(problemId) {
-  const totalSubmissions = await Submission.countDocuments({ problemId });
-  const acceptedSubmissions = await Submission.countDocuments({ problemId, status: "Success" });
-  
-  const successSubmissions = await Submission.find({ problemId, status: "Success" });
-  
-  let totalTime = 0;
-  let countWithTime = 0;
-  
-  successSubmissions.forEach(s => {
-    let elapsed = null;
-    if (s.testResult && typeof s.testResult === 'object') {
-      elapsed = s.testResult.elapsedMs ?? s.testResult.totalTimeMs;
-    } else if (s.output) {
-      try {
-        const parsed = JSON.parse(s.output);
-        elapsed = parsed.elapsedMs ?? parsed.totalTimeMs;
-      } catch { /* ignore */ }
+// One aggregation rather than loading every accepted submission (code included) into memory:
+// this route needs no login.
+export async function getProblemStats(problemId, user = null) {
+  if (!mongoose.isValidObjectId(problemId)) return null;
+  const problem = await problemsRepo.findById(problemId);
+  if (!problem || !canSeeProblem(problem, user)) return null;
+
+  const [row] = await Submission.aggregate([
+    { $match: { problemId: new mongoose.Types.ObjectId(String(problemId)) } },
+    {
+      $group: {
+        _id: null,
+        total: { $sum: 1 },
+        accepted: { $sum: { $cond: [{ $eq: ["$status", "Success"] }, 1, 0] } },
+        avgTime: {
+          $avg: {
+            $cond: [
+              { $eq: ["$status", "Success"] },
+              { $ifNull: ["$testResult.elapsedMs", "$testResult.totalTimeMs"] },
+              null
+            ]
+          }
+        }
+      }
     }
-    
-    if (elapsed !== null && typeof elapsed === 'number') {
-      totalTime += elapsed;
-      countWithTime++;
-    }
-  });
+  ]);
+  const totalSubmissions = row?.total || 0;
+  const acceptedSubmissions = row?.accepted || 0;
 
   return {
     problemId,
     totalSubmissions,
     acceptedSubmissions,
     acceptanceRate: totalSubmissions > 0 ? (acceptedSubmissions / totalSubmissions) * 100 : 0,
-    averageRuntimeMs: countWithTime > 0 ? totalTime / countWithTime : null
+    averageRuntimeMs: typeof row?.avgTime === "number" ? row.avgTime : null
   };
 }
 
@@ -384,8 +397,17 @@ function structuralValidatorFor(problemType) {
   return validateProblemPayload;
 }
 
-export async function createProblem(payload) {
-  const normalizedPayload = normalizeProblemPayload(payload);
+// Ownership comes from the author's account, never from the request body.
+function withoutOwnership(payload) {
+  const { collegeId: _collegeId, createdBy: _createdBy, ...rest } = payload || {};
+  return rest;
+}
+
+export async function createProblem(payload, user = null) {
+  const normalizedPayload = normalizeProblemPayload(withoutOwnership(payload));
+  if (normalizedPayload.visibility === "private" && !user?.collegeId) {
+    throw new HttpError(400, "Validation failed", { error: "A private problem belongs to a college; this account has none." });
+  }
   const problemType = normalizedPayload.problemType || "function";
   const validationErrors = [...structuralValidatorFor(problemType)(normalizedPayload), ...alternateSolutionErrors(normalizedPayload)];
   if (validationErrors.length > 0) {
@@ -414,11 +436,21 @@ export async function createProblem(payload) {
     }
   }
 
-  return problemsRepo.create(normalizedPayload);
+  // Set after validation: the problem schema has no owner fields.
+  const owner = user ? { collegeId: user.collegeId || undefined, createdBy: user._id } : {};
+  return problemsRepo.create({ ...normalizedPayload, ...owner });
 }
 
-export async function updateProblem(id, payload) {
-  const normalizedPayload = normalizeProblemPayload(payload);
+// null when the problem does not exist for this user (404); 403 when they may see it but not
+// change it.
+export async function updateProblem(id, payload, user = null) {
+  const existing = mongoose.isValidObjectId(id) ? await problemsRepo.findById(id) : null;
+  if (!existing || (user && !canSeeProblem(existing, user))) return null;
+  if (user && !canEditProblem(existing, user)) {
+    throw new HttpError(403, "Forbidden", { error: "Only the college that added this private problem can edit it." });
+  }
+  const normalizedPayload = normalizeProblemPayload(withoutOwnership(payload));
+  if (user) await assertCanSetVisibility(existing, normalizedPayload.visibility, user);
   const problemType = normalizedPayload.problemType || "function";
   const validationErrors = [...structuralValidatorFor(problemType)(normalizedPayload), ...alternateSolutionErrors(normalizedPayload)];
   if (validationErrors.length > 0) {
@@ -450,7 +482,17 @@ export async function updateProblem(id, payload) {
   return problemsRepo.updateById(id, normalizedPayload);
 }
 
-export async function deleteProblem(id) {
+export async function deleteProblem(id, user = null) {
+  const existing = mongoose.isValidObjectId(id) ? await problemsRepo.findById(id) : null;
+  if (!existing || (user && !canSeeProblem(existing, user))) return null;
+  if (user && !canDeleteProblem(existing, user)) {
+    throw new HttpError(403, "Forbidden", {
+      error: existing.collegeId
+        ? "Only the college that added this problem can delete it."
+        : "Only a superadmin can delete a problem that no college owns."
+    });
+  }
+  await assertNotInUse(existing);
   return problemsRepo.deleteById(id);
 }
 
@@ -496,9 +538,9 @@ const inputsKey = (inputs) => {
  * by running the reference solution (P1, P3). A test with no computable expected output still
  * runs and shows its output, marked noExpected, without a verdict.
  */
-export async function runProblem(id, payload) {
+export async function runProblem(id, payload, user = null) {
   const problem = await problemsRepo.findByIdWithReference(id);
-  if (!problem) throw new HttpError(404, "Problem not found");
+  if (!problem || (user && !canSeeProblem(problem, user))) throw new HttpError(404, "Problem not found");
 
   const { code, language, customTests } = payload;
   const problemType = problem.problemType || "function";

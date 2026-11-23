@@ -16,6 +16,7 @@ const AddProblemPage = () => {
     difficulty: 'Easy',
     tags: '',
     isPremium: false,
+    visibility: 'public',
     functionName: '',
     parameters: [{ name: '', type: '' }],
     returnType: '',
@@ -331,11 +332,21 @@ const AddProblemPage = () => {
             <input type="text" name="tags" value={formData.tags} onChange={handleChange} placeholder="array, string, dp" />
           </div>
         </div>
-        <div className="form-group mt-4 mb-8">
+        <div className="form-group mt-4 mb-4">
           <label className="flex-center gap-2" style={{ justifyContent: 'flex-start', cursor: 'pointer' }}>
             <input type="checkbox" name="isPremium" checked={formData.isPremium} onChange={handleChange} style={{ width: 'auto' }} />
             <span style={{ fontSize: '0.9rem' }}>Premium Problem</span>
           </label>
+        </div>
+        <div className="form-group mb-8">
+          <label>Who can use this problem</label>
+          <select name="visibility" value={formData.visibility || 'public'} onChange={handleChange}>
+            <option value="public">Public: every college can use and edit it</option>
+            <option value="private">Private: only your college can see and edit it</option>
+          </select>
+          <small style={{ color: 'var(--text-secondary)' }}>
+            Only the college that added a problem can delete it or change this setting.
+          </small>
         </div>
 
         {formData.problemType === 'function' && (<>

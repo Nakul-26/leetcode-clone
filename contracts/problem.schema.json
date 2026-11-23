@@ -105,6 +105,10 @@
     "isPremium": {
       "type": "boolean"
     },
+    "visibility": {
+      "type": "string",
+      "enum": ["public", "private"]
+    },
     "options": {
       "type": "array",
       "minItems": 2,

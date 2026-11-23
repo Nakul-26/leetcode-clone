@@ -17,6 +17,7 @@ export async function submitSolution(req, res, next) {
       answerText,
       userId,
       collegeId: req.user && req.user.collegeId,
+      role: req.user && req.user.role,
       assessmentId,
       attemptId,
       requestId: req.id,

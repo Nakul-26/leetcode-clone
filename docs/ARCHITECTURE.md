@@ -211,6 +211,14 @@ The tenant is a **college**. Every user, problem, assessment, API client and usa
 who names another college is ignored. A request for another college's resource returns **404**, not 403:
 a 403 would confirm the id exists.
 
+Problems are the exception: the catalog is shared, and each problem's `visibility` says how far
+(`services/problemAccess.js`). A **public** problem is seen, used in assessments and edited by every
+college. A **private** one exists only for the college that added it. `collegeId` on a problem is
+its owner, set from the author's account. Only the owner (or a superadmin) deletes a problem or
+changes its visibility, and never while an assessment uses it: a problem cannot be deleted from
+under an exam, nor made private while another college's assessment uses it. Problems with no
+owner (older ones, Arventiq's synced ones) are public and only a superadmin deletes them.
+
 ### Quotas, from the outside in
 
 | Layer | Scope | Unit | Window | Where |
@@ -237,7 +245,7 @@ month. Billing reads `usageevents`, never Redis.
 |---|---|---|
 | `colleges` | name, slug, `planId` | The tenant |
 | `users` | role, `collegeId` | Roles: student, faculty, admin, superadmin |
-| `problems` | `problemType` (function / stdin / mcq / subjective), testCases | Per college |
+| `problems` | `problemType` (function / stdin / mcq / subjective), testCases, `visibility`, `collegeId` (owner) | Shared; private ones per college |
 | `assessments`, `assessmentattempts` | | Timed exams and a student's attempt at one |
 | `submissions` | `problemId` (absent when ad-hoc), `kind`, `apiClientId`, `expiresAt`, `status`, `testResult` | Ad-hoc rows expire after 24 h via a TTL index |
 | `usageevents` | `apiClientId`, `collegeId`, `userId`, `language`, `status`, `elapsedMs`, **`testCount`** | Written by the **judge**, directly. The durable billing record. No source or output |

@@ -11,7 +11,8 @@ function ProblemListPage({ user }) {
   const [filters, setFilters] = useState({
     search: '',
     difficulty: '',
-    tag: ''
+    tag: '',
+    visibility: ''
   });
 
   const [apiError, setApiError] = useState(null);
@@ -30,6 +31,7 @@ function ProblemListPage({ user }) {
     if (filters.search) activeFilters.search = filters.search;
     if (filters.difficulty) activeFilters.difficulty = filters.difficulty;
     if (filters.tag) activeFilters.tag = filters.tag;
+    if (filters.visibility) activeFilters.visibility = filters.visibility;
 
     api.get('/api/v1/problems', { params: activeFilters })
       .then(response => {
@@ -97,6 +99,15 @@ function ProblemListPage({ user }) {
             <option value="Hard">Hard</option>
           </select>
         </div>
+        {user?.collegeId && (
+          <div style={{ width: '180px' }}>
+            <select name="visibility" value={filters.visibility} onChange={handleFilterChange} style={{ width: '100%' }}>
+              <option value="">All problems</option>
+              <option value="public">Public</option>
+              <option value="private">My college only</option>
+            </select>
+          </div>
+        )}
         <div style={{ width: '180px' }}>
           <input 
             type="text" 
@@ -152,7 +163,12 @@ function ProblemListPage({ user }) {
                 <span className={`tag difficulty-${problem.difficulty.toLowerCase()}`}>
                   {problem.difficulty}
                 </span>
-                <span className="text-muted" style={{ fontSize: '0.8rem' }}>
+                <span className="text-muted flex-center gap-2" style={{ fontSize: '0.8rem' }}>
+                  {problem.visibility === 'private' && (
+                    <span className="tag" title="Only your college can see this problem">
+                      <Lock size={12} /> Private
+                    </span>
+                  )}
                   ID: {problem._id.slice(-6)}
                 </span>
               </div>

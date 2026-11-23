@@ -167,7 +167,8 @@ export function buildProblemPayload(formData) {
         .split(",")
         .map((tag) => tag.trim())
         .filter(Boolean),
-      isPremium: !!formData.isPremium
+      isPremium: !!formData.isPremium,
+      visibility: formData.visibility === "private" ? "private" : "public"
     }
   };
 }
@@ -213,7 +214,8 @@ export function buildMcqPayload(formData) {
         .split(",")
         .map((tag) => tag.trim())
         .filter(Boolean),
-      isPremium: !!formData.isPremium
+      isPremium: !!formData.isPremium,
+      visibility: formData.visibility === "private" ? "private" : "public"
     }
   };
 }
@@ -248,7 +250,8 @@ export function buildSubjectivePayload(formData) {
         .split(",")
         .map((tag) => tag.trim())
         .filter(Boolean),
-      isPremium: !!formData.isPremium
+      isPremium: !!formData.isPremium,
+      visibility: formData.visibility === "private" ? "private" : "public"
     }
   };
 }
@@ -400,7 +403,8 @@ export function buildStdinPayload(formData) {
       solutionLanguage: formData.solutionLanguage,
       ...alternateSolutionFields(formData),
       tags: String(formData.tags || "").split(",").map((tag) => tag.trim()).filter(Boolean),
-      isPremium: !!formData.isPremium
+      isPremium: !!formData.isPremium,
+      visibility: formData.visibility === "private" ? "private" : "public"
     }
   };
 }
