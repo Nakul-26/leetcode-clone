@@ -216,7 +216,9 @@ Problems are the exception: the catalog is shared, and each problem's `visibilit
 college. A **private** one exists only for the college that added it. `collegeId` on a problem is
 its owner, set from the author's account. Only the owner (or a superadmin) deletes a problem or
 changes its visibility, and never while an assessment uses it: a problem cannot be deleted from
-under an exam, nor made private while another college's assessment uses it. Problems with no
+under an exam, nor made private while another college's assessment uses it. While another
+college's exam using a problem is running, nobody but that college (or a superadmin) may edit it.
+Submitted or run code is limited to 64 KB (`utils/codeSize.js`). Problems with no
 owner (older ones, Arventiq's synced ones) are public and only a superadmin deletes them.
 
 ### Quotas, from the outside in

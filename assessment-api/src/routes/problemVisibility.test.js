@@ -138,6 +138,31 @@ describe('Problem visibility', () => {
     expect((await request(app).delete(`/api/v1/problems/${legacy._id}`).set(as(superadmin))).status).toBe(200);
   });
 
+  it('nobody else edits a problem while another college\'s exam using it is running', async () => {
+    const p = await create(facultyA, mcq('Shared'));
+    const exam = await Assessment.create({
+      title: 'B exam', collegeId: b._id, createdBy: facultyB.user.id, durationMinutes: 30, status: 'Published',
+      startTime: new Date(Date.now() - 60e3), endTime: new Date(Date.now() + 3600e3), problems: [{ problemId: p._id }]
+    });
+    const edit = (u) => request(app).put(`/api/v1/problems/${p._id}`).set(as(u)).send(mcq('Shared v2'));
+
+    expect((await edit(facultyA)).status).toBe(409); // even the owner
+    expect((await edit(facultyB)).status).toBe(200); // the college running the exam may fix it
+    expect((await edit(superadmin)).status).toBe(200);
+
+    // Once it has ended, anyone may edit again.
+    await Assessment.updateOne({ _id: exam._id }, { endTime: new Date(Date.now() - 1000), startTime: new Date(Date.now() - 7200e3) });
+    expect((await edit(facultyA)).status).toBe(200);
+  });
+
+  it('refuses code over 64 KB with a clear message', async () => {
+    const p = await create(facultyA, mcq('Shared'));
+    const big = 'x'.repeat(64 * 1024 + 1);
+    const run = await request(app).post(`/api/v1/problems/${p._id}/run`).set(as(studentA)).send({ code: big, language: 'python' });
+    expect(run.status).toBe(413);
+    expect(run.body.msg).toContain('64 KB');
+  });
+
   it('an assessment cannot use another college\'s private problem', async () => {
     const p = await create(facultyA, mcq('Secret', 'private'));
     const body = {

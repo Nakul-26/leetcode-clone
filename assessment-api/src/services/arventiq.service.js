@@ -4,6 +4,7 @@ import { HttpError } from "../utils/httpError.js";
 import { resolveArventiqLanguage } from "../config/arventiqLanguages.js";
 import { judgeFetch } from "./judgeClient.service.js";
 import { explainJudgeResult } from "./diagnostics.service.js";
+import { assertCodeSize } from "../utils/codeSize.js";
 
 // Translates Arventiq's native `questions` + `test_cases` schema (see
 // docs/arventiq-integration/history/04-arventiq-real-schema-and-payload.md)
@@ -101,6 +102,7 @@ export async function submitArventiqSolution({ userId, questionId, code, codeLan
   if (typeof code !== "string" || !code) {
     throw new HttpError(400, "code is required");
   }
+  assertCodeSize(code);
 
   const language = resolveArventiqLanguage(codeLanguage);
   if (!language) {
@@ -263,6 +265,7 @@ export async function runArventiqCode({ questionId, code, codeLanguage, customIn
   if (typeof code !== "string" || !code) {
     throw new HttpError(400, "code is required");
   }
+  assertCodeSize(code);
 
   const language = resolveArventiqLanguage(codeLanguage);
   if (!language) {

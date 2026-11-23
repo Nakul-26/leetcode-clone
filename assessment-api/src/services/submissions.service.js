@@ -11,6 +11,7 @@ import { HttpError } from "../utils/httpError.js";
 import { admitApiClient } from "./apiClientQuota.service.js";
 import { explainJudgeResult } from "./diagnostics.service.js";
 import { canSeeProblem } from "./problemAccess.js";
+import { assertCodeSize } from "../utils/codeSize.js";
 
 function validateSubmissionMessage(msg) {
   if (!msg || typeof msg !== "object") return false;
@@ -396,6 +397,7 @@ export async function submitSolution({ problemId, code, language, selectedOption
   if (typeof code !== "string" || !code.trim() || typeof language !== "string" || !language.trim()) {
     throw new HttpError(400, "code and language are required for this problem");
   }
+  assertCodeSize(code);
 
   // Per-API-client admission (plan Phase 4). Placed after every validation that can reject the
   // request, and only on the path that actually reaches the judge, so a client is never charged

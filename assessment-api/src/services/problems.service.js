@@ -8,9 +8,10 @@ import { explainJudgeResult } from "./diagnostics.service.js";
 import { collegeAllowsPremium } from "./billing.service.js";
 import { escapeRegex } from "../utils/escapeRegex.js";
 import mongoose from "mongoose";
+import { assertCodeSize } from "../utils/codeSize.js";
 import {
   canSeeProblem, canEditProblem, canDeleteProblem, visibleProblemsFilter,
-  assertCanSetVisibility, assertNotInUse
+  assertCanSetVisibility, assertNotInUse, assertNoOtherCollegeExamRunning
 } from "./problemAccess.js";
 
 function isPrivilegedRole(role) {
@@ -450,7 +451,10 @@ export async function updateProblem(id, payload, user = null) {
     throw new HttpError(403, "Forbidden", { error: "Only the college that added this private problem can edit it." });
   }
   const normalizedPayload = normalizeProblemPayload(withoutOwnership(payload));
-  if (user) await assertCanSetVisibility(existing, normalizedPayload.visibility, user);
+  if (user) {
+    await assertNoOtherCollegeExamRunning(existing, user);
+    await assertCanSetVisibility(existing, normalizedPayload.visibility, user);
+  }
   const problemType = normalizedPayload.problemType || "function";
   const validationErrors = [...structuralValidatorFor(problemType)(normalizedPayload), ...alternateSolutionErrors(normalizedPayload)];
   if (validationErrors.length > 0) {
@@ -543,6 +547,7 @@ export async function runProblem(id, payload, user = null) {
   if (!problem || (user && !canSeeProblem(problem, user))) throw new HttpError(404, "Problem not found");
 
   const { code, language, customTests } = payload;
+  assertCodeSize(code);
   const problemType = problem.problemType || "function";
   const samples = (problem.testCases || []).filter((tc) => isSampleTestCase(tc));
 

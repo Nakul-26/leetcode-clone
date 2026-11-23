@@ -67,3 +67,25 @@ export async function assertNotInUse(problem) {
     throw new HttpError(409, "Problem in use", { error: "An assessment uses this problem. Remove it from the assessment before deleting it." });
   }
 }
+
+// A public problem may be edited by any college, but not while another college's exam that
+// uses it is running: changing its tests or statement would change that exam under its
+// students. The college running the exam may still edit (to fix a broken test mid-exam), and
+// so may a superadmin. Snapshotting the problem per exam would avoid the block, but every
+// part that reads a problem (grading, rejudge, reports, the judge) would need the copy.
+export async function assertNoOtherCollegeExamRunning(problem, user) {
+  if (isSuperadmin(user)) return;
+  const now = new Date();
+  const running = await Assessment.findOne({
+    "problems.problemId": problem._id,
+    status: "Published",
+    startTime: { $lte: now },
+    endTime: { $gte: now },
+    ...(user?.collegeId ? { collegeId: { $ne: user.collegeId } } : {})
+  }).select("endTime");
+  if (running) {
+    throw new HttpError(409, "Problem in use", {
+      error: `Another college's exam using this problem is running. You can edit it after ${running.endTime.toISOString()}.`
+    });
+  }
+}
