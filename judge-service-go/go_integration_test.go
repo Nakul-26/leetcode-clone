@@ -42,7 +42,7 @@ func TestGoIntegration_Primitive(t *testing.T) {
 	problem := models.Problem{
 		Title: "Add", FunctionName: "add", ReturnType: "number",
 		Parameters: []models.Parameter{{Name: "a", Type: "number"}, {Name: "b", Type: "number"}},
-		TestCases: []models.TestCase{{Input: []interface{}{float64(1), float64(2)}, Expected: int64(3)}},
+		TestCases:  []models.TestCase{{Input: []interface{}{float64(1), float64(2)}, Expected: int64(3)}},
 	}
 	code := `package main
 func add(a, b int) int { return a + b }`
@@ -53,7 +53,7 @@ func TestGoIntegration_Array(t *testing.T) {
 	problem := models.Problem{
 		Title: "SumArray", FunctionName: "sum", ReturnType: "number",
 		Parameters: []models.Parameter{{Name: "nums", Type: "array<number>"}},
-		TestCases: []models.TestCase{{Input: []interface{}{[]interface{}{float64(1), float64(2), float64(3)}}, Expected: int64(6)}},
+		TestCases:  []models.TestCase{{Input: []interface{}{[]interface{}{float64(1), float64(2), float64(3)}}, Expected: int64(6)}},
 	}
 	code := `package main
 func sum(nums []int) int {
@@ -68,7 +68,7 @@ func TestGoIntegration_LinkedList(t *testing.T) {
 	problem := models.Problem{
 		Title: "ReverseList", FunctionName: "reverseList", ReturnType: "linkedlist<number>",
 		Parameters: []models.Parameter{{Name: "head", Type: "linkedlist<number>"}},
-		TestCases: []models.TestCase{{Input: []interface{}{[]interface{}{float64(1), float64(2)}}, Expected: []interface{}{int64(2), int64(1)}}},
+		TestCases:  []models.TestCase{{Input: []interface{}{[]interface{}{float64(1), float64(2)}}, Expected: []interface{}{int64(2), int64(1)}}},
 	}
 	code := `package main
 func reverseList(head *ListNode) *ListNode {
@@ -89,7 +89,7 @@ func TestGoIntegration_Tree(t *testing.T) {
 	problem := models.Problem{
 		Title: "MaxDepth", FunctionName: "maxDepth", ReturnType: "number",
 		Parameters: []models.Parameter{{Name: "root", Type: "tree<number>"}},
-		TestCases: []models.TestCase{{Input: []interface{}{[]interface{}{float64(1), float64(2), float64(3)}}, Expected: int64(2)}},
+		TestCases:  []models.TestCase{{Input: []interface{}{[]interface{}{float64(1), float64(2), float64(3)}}, Expected: int64(2)}},
 	}
 	code := `package main
 func maxDepth(root *TreeNode) int {
@@ -105,7 +105,7 @@ func TestGoIntegration_CompileError(t *testing.T) {
 	problem := models.Problem{
 		Title: "SyntaxError", FunctionName: "f", ReturnType: "void",
 		Parameters: []models.Parameter{{Name: "n", Type: "number"}},
-		TestCases: []models.TestCase{{Input: []interface{}{float64(1)}, Expected: nil}},
+		TestCases:  []models.TestCase{{Input: []interface{}{float64(1)}, Expected: nil}},
 	}
 	code := `package main
 func f(n int) { return 1 + }`
@@ -116,7 +116,7 @@ func TestGoIntegration_RuntimeError(t *testing.T) {
 	problem := models.Problem{
 		Title: "Panic", FunctionName: "panicFunc", ReturnType: "void",
 		Parameters: []models.Parameter{{Name: "n", Type: "number"}},
-		TestCases: []models.TestCase{{Input: []interface{}{float64(1)}, Expected: nil}},
+		TestCases:  []models.TestCase{{Input: []interface{}{float64(1)}, Expected: nil}},
 	}
 	code := `package main
 func panicFunc(n int) { panic("boom") }`
@@ -127,7 +127,7 @@ func TestGoIntegration_Timeout(t *testing.T) {
 	problem := models.Problem{
 		Title: "InfiniteLoop", FunctionName: "loop", ReturnType: "void", TimeLimitMs: 500,
 		Parameters: []models.Parameter{{Name: "n", Type: "number"}},
-		TestCases: []models.TestCase{{Input: []interface{}{float64(1)}, Expected: nil}},
+		TestCases:  []models.TestCase{{Input: []interface{}{float64(1)}, Expected: nil}},
 	}
 	code := `package main
 func loop(n int) { for {} }`

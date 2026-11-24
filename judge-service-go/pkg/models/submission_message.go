@@ -7,25 +7,25 @@ import (
 )
 
 type SubmissionMessage struct {
-	SchemaVersion string      `json:"schemaVersion"`
-	SubmissionID  string      `json:"submissionId"`
-	ProblemID     string      `json:"problemId"`
-	Language      string      `json:"language"`
-	Code          string      `json:"code"`
-	Tests         []TestCase  `json:"tests"`
-	ProblemType   ProblemType `json:"problemType,omitempty"`
-	FunctionName  string      `json:"functionName"`
-	Parameters    []Parameter `json:"parameters,omitempty"`
-	ReturnType    string      `json:"returnType,omitempty"`
-	CompareMode   string      `json:"compareMode,omitempty"`
+	SchemaVersion string        `json:"schemaVersion"`
+	SubmissionID  string        `json:"submissionId"`
+	ProblemID     string        `json:"problemId"`
+	Language      string        `json:"language"`
+	Code          string        `json:"code"`
+	Tests         []TestCase    `json:"tests"`
+	ProblemType   ProblemType   `json:"problemType,omitempty"`
+	FunctionName  string        `json:"functionName"`
+	Parameters    []Parameter   `json:"parameters,omitempty"`
+	ReturnType    string        `json:"returnType,omitempty"`
+	CompareMode   string        `json:"compareMode,omitempty"`
 	CompareConfig CompareConfig `json:"compareConfig,omitempty"`
-	RequestID     string      `json:"requestId,omitempty"`
-	RetryCount    int         `json:"retryCount,omitempty"`
-	CollegeID     string      `json:"collegeId,omitempty"`
+	RequestID     string        `json:"requestId,omitempty"`
+	RetryCount    int           `json:"retryCount,omitempty"`
+	CollegeID     string        `json:"collegeId,omitempty"`
 	// Which external API key produced this submission, so usage can be attributed
 	// to a paying customer (plan Phase 1). Empty for frontend traffic and for
 	// callers still authenticating with a legacy global shared secret.
-	ApiClientID   string      `json:"apiClientId,omitempty"`
+	ApiClientID string `json:"apiClientId,omitempty"`
 	// Kind marks a submission that has no stored Problem behind it — a raw
 	// "run this program against this input" request arriving through the public
 	// GO Judge public API API. Left empty for every normal submission.

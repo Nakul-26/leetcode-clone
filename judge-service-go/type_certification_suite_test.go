@@ -3,8 +3,8 @@
 package main
 
 import (
-	"testing"
 	"judge-service-go/pkg/models"
+	"testing"
 )
 
 func TestTypeCertificationSuite(t *testing.T) {

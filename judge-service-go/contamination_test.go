@@ -3,8 +3,8 @@
 package main
 
 import (
-	"testing"
 	"judge-service-go/pkg/models"
+	"testing"
 )
 
 func TestContainerContamination(t *testing.T) {
@@ -19,7 +19,7 @@ func TestContainerContamination(t *testing.T) {
 			probWrite := models.Problem{
 				Title: "Contamination Write", FunctionName: "solve", ReturnType: "boolean",
 				Parameters: []models.Parameter{},
-				TestCases: []models.TestCase{{Input: []interface{}{}, Expected: true}},
+				TestCases:  []models.TestCase{{Input: []interface{}{}, Expected: true}},
 			}
 
 			var codeWrite string
@@ -45,7 +45,7 @@ func TestContainerContamination(t *testing.T) {
 			probRead := models.Problem{
 				Title: "Contamination Read", FunctionName: "solve", ReturnType: "boolean",
 				Parameters: []models.Parameter{},
-				TestCases: []models.TestCase{{Input: []interface{}{}, Expected: false}},
+				TestCases:  []models.TestCase{{Input: []interface{}{}, Expected: false}},
 			}
 
 			var codeRead string
@@ -63,7 +63,7 @@ func TestContainerContamination(t *testing.T) {
 			}
 
 			res2 := runCertificationTest(t, exec, pc, lang, probRead, codeRead, "contam-2")
-			
+
 			if res2.Status != models.SubmissionStatusAccepted {
 				if res2.Status == models.SubmissionStatusWrongAnswer {
 					t.Errorf("CONTAMINATION DETECTED for %s: /tmp/contamination.txt exists!", langID)

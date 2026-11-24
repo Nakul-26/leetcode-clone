@@ -51,7 +51,7 @@ type batchedTestExecOutput struct {
 	Stdout *string `json:"stdout,omitempty"`
 
 	// Stdin mode (stdinRunnerScript): the program's exit code and its stdout and stderr, base64.
-	Exit *int  `json:"exit,omitempty"`
+	Exit *int   `json:"exit,omitempty"`
 	Out  string `json:"out,omitempty"`
 	Err  string `json:"err,omitempty"`
 }
@@ -269,7 +269,7 @@ func runSubmissionCentralPerTest(ctx context.Context, exec *executor.Executor, p
 
 		tr.Stdout = userLogs
 		tr.Stderr = "" // Clear stderr since it contains internal judge metadata if parsing succeeded
-		
+
 		if out.Error != "" {
 			reason := models.SubmissionStatusRuntimeError
 			if strings.Contains(strings.ToLower(out.Error), "outofmemory") || strings.Contains(strings.ToLower(out.Traceback), "outofmemory") {

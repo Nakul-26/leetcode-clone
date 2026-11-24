@@ -3,8 +3,8 @@
 package main
 
 import (
-	"testing"
 	"judge-service-go/pkg/models"
+	"testing"
 )
 
 func TestTypeScriptSimple(t *testing.T) {

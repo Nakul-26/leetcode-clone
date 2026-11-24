@@ -27,21 +27,21 @@ const (
 
 // TestResult represents the result of a single test case.
 type TestResult struct {
-	Test      int         `json:"test" bson:"test"`                // test index (0-based)
-	Passed    bool        `json:"passed" bson:"passed"`              // whether test passed
-	Ok        bool        `json:"ok,omitempty" bson:"ok,omitempty"`        // legacy alias for whether test passed
-	Input     interface{} `json:"input,omitempty" bson:"input,omitempty"`     // input used for this test
-	Output    interface{} `json:"output,omitempty" bson:"output,omitempty"`    // actual output returned by user code
-	Expected  interface{} `json:"expected,omitempty" bson:"expected,omitempty"`  // expected output (useful for UI diffs)
-	Error     string      `json:"error,omitempty" bson:"error,omitempty"`     // short error message, if any
+	Test      int         `json:"test" bson:"test"`                               // test index (0-based)
+	Passed    bool        `json:"passed" bson:"passed"`                           // whether test passed
+	Ok        bool        `json:"ok,omitempty" bson:"ok,omitempty"`               // legacy alias for whether test passed
+	Input     interface{} `json:"input,omitempty" bson:"input,omitempty"`         // input used for this test
+	Output    interface{} `json:"output,omitempty" bson:"output,omitempty"`       // actual output returned by user code
+	Expected  interface{} `json:"expected,omitempty" bson:"expected,omitempty"`   // expected output (useful for UI diffs)
+	Error     string      `json:"error,omitempty" bson:"error,omitempty"`         // short error message, if any
 	ErrorType string      `json:"errorType,omitempty" bson:"errorType,omitempty"` // timeout / runtime / wrong_answer
-	Stack     string      `json:"stack,omitempty" bson:"stack,omitempty"`     // optional stack trace (for languages that produce it)
+	Stack     string      `json:"stack,omitempty" bson:"stack,omitempty"`         // optional stack trace (for languages that produce it)
 	Traceback string      `json:"traceback,omitempty" bson:"traceback,omitempty"` // python-style traceback or similar
-	Stdout    string      `json:"stdout,omitempty" bson:"stdout,omitempty"`    // captured stdout for this test
-	Stderr    string      `json:"stderr,omitempty" bson:"stderr,omitempty"`    // captured stderr for this test
-	ExitCode  int         `json:"exitCode,omitempty" bson:"exitCode,omitempty"`  // process exit code (if applicable)
-	TimeMs    int64       `json:"timeMs" bson:"timeMs"`              // time taken for this test in milliseconds
-	MemoryKB  int64       `json:"memoryKb,omitempty" bson:"memoryKb,omitempty"`  // memory used (best-effort)
+	Stdout    string      `json:"stdout,omitempty" bson:"stdout,omitempty"`       // captured stdout for this test
+	Stderr    string      `json:"stderr,omitempty" bson:"stderr,omitempty"`       // captured stderr for this test
+	ExitCode  int         `json:"exitCode,omitempty" bson:"exitCode,omitempty"`   // process exit code (if applicable)
+	TimeMs    int64       `json:"timeMs" bson:"timeMs"`                           // time taken for this test in milliseconds
+	MemoryKB  int64       `json:"memoryKb,omitempty" bson:"memoryKb,omitempty"`   // memory used (best-effort)
 	// Extra fields can be added as needed, but keep them small to avoid huge JSON payloads.
 }
 
@@ -50,15 +50,15 @@ type SubmissionResult struct {
 	Status          string       `json:"status" bson:"status"` // Accepted / Wrong Answer / Runtime Error / Time Limit Exceeded
 	ExecutionPath   string       `json:"executionPath,omitempty" bson:"executionPath,omitempty"`
 	InternalError   string       `json:"internalError,omitempty" bson:"internalError,omitempty"`
-	Passed          int          `json:"passed" bson:"passed"`              // number of tests passed
-	PassedCount     int          `json:"passedCount" bson:"passedCount"`         // alias for UI-facing pass count
-	Total           int          `json:"total" bson:"total"`               // total tests executed
-	TotalCount      int          `json:"totalCount" bson:"totalCount"`          // alias for UI-facing total count
-	MaxTimeMs       int64        `json:"maxTimeMs" bson:"maxTimeMs"`           // slowest per-test execution time in milliseconds
-	FirstFailedTest int          `json:"firstFailedTest" bson:"firstFailedTest"`     // 1-based index of first failed test, or -1 if all passed
-	Details         []TestResult `json:"details,omitempty" bson:"details,omitempty"`   // per-test details
-	Stdout          string       `json:"stdout,omitempty" bson:"stdout,omitempty"`    // aggregated stdout (if any)
-	Stderr          string       `json:"stderr,omitempty" bson:"stderr,omitempty"`    // aggregated stderr (if any)
+	Passed          int          `json:"passed" bson:"passed"`                           // number of tests passed
+	PassedCount     int          `json:"passedCount" bson:"passedCount"`                 // alias for UI-facing pass count
+	Total           int          `json:"total" bson:"total"`                             // total tests executed
+	TotalCount      int          `json:"totalCount" bson:"totalCount"`                   // alias for UI-facing total count
+	MaxTimeMs       int64        `json:"maxTimeMs" bson:"maxTimeMs"`                     // slowest per-test execution time in milliseconds
+	FirstFailedTest int          `json:"firstFailedTest" bson:"firstFailedTest"`         // 1-based index of first failed test, or -1 if all passed
+	Details         []TestResult `json:"details,omitempty" bson:"details,omitempty"`     // per-test details
+	Stdout          string       `json:"stdout,omitempty" bson:"stdout,omitempty"`       // aggregated stdout (if any)
+	Stderr          string       `json:"stderr,omitempty" bson:"stderr,omitempty"`       // aggregated stderr (if any)
 	StartedAt       *time.Time   `json:"startedAt,omitempty" bson:"startedAt,omitempty"` // optional timestamps
 	FinishedAt      *time.Time   `json:"finishedAt,omitempty" bson:"finishedAt,omitempty"`
 	ElapsedMs       int64        `json:"elapsedMs,omitempty" bson:"elapsedMs,omitempty"` // total elapsed time for submission

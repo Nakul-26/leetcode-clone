@@ -110,7 +110,7 @@ int add(int a, int b) {
 func TestCCentralIntegration_LinkedList(t *testing.T) {
 	exec, p, pc, lang := setupCIntegration(t)
 	defer p.Release(pc)
-	
+
 	problem := models.Problem{
 		Title:        "Reverse List",
 		FunctionName: "reverseList",
@@ -126,7 +126,7 @@ func TestCCentralIntegration_LinkedList(t *testing.T) {
 		},
 		CompareConfig: models.CompareConfig{Mode: "EXACT"},
 	}
-	
+
 	code := `
 struct ListNode* reverseList(struct ListNode* head) {
     struct ListNode* prev = NULL;
@@ -150,7 +150,7 @@ struct ListNode* reverseList(struct ListNode* head) {
 func TestCCentralIntegration_Array(t *testing.T) {
 	exec, p, pc, lang := setupCIntegration(t)
 	defer p.Release(pc)
-	
+
 	problem := models.Problem{
 		Title:        "Sum Array",
 		FunctionName: "sumArray",
@@ -166,7 +166,7 @@ func TestCCentralIntegration_Array(t *testing.T) {
 		},
 		CompareConfig: models.CompareConfig{Mode: "EXACT"},
 	}
-	
+
 	code := `
 int sumArray(int* nums, int numsSize) {
     int sum = 0;
@@ -186,7 +186,7 @@ int sumArray(int* nums, int numsSize) {
 func TestCCentralIntegration_Matrix(t *testing.T) {
 	exec, p, pc, lang := setupCIntegration(t)
 	defer p.Release(pc)
-	
+
 	problem := models.Problem{
 		Title:        "Diagonal Sum",
 		FunctionName: "diagonalSum",
@@ -202,7 +202,7 @@ func TestCCentralIntegration_Matrix(t *testing.T) {
 		},
 		CompareConfig: models.CompareConfig{Mode: "EXACT"},
 	}
-	
+
 	code := `
 int diagonalSum(int** mat, int matRows, int* matCols) {
     int sum = 0;

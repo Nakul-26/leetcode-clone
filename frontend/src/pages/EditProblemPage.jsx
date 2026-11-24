@@ -7,7 +7,7 @@ import TestCasesEditor from '../components/TestCasesEditor';
 import AlternateSolutionFields from '../components/AlternateSolutionFields';
 import { PROBLEM_TEMPLATES } from '../utils/problemTemplates';
 
-const EditProblemPage = () => {
+const EditProblemPage = ({ user }) => {
   const { _id } = useParams();
   const navigate = useNavigate();
 
@@ -342,7 +342,7 @@ const EditProblemPage = () => {
           <label>Who can use this problem</label>
           <select name="visibility" value={formData.visibility || 'public'} onChange={handleChange}>
             <option value="public">Public: every college can use and edit it</option>
-            <option value="private">Private: only your college can see and edit it</option>
+            <option value="private" disabled={!user?.collegeId}>Private: only your college can see and edit it</option>
           </select>
           <small style={{ color: 'var(--text-secondary)' }}>
             Only the college that added a problem can delete it or change this setting.

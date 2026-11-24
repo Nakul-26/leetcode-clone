@@ -46,10 +46,10 @@ func prepareGoFiles(workDir string, submissionMsg models.SubmissionMessage, prob
 	if err := workspace.WriteFile(workDir, "solution.go", []byte(solutionCode), 0644); err != nil {
 		return nil, fmt.Errorf("failed to write solution.go: %w", err)
 	}
-	
+
 	// Clear USER_CODE_MARKER in the wrapper since the user code is in a separate file
 	wrapperCode = strings.Replace(wrapperCode, "// USER_CODE_MARKER", "", 1)
-	
+
 	if err := workspace.WriteFile(workDir, "main.go", []byte(wrapperCode), 0644); err != nil {
 		return nil, fmt.Errorf("failed to write main.go: %w", err)
 	}

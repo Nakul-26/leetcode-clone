@@ -3,9 +3,9 @@
 package main
 
 import (
-	"testing"
 	"judge-service-go/pkg/models"
 	"strings"
+	"testing"
 )
 
 func TestProcessContamination(t *testing.T) {
@@ -20,7 +20,7 @@ func TestProcessContamination(t *testing.T) {
 			probSpawn := models.Problem{
 				Title: "Spawn Background", FunctionName: "solve", ReturnType: "boolean",
 				Parameters: []models.Parameter{},
-				TestCases: []models.TestCase{{Input: []interface{}{}, Expected: true}},
+				TestCases:  []models.TestCase{{Input: []interface{}{}, Expected: true}},
 			}
 
 			var codeSpawn string
@@ -40,7 +40,7 @@ func TestProcessContamination(t *testing.T) {
 			probCheck := models.Problem{
 				Title: "Check Background", FunctionName: "solve", ReturnType: "boolean",
 				Parameters: []models.Parameter{},
-				TestCases: []models.TestCase{{Input: []interface{}{}, Expected: false}},
+				TestCases:  []models.TestCase{{Input: []interface{}{}, Expected: false}},
 			}
 
 			var codeCheck string
@@ -52,7 +52,7 @@ func TestProcessContamination(t *testing.T) {
 			}
 
 			res2 := runCertificationTest(t, exec, pc, lang, probCheck, codeCheck, "spawn-2")
-			
+
 			if res2.Status != models.SubmissionStatusAccepted {
 				if res2.Status == models.SubmissionStatusWrongAnswer {
 					t.Errorf("PROCESS CONTAMINATION DETECTED for %s: 'sleep' process still running!", langID)

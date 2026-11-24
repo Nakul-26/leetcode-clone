@@ -325,8 +325,8 @@ function AppContent() {
                 <Route path="/admin/api-keys" element={<RequireRole roles={['admin', 'superadmin']}><ApiKeysPage user={user} /></RequireRole>} />
 
                 <Route path="/problems/:_id" element={<ProblemPage user={user} />} />
-                <Route path="/add-problem" element={<RequireStaff><AddProblemPage /></RequireStaff>} />
-                <Route path="/problems/:_id/edit" element={<RequireStaff><EditProblemPage /></RequireStaff>} />
+                <Route path="/add-problem" element={<RequireStaff><AddProblemPage user={user} /></RequireStaff>} />
+                <Route path="/problems/:_id/edit" element={<RequireStaff><EditProblemPage user={user} /></RequireStaff>} />
                 <Route path="/login" element={<LoginPage />} />
                 <Route path="/signup" element={<SignupPage />} />
                 <Route path="/my-submissions" element={<RequireAuth><MySubmissionsPage /></RequireAuth>} />

@@ -58,14 +58,14 @@ const (
 	// Per-language container pool autoscaling (see pkg/pool.StartAutoscaler). All of these
 	// have env var overrides parsed in main(); see docker-compose.prod.yml's header comment
 	// for the operator-facing summary.
-	defaultPoolGlobalCap          = 60
-	defaultWorkerConcurrency      = 24
-	defaultInteractiveWorkers     = 4
-	defaultAutoscaleInterval      = 15 * time.Second
-	defaultScaleUpThresholdMs     = 150.0
-	defaultScaleDownThresholdMs   = 20.0
-	defaultScaleUpCooldown        = 20 * time.Second
-	defaultScaleDownCooldown      = 180 * time.Second
+	defaultPoolGlobalCap        = 60
+	defaultWorkerConcurrency    = 24
+	defaultInteractiveWorkers   = 4
+	defaultAutoscaleInterval    = 15 * time.Second
+	defaultScaleUpThresholdMs   = 150.0
+	defaultScaleDownThresholdMs = 20.0
+	defaultScaleUpCooldown      = 20 * time.Second
+	defaultScaleDownCooldown    = 180 * time.Second
 )
 
 // langPoolAbbrev maps each supported language ID to the abbreviation used in its
@@ -1054,8 +1054,8 @@ func processAndStoreResults(ctx context.Context, executionPath string, stdout, s
 		// A coalesced batch is one submission with many test cases, so usage is also
 		// recorded in tests. Without it a client sending six cases in one request would meter
 		// as one, undercounting exactly the traffic the batch endpoint is meant to attract.
-		"testCount":    testCountFromResult(submissionTestResult, len(submissionMsg.Tests)),
-		"createdAt":    time.Now(),
+		"testCount": testCountFromResult(submissionTestResult, len(submissionMsg.Tests)),
+		"createdAt": time.Now(),
 		// Which execution path ran it, so per-language statistics can be split by surface.
 		"source": "queue",
 	}

@@ -377,4 +377,3 @@ public:
 		t.Fatalf("expected accepted result, got %+v", result)
 	}
 }
-

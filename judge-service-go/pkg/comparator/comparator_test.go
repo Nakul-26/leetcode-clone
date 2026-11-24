@@ -49,15 +49,15 @@ func TestCompare_OrderInsensitiveSlices(t *testing.T) {
 
 func TestCompare_NilAndEmptySlice(t *testing.T) {
 	cfg := models.CompareConfig{}
-	
+
 	if !Compare(nil, []interface{}{}, cfg) {
 		t.Fatalf("expected nil and empty slice to match")
 	}
-	
+
 	if !Compare([]interface{}{}, nil, cfg) {
 		t.Fatalf("expected empty slice and nil to match")
 	}
-	
+
 	// Test nested
 	expected := map[string]interface{}{"data": []interface{}{}}
 	actual := map[string]interface{}{"data": nil}

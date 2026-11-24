@@ -111,7 +111,6 @@ func runSubmissionStdinDetailed(ctx context.Context, exec *executor.Executor, po
 		return result, cleanupFailed, nil
 	}
 
-
 	for i, tc := range problem.TestCases {
 		if submissionMsg.StopOnFirstFailure && result.FirstFailedTest != -1 {
 			appendNotRunTests(result, problem, i)
@@ -137,7 +136,6 @@ func runSubmissionStdinDetailed(ctx context.Context, exec *executor.Executor, po
 			result.AddTestResult(tr)
 			continue
 		}
-
 
 		var stdout, stderr string
 		var exitCode int

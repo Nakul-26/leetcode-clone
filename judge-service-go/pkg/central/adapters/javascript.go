@@ -55,4 +55,3 @@ func (JavaScriptAdapter) RunCommand(inputB64 string) []string {
 func (JavaScriptAdapter) BatchRunCommand(testsB64 string) []string {
 	return []string{"node", "/app/wrapper.js", testsB64}
 }
-

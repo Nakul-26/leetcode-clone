@@ -29,7 +29,7 @@ type CompareConfig struct {
 	FloatTolerance   float64 `json:"floatTolerance" bson:"floatTolerance"`
 	OrderInsensitive bool    `json:"orderInsensitive" bson:"orderInsensitive"`
 	// RequireDeepCopy indicates that the result must be a deep copy of input structures
-	RequireDeepCopy  bool    `json:"requireDeepCopy" bson:"requireDeepCopy,omitempty"`
+	RequireDeepCopy bool `json:"requireDeepCopy" bson:"requireDeepCopy,omitempty"`
 }
 
 // Problem defines the structure for a programming problem.
