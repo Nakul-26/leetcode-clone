@@ -59,3 +59,52 @@ func TestTryClaimAdmitsUnknownLanguages(t *testing.T) {
 		}
 	}
 }
+
+// A slow language's interactive burst holds at most its containers plus interactiveWaiters
+// workers, so other languages' interactive requests still get workers.
+func TestTryClaimInteractiveCapsWaitingPerLanguage(t *testing.T) {
+	p := poolWithIdle("cpp", 2, 2)
+	p.limits["python"] = LangLimits{Min: 1, Max: 2}
+	p.targets["python"] = 1
+
+	var releases []func()
+	for i := 0; i < 2+interactiveWaiters; i++ {
+		release, ok := p.TryClaimInteractive("cpp")
+		if !ok {
+			t.Fatalf("interactive claim %d refused before the limit", i+1)
+		}
+		releases = append(releases, release)
+	}
+	if _, ok := p.TryClaimInteractive("cpp"); ok {
+		t.Fatal("cpp took more interactive workers than its containers plus the waiters")
+	}
+	if _, ok := p.TryClaimInteractive("python"); !ok {
+		t.Fatal("a cpp burst blocked python's interactive requests")
+	}
+	// Bulk and interactive claims are counted apart.
+	if _, ok := p.TryClaim("cpp"); !ok {
+		t.Fatal("interactive claims blocked bulk work")
+	}
+
+	releases[0]()
+	releases[0]()
+	if _, ok := p.TryClaimInteractive("cpp"); !ok {
+		t.Fatal("a released interactive claim was not reusable")
+	}
+	if _, ok := p.TryClaimInteractive("cpp"); ok {
+		t.Fatal("a double release freed two slots")
+	}
+
+	// A grown pool admits more.
+	p.mu.Lock()
+	p.targets["cpp"] = 6
+	p.mu.Unlock()
+	if _, ok := p.TryClaimInteractive("cpp"); !ok {
+		t.Fatal("the limit did not follow the pool's target")
+	}
+
+	// A language the pool does not serve is always admitted.
+	if _, ok := p.TryClaimInteractive("cobol"); !ok {
+		t.Fatal("an unserved language was refused")
+	}
+}

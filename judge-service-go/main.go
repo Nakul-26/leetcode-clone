@@ -210,6 +210,13 @@ func getDurationSecondsEnv(name string, def time.Duration) time.Duration {
 	return def
 }
 
+// interactiveWaitQueueName is the queue an interactive request waits in, for interactiveWaitMs,
+// when its language already has as many requests as it can take (pool.TryClaimInteractive). It
+// dead-letters back to the interactive queue. Set at startup.
+var interactiveWaitQueueName string
+
+const interactiveWaitMs = 300
+
 // bulkContainerReserve is how many idle containers per language bulk work leaves untouched
 // for interactive callers. Set from JUDGE_INTERACTIVE_RESERVE at startup.
 var bulkContainerReserve = 1
@@ -1286,10 +1293,19 @@ func processSubmission(interactive bool, d amqp.Delivery, ch *amqp.Channel, retr
 	// otherwise the message goes back on the queue and this worker takes other work, so one
 	// language's burst cannot block every worker (JUDGE_FIX_PLAN T4). Registered before the
 	// container's own deferred release, so the claim is given back after the container is.
+	// Interactive workers follow the same idea (pool.TryClaimInteractive), with a much shorter
+	// wait: a caller is waiting on the result.
 	if !interactive {
 		releaseClaim, admitted := containerPool.TryClaim(lang.ID)
 		if !admitted {
 			deferBusy(ctx, d, ch, retryQueueName, submissionMsg, lang.ID)
+			return
+		}
+		defer releaseClaim()
+	} else if interactiveWaitQueueName != "" {
+		releaseClaim, admitted := containerPool.TryClaimInteractive(lang.ID)
+		if !admitted {
+			deferBusy(ctx, d, ch, interactiveWaitQueueName, submissionMsg, lang.ID)
 			return
 		}
 		defer releaseClaim()
@@ -1976,6 +1992,25 @@ func main() {
 		},
 	)
 	failOnError(err, "Failed to declare interactive retry queue")
+
+	// A short wait for interactive requests of a language that already has all it can take
+	// (pool.TryClaimInteractive), so they let other languages' requests through. A new queue,
+	// so declaring it is additive for brokers and judges of older versions.
+	waitQueue := interactiveQueueName + "_wait"
+	_, err = ch.QueueDeclare(
+		waitQueue,
+		true,
+		false,
+		false,
+		false,
+		amqp.Table{
+			"x-dead-letter-exchange":    "",
+			"x-dead-letter-routing-key": interactiveQueueName,
+			"x-message-ttl":             interactiveWaitMs,
+		},
+	)
+	failOnError(err, "Failed to declare interactive wait queue")
+	interactiveWaitQueueName = waitQueue
 
 	// Registered before consuming so a connection loss at any point after this is seen.
 	connClosed := conn.NotifyClose(make(chan *amqp.Error, 1))

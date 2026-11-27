@@ -67,6 +67,7 @@ type ContainerPool struct {
 	ceiling  atomic.Int64
 	images   map[string]string           // language -> image name
 	claims   map[string]int              // language -> bulk workers holding or waiting for one of its containers
+	iclaims  map[string]int              // language -> interactive workers holding or waiting for one of its containers
 	runtime  string                      // OCI runtime for new containers; "" is the daemon default (runc)
 	maxExecs int32                       // runs before a container is replaced; 0 = never (SetMaxExecutions)
 	standby  map[string]*PooledContainer // successors created ahead of their container's retirement
@@ -85,6 +86,7 @@ func NewPool(cli *docker.Client, globalCap int) *ContainerPool {
 		globalCap:  globalCap,
 		images:     make(map[string]string),
 		claims:     make(map[string]int),
+		iclaims:    make(map[string]int),
 		standby:    make(map[string]*PooledContainer),
 	}
 }
@@ -241,6 +243,40 @@ func (p *ContainerPool) SetRuntime(runtime string) error {
 		}
 	}
 	return fmt.Errorf("sandbox runtime %q is not supported (want runc or runsc)", runtime)
+}
+
+// interactiveWaiters is how many interactive requests of one language may wait for a container
+// beyond the containers it has.
+const interactiveWaiters = 2
+
+// TryClaimInteractive is TryClaim for the interactive workers. They are few and shared by all
+// languages, and a worker waiting for a container holds its request until one is free, so
+// without a limit a burst of a slow language (C++, Java) occupied most of them while Python,
+// with idle containers, queued behind it: in a mixed load test Python fell from 4,728 to
+// 835/min and its median wait went from 0.6 to 2.8 s (2026-11-27). A language may hold as many
+// interactive requests as it has containers, plus interactiveWaiters waiting; a refused request
+// goes back on the queue for a moment (the caller defers it) and the worker takes other work.
+func (p *ContainerPool) TryClaimInteractive(lang string) (release func(), ok bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if _, served := p.limits[lang]; !served {
+		return func() {}, true
+	}
+	if p.iclaims == nil {
+		p.iclaims = make(map[string]int)
+	}
+	if p.iclaims[lang] >= p.targets[lang]+interactiveWaiters {
+		return nil, false
+	}
+	p.iclaims[lang]++
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			p.mu.Lock()
+			p.iclaims[lang]--
+			p.mu.Unlock()
+		})
+	}, true
 }
 
 // claimsPerContainer is how many bulk workers one language may tie up per container it
