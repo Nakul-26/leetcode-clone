@@ -62,6 +62,9 @@ type ContainerPool struct {
 	limits     map[string]LangLimits            // language -> configured min/max
 	targets    map[string]int                   // language -> current scaling target (min <= target <= max)
 	globalCap  int                              // max containers across ALL languages combined
+	// ceiling lets a language's pool grow past its configured max, up to this many containers
+	// (pkg/capacity, JUDGE_ADAPTIVE_CONCURRENCY). 0 = none. The global cap still applies.
+	ceiling atomic.Int64
 	images     map[string]string                // language -> image name
 	claims     map[string]int                   // language -> bulk workers holding or waiting for one of its containers
 	runtime    string                           // OCI runtime for new containers; "" is the daemon default (runc)
@@ -757,6 +760,19 @@ type AutoscaleConfig struct {
 	DownCooldown    time.Duration
 }
 
+// SetCeiling sets how far past its configured max a language's pool may grow while the host has
+// CPU to spare (pkg/capacity). Lowering it shrinks pools back on the autoscaler's next ticks,
+// never below their configured max.
+func (p *ContainerPool) SetCeiling(n int) { p.ceiling.Store(int64(n)) }
+
+// effectiveMax is a language's max with the ceiling applied.
+func (p *ContainerPool) effectiveMax(l LangLimits) int {
+	if c := int(p.ceiling.Load()); c > l.Max {
+		return c
+	}
+	return l.Max
+}
+
 // globalLiveTotal returns the current container count (in-use + available) summed across
 // every language — what StartAutoscaler compares against globalCap before allowing any
 // language to scale up, since all languages share the same underlying host CPU budget.
@@ -834,7 +850,7 @@ func (p *ContainerPool) StartAutoscaler(ctx context.Context, cfg AutoscaleConfig
 					headroom := p.globalLiveTotal() < p.globalCap
 
 					decision := decideScale(
-						limits.Min, limits.Max, target,
+						limits.Min, p.effectiveMax(limits), target,
 						avgWaitMs, hadTraffic, deltaTimeouts,
 						cfg.UpThresholdMs, cfg.DownThresholdMs,
 						upElapsed, downElapsed,

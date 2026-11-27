@@ -54,6 +54,11 @@
 #                          Phase 2), e.g. python,javascript or all. Needs JUDGE_MERGED_EXECS=true
 #                          and images built from this commit or later; an image without the agent
 #                          falls back to plain execs.
+#   JUDGE_ADAPTIVE_CONCURRENCY (default: false) — true grows the interactive workers past
+#                          JUDGE_INTERACTIVE_WORKERS, and lets each language's pool grow past its
+#                          JUDGE_POOL_MAX_<LANG>, while work waits and host CPU is under 85%;
+#                          shrinks back when CPU is over 95%. JUDGE_CONCURRENCY_MAX caps it
+#                          (default 1.5x the host's cores). See pkg/capacity.
 #   JUDGE_WORKER_CONCURRENCY  (default: 24) — how many submissions can be pulled off RabbitMQ
 #                          and processed concurrently. Deliberately set above the host's core
 #                          count: these workers spend most of their time blocked on Docker API
@@ -378,6 +383,8 @@ services:
       JUDGE_SANDBOX_RUNTIME: ${JUDGE_SANDBOX_RUNTIME:-}
       JUDGE_MERGED_EXECS: ${JUDGE_MERGED_EXECS:-false}
       JUDGE_AGENT_LANGS: ${JUDGE_AGENT_LANGS:-}
+      JUDGE_ADAPTIVE_CONCURRENCY: ${JUDGE_ADAPTIVE_CONCURRENCY:-false}
+      JUDGE_CONCURRENCY_MAX: ${JUDGE_CONCURRENCY_MAX:-}
       # Which stack this judge's sandboxes belong to, so a second stack on the same server
       # (deploy2 runs two) keeps its sandboxes when this one starts. Defaults to the Compose
       # project name, which Dokploy makes unique per compose.

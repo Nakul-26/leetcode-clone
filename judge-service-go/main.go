@@ -27,6 +27,7 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	"judge-service-go/pkg/central/adapters"
+	"judge-service-go/pkg/capacity"
 	"judge-service-go/pkg/executor"
 	"judge-service-go/pkg/languages"
 	"judge-service-go/pkg/metrics"
@@ -1974,24 +1975,12 @@ func main() {
 	failOnError(err, "Failed to register a consumer")
 
 	// The interactive consumer may hold only as many unacknowledged messages as it has
-	// workers. With the bulk prefetch (workerConcurrency) a judge with 4 interactive workers
+	// workers: with the bulk prefetch (workerConcurrency) a judge with 4 interactive workers
 	// took 24 waiting callers at a time, and with two judges the one with fewer workers sat
-	// on requests the other was free to run. basic.qos with global=false applies to
-	// consumers registered after it on this channel, so the bulk consumer above keeps its own.
-	interactiveWorkers := getIntEnv("JUDGE_INTERACTIVE_WORKERS", defaultInteractiveWorkers)
-	err = ch.Qos(max(interactiveWorkers, 1), 0, false) // 0 would mean "no limit"
-	failOnError(err, "Failed to set interactive QoS")
-
-	interactiveMsgs, err := ch.Consume(
-		interactiveQueueName,
-		interactiveConsumerTag,
-		false,
-		false,
-		false,
-		false,
-		nil,
-	)
-	failOnError(err, "Failed to register the interactive consumer")
+	// on requests the other was free to run. Each interactive worker has its own channel and
+	// a prefetch of one (interactive_workers.go), which keeps that and lets the number of
+	// workers change at run time (JUDGE_ADAPTIVE_CONCURRENCY).
+	interactiveWorkers := max(getIntEnv("JUDGE_INTERACTIVE_WORKERS", defaultInteractiveWorkers), 1)
 
 	slog.Info("Waiting for messages", "queue", submissionQueueName, "interactiveQueue", interactiveQueueName)
 
@@ -2027,17 +2016,39 @@ func main() {
 	// it, so bulk throughput is unchanged; they spend nearly all their time blocked on
 	// the sandbox, not on CPU.
 	slog.Info("Starting interactive workers", "count", interactiveWorkers, "bulkContainerReserve", bulkContainerReserve)
-	for i := 0; i < interactiveWorkers; i++ {
-		workerWg.Add(1)
-		go func(workerID int) {
-			defer workerWg.Done()
-			for d := range interactiveMsgs {
-				if returnIfShuttingDown(d) {
-					continue
+	iworkers := newInteractiveWorkers(conn, interactiveQueueName, &workerWg, func(d amqp.Delivery, wch *amqp.Channel) {
+		processSubmission(true, d, wch, interactiveRetryQueueName, problemsCollection, submissionsCollection, usageEventsCollection, redisClient, executor, containerPool)
+	})
+	failOnError(iworkers.ScaleTo(interactiveWorkers), "Failed to start the interactive workers")
+
+	// Adaptive concurrency (pkg/capacity): more interactive workers, and room for each
+	// language's pool past its configured max, while the host has CPU to spare.
+	if capacity.Enabled() {
+		cfg := capacity.ConfigFromEnv(interactiveWorkers)
+		prevAcquire := metrics.SnapshotAcquire()
+		demand := func() bool {
+			// Interactive workers all busy, or bulk work waiting for containers.
+			waited := iworkers.Demand()
+			cur := metrics.SnapshotAcquire()
+			for lang, c := range cur {
+				p := prevAcquire[lang]
+				if n := c.Count - p.Count; n > 0 && (c.WaitNanos-p.WaitNanos)/n > int64(50*time.Millisecond) {
+					waited = true
 				}
-				processSubmission(true, d, ch, interactiveRetryQueueName, problemsCollection, submissionsCollection, usageEventsCollection, redisClient, executor, containerPool)
+				if c.TimeoutCount > p.TimeoutCount {
+					waited = true
+				}
 			}
-		}(i)
+			prevAcquire = cur
+			return waited
+		}
+		ctl := capacity.New(cfg, demand, func(limit int) {
+			containerPool.SetCeiling(limit)
+			if err := iworkers.ScaleTo(limit); err != nil {
+				slog.Error("adaptive concurrency: could not change interactive workers", "limit", limit, "error", err)
+			}
+		})
+		go ctl.Run(ctx)
 	}
 
 	consumersHealthy.Store(true)
@@ -2074,17 +2085,18 @@ func main() {
 		exitLostBroker("channel closed", amqpErr)
 	case <-workersDone:
 		exitLostBroker("all consumers stopped", nil)
+	case err := <-iworkers.lost:
+		exitLostBroker(err.Error(), nil)
 	}
 	consumersHealthy.Store(false)
 	shuttingDown.Store(true)
 
 	// 1. Stop consuming. Cancelling a consumer closes its delivery channel once the
 	// deliveries already buffered for it have been handed out, which ends the worker loops.
-	for _, tag := range []string{bulkConsumerTag, interactiveConsumerTag} {
-		if err := ch.Cancel(tag, false); err != nil {
-			slog.Error("Error cancelling consumer", "consumer", tag, "error", err)
-		}
+	if err := ch.Cancel(bulkConsumerTag, false); err != nil {
+		slog.Error("Error cancelling consumer", "consumer", bulkConsumerTag, "error", err)
 	}
+	iworkers.StopAll()
 
 	// 2. Wait for active workers to finish
 	slog.Info("Waiting for active workers to finish...")
