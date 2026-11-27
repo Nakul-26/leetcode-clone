@@ -243,8 +243,19 @@ container gets correct verdicts, on time, with untouched limits. The whole integ
 `JUDGE_AGENT_LANGS=all` (all 11 languages, 658 tests, as without the agent), and
 `TestAgentGoroutinesEndWithContainer` checks the judge keeps nothing per removed container.
 
-Next: enable on the testing judges (`JUDGE_AGENT_LANGS=all` on Test GO Judge and test-judge-worker,
-after a redeploy builds the new images), load test, then production.
+**Load test on the testing stack** (2026-11-27, both testing judges, merged execs on, `npm run loadtest
+-- full`, 0 errors in every run; quiet servers):
+
+| | agent off | agent on (`JUDGE_AGENT_LANGS=all`) |
+|---|---|---|
+| Python x80 | 4,777/min, p50 871 ms | **9,704/min**, p50 576 ms (2.0x) |
+| Python peak | ~4,800/min | **11,436/min at x160** (2.4x), p50 734 ms |
+| C++ x80 | 1,208/min | 1,515/min (+25%) |
+| Java x80 | 1,065/min | 1,204/min (+13%) |
+
+At x240 the servers' load averages were only ~6 (deploy2) and ~4 (deploy4) of 12 cores: judge CPU
+is no longer the limit for Python; the next one is in front of the judges (API, queue or the load
+generator). Next: production, after the testing judges have run it for a while.
 
 ### Phase 3 (optional): CPU time without Docker stats
 
