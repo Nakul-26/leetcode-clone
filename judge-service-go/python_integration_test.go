@@ -29,6 +29,8 @@ func setupPythonIntegration(t *testing.T) (*executor.Executor, *pool.ContainerPo
 	}
 
 	p := newTestPool(t, exec.Client(), 1)
+	// Remove the container afterwards, as setupIntegration does; it used to stay running.
+	t.Cleanup(func() { p.Shutdown(context.Background()) })
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	if err := p.WarmUp(ctx, lang.ID, lang.ImageRef(), 1, 1); err != nil {

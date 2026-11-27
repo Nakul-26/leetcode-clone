@@ -1,3 +1,12 @@
+# The sandbox agent (cmd/judge-agent, docs/judge/JUDGE_AGENT_PLAN.md Phase 2), built from the
+# judge's own source: the build context is judge-service-go/ (see the docker-compose files).
+FROM golang:alpine AS judge-agent
+WORKDIR /src
+COPY go.mod go.sum ./
+COPY pkg/agentproto ./pkg/agentproto
+COPY cmd/judge-agent ./cmd/judge-agent
+RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /judge-agent ./cmd/judge-agent
+
 FROM eclipse-temurin:21-jdk
 # NOTE: eclipse-temurin's *-alpine tags are amd64-only for many JDK versions.
 # The Debian/Ubuntu-based (non-alpine) tag is multi-arch, so use that instead
@@ -31,7 +40,7 @@ RUN apt-get update \
 # on one core. They find Solution by reflection, so they compile without it. Copies of
 # pkg/wrappers/kotlin_wrapper.tpl and kotlin_batch_wrapper.tpl (a judge test keeps them equal).
 # The build fails if either does not compile.
-COPY harness /opt/judge-harness-src
+COPY environments/kotlin/harness /opt/judge-harness-src
 RUN kotlinc -cp /usr/share/java/gson.jar -d /opt/judge-harness/single /opt/judge-harness-src/single/Harness.kt \
  && kotlinc -cp /usr/share/java/gson.jar -d /opt/judge-harness/batch /opt/judge-harness-src/batch/Harness.kt \
  && test -f /opt/judge-harness/single/HarnessKt.class && test -f /opt/judge-harness/batch/HarnessKt.class \
@@ -43,6 +52,9 @@ RUN addgroup --system judge && adduser --system --ingroup judge --home /home/jud
     && mkdir -p /home/judge && chown -R judge:judge /home/judge
 
 ENV HOME=/home/judge
+
+# Root-owned and on the read-only root filesystem: no submission can change it.
+COPY --from=judge-agent /judge-agent /usr/local/bin/judge-agent
 
 USER judge
 WORKDIR /app

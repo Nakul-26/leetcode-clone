@@ -37,6 +37,11 @@ type Executor struct {
 	wipePending sync.Map
 	staleLimit  sync.Map
 	broken      sync.Map
+
+	// The sandbox agent (agent.go): per container ID its *agentState, and per stand-in exec
+	// ID the *agentExec it runs.
+	agents     sync.Map
+	agentExecs sync.Map
 }
 
 // maxCapturedOutputBytes caps how much of a single exec's stdout/stderr this process
@@ -245,7 +250,15 @@ func (e *Executor) ResetContainer(ctx context.Context, containerID string) error
 	if err := e.UpdateContainerResources(ctx, containerID, defaultMemoryMb); err != nil {
 		return err
 	}
-	stdout, stderr, exitCode, err := e.runExecWithTimeout(ctx, containerID, "root", "/", []string{"sh", "-c", containerKillScript}, 10*time.Second)
+	var stdout, stderr string
+	var exitCode int
+	handled, err := e.killJudge(ctx, containerID)
+	if !handled {
+		stdout, stderr, exitCode, err = e.runExecWithTimeout(ctx, containerID, "root", "/", []string{"sh", "-c", containerKillScript}, 10*time.Second)
+	}
+	if err == nil {
+		err = e.checkRunner(ctx, containerID)
+	}
 	if err == nil {
 		stdout, stderr, exitCode, err = e.runExecWithTimeout(ctx, containerID, getJudgeUser(), "/", []string{"sh", "-c", containerWipeScript}, 10*time.Second)
 	}
@@ -259,7 +272,18 @@ func (e *Executor) ResetContainer(ctx context.Context, containerID string) error
 // limit: the OOM killer frees memory by killing the student's processes, and if what is left
 // (files in memory-backed /tmp) still starves the kill, it fails and the container is discarded.
 func (e *Executor) resetDeferred(ctx context.Context, containerID string) error {
-	stdout, stderr, exitCode, err := e.runExecWithTimeout(ctx, containerID, "root", "/", []string{"sh", "-c", containerKillCmds + "; " + containerUsageScript + "; exit 0"}, 10*time.Second)
+	var stdout, stderr string
+	var exitCode int
+	handled, err := e.killJudge(ctx, containerID)
+	switch {
+	case !handled:
+		stdout, stderr, exitCode, err = e.runExecWithTimeout(ctx, containerID, "root", "/", []string{"sh", "-c", containerKillCmds + "; " + containerUsageScript + "; exit 0"}, 10*time.Second)
+	case err == nil:
+		// The keeper killed everything but the runner; the usage check is a root command too.
+		if err = e.checkRunner(ctx, containerID); err == nil {
+			stdout, stderr, exitCode, err = e.runExecWithTimeout(ctx, containerID, "root", "/", []string{"sh", "-c", containerUsageScript + "; exit 0"}, 10*time.Second)
+		}
+	}
 	if err != nil {
 		e.forget(containerID)
 		return fmt.Errorf("container reset failed: %w (exit=%d stdout=%s stderr=%s)", err, exitCode, stdout, stderr)
@@ -938,6 +962,12 @@ func runEndedBadly(exitCode int, err error) bool {
 // next test of the same submission runs. Since the container's PID 1 runs as root, every process
 // owned by the judge user can be killed without stopping the container.
 func (e *Executor) killLeftovers(containerID string) {
+	if handled, err := e.killJudge(context.Background(), containerID); handled {
+		if err != nil {
+			slog.Error("failed to kill leftover processes", "containerId", containerID, "error", err)
+		}
+		return
+	}
 	stdout, stderr, exitCode, err := e.runExecWithTimeout(context.Background(), containerID, "root", "/", []string{"sh", "-c", "pkill -9 -u judge || true"}, 5*time.Second)
 	if err != nil && exitCode != 137 {
 		slog.Error("failed to kill leftover processes", "containerId", containerID, "error", err, "stdout", stdout, "stderr", stderr, "exitCode", exitCode)
@@ -1208,7 +1238,14 @@ func (e *Executor) RunRawWithStdin(ctx context.Context, containerID string, file
 	}
 
 	// Clear /tmp and kill leftover processes to prevent contamination between reused containers.
-	cStdout, cStderr, cExit, cErr := e.runExecWithTimeout(context.Background(), containerID, "root", "/", []string{"sh", "-c", "rm -rf /tmp/* && (pkill -9 -u judge || true)"}, 5*time.Second)
+	cleanup := "rm -rf /tmp/* && (pkill -9 -u judge || true)"
+	if handled, err := e.killJudge(context.Background(), containerID); handled {
+		if err != nil {
+			slog.Error("failed to kill raw-run leftovers", "containerId", containerID, "error", err)
+		}
+		cleanup = "rm -rf /tmp/* || true" // with the agent, the keeper did the kill
+	}
+	cStdout, cStderr, cExit, cErr := e.runExecWithTimeout(context.Background(), containerID, "root", "/", []string{"sh", "-c", cleanup}, 5*time.Second)
 	if cErr != nil && cExit != 137 {
 		slog.Error("failed to cleanup raw-run container", "containerId", containerID, "error", cErr, "stdout", cStdout, "stderr", cStderr, "exitCode", cExit)
 	}

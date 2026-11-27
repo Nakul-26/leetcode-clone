@@ -159,8 +159,8 @@ services:
 
   judge-java:
     build:
-      context: ./judge-service-go/environments/java
-      dockerfile: Dockerfile
+      context: ./judge-service-go
+      dockerfile: environments/java/Dockerfile
     image: judge-java-env
     pull_policy: build
     container_name: judge_java_env
@@ -169,8 +169,8 @@ services:
 
   judge-js:
     build:
-      context: ./judge-service-go/environments/javascript
-      dockerfile: Dockerfile
+      context: ./judge-service-go
+      dockerfile: environments/javascript/Dockerfile
     image: judge-js-env
     pull_policy: build
     container_name: judge_js_env
@@ -179,8 +179,8 @@ services:
 
   judge-py:
     build:
-      context: ./judge-service-go/environments/python
-      dockerfile: Dockerfile
+      context: ./judge-service-go
+      dockerfile: environments/python/Dockerfile
     image: judge-py-env
     pull_policy: build
     container_name: judge_py_env
@@ -189,8 +189,8 @@ services:
 
   judge-c:
     build:
-      context: ./judge-service-go/environments/c
-      dockerfile: Dockerfile
+      context: ./judge-service-go
+      dockerfile: environments/c/Dockerfile
     image: judge-c-env
     pull_policy: build
     container_name: judge_c_env
@@ -199,8 +199,8 @@ services:
 
   judge-cpp:
     build:
-      context: ./judge-service-go/environments/cpp
-      dockerfile: Dockerfile
+      context: ./judge-service-go
+      dockerfile: environments/cpp/Dockerfile
     image: judge-cpp-env
     pull_policy: build
     container_name: judge_cpp_env
@@ -209,8 +209,8 @@ services:
 
   judge-csharp:
     build:
-      context: ./judge-service-go/environments/csharp
-      dockerfile: Dockerfile
+      context: ./judge-service-go
+      dockerfile: environments/csharp/Dockerfile
     image: judge-csharp-env
     pull_policy: build
     container_name: judge_csharp_env
@@ -219,8 +219,8 @@ services:
 
   judge-go:
     build:
-      context: ./judge-service-go/environments/go
-      dockerfile: Dockerfile
+      context: ./judge-service-go
+      dockerfile: environments/go/Dockerfile
     image: judge-go-env
     pull_policy: build
     container_name: judge_go_env
@@ -229,8 +229,8 @@ services:
 
   judge-rust:
     build:
-      context: ./judge-service-go/environments/rust
-      dockerfile: Dockerfile
+      context: ./judge-service-go
+      dockerfile: environments/rust/Dockerfile
     image: judge-rust-env
     pull_policy: build
     container_name: judge_rust_env
@@ -239,8 +239,8 @@ services:
 
   judge-ruby:
     build:
-      context: ./judge-service-go/environments/ruby
-      dockerfile: Dockerfile
+      context: ./judge-service-go
+      dockerfile: environments/ruby/Dockerfile
     image: judge-ruby-env
     pull_policy: build
     container_name: judge_ruby_env
@@ -249,8 +249,8 @@ services:
 
   judge-php:
     build:
-      context: ./judge-service-go/environments/php
-      dockerfile: Dockerfile
+      context: ./judge-service-go
+      dockerfile: environments/php/Dockerfile
     image: judge-php-env
     pull_policy: build
     container_name: judge_php_env
@@ -259,8 +259,8 @@ services:
 
   judge-kotlin:
     build:
-      context: ./judge-service-go/environments/kotlin
-      dockerfile: Dockerfile
+      context: ./judge-service-go
+      dockerfile: environments/kotlin/Dockerfile
     image: judge-kotlin-env
     pull_policy: build
     container_name: judge_kotlin_env

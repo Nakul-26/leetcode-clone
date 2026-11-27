@@ -34,7 +34,7 @@ Start with the row that matches what you are doing.
 | [Second Judge](./judge/SECOND_JUDGE.md) | How the second judge on deploy4 shares work with deploy2's over Tailscale; setup, checks and measured results. Live since 2026-11-06 |
 | [Second Judge for Another Stack](./judge/SECOND_JUDGE_FOR_ANOTHER_STACK.md) | The same setup for the Exam Sandbox stack, running beside GO Judge's on both servers |
 | [Judge Fix Plan](./judge/JUDGE_FIX_PLAN.md) | The dated list of every judge fix (reliability, correctness, performance, security, scale-out), with commits |
-| [Judge Agent Plan](./judge/JUDGE_AGENT_PLAN.md) | Fewer Docker calls per run: Phase 0 measurements, Phase 1 (merged execs, behind `JUDGE_MERGED_EXECS`) built, Phase 2 to decide |
+| [Judge Agent Plan](./judge/JUDGE_AGENT_PLAN.md) | Fewer Docker calls per run: Phase 0 measurements, Phase 1 (merged execs, `JUDGE_MERGED_EXECS`) on everywhere, Phase 2 (resident agent, `JUDGE_AGENT_LANGS`) built |
 | [Judge Performance Review](./judge/JUDGE_PERFORMANCE_REVIEW.md) | How a submission flows through the judge, what limits throughput (measured), and the prioritised fixes |
 | [Judge Unification and Scaling Plan](./judge/JUDGE_UNIFICATION_AND_SCALING_PLAN.md) | The six-phase plan that put every surface on one queue-backed pipeline, with the measurements taken at each step. All phases done |
 

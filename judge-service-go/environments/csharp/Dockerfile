@@ -1,3 +1,12 @@
+# The sandbox agent (cmd/judge-agent, docs/judge/JUDGE_AGENT_PLAN.md Phase 2), built from the
+# judge's own source: the build context is judge-service-go/ (see the docker-compose files).
+FROM golang:alpine AS judge-agent
+WORKDIR /src
+COPY go.mod go.sum ./
+COPY pkg/agentproto ./pkg/agentproto
+COPY cmd/judge-agent ./cmd/judge-agent
+RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /judge-agent ./cmd/judge-agent
+
 FROM mcr.microsoft.com/dotnet/sdk:8.0
 
 # procps provides pkill/pgrep, which the judge uses to kill a submission's leftover processes
@@ -25,6 +34,9 @@ ENV HOME=/tmp
 ENV DOTNET_CLI_HOME=/tmp
 ENV DOTNET_NOLOGO=true
 ENV DOTNET_SKIP_FIRST_TIME_EXPERIENCE=true
+
+# Root-owned and on the read-only root filesystem: no submission can change it.
+COPY --from=judge-agent /judge-agent /usr/local/bin/judge-agent
 
 USER judge
 WORKDIR /app

@@ -1,3 +1,12 @@
+# The sandbox agent (cmd/judge-agent, docs/judge/JUDGE_AGENT_PLAN.md Phase 2), built from the
+# judge's own source: the build context is judge-service-go/ (see the docker-compose files).
+FROM golang:alpine AS judge-agent
+WORKDIR /src
+COPY go.mod go.sum ./
+COPY pkg/agentproto ./pkg/agentproto
+COPY cmd/judge-agent ./cmd/judge-agent
+RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /judge-agent ./cmd/judge-agent
+
 FROM eclipse-temurin:11-jdk
 # NOTE: eclipse-temurin:11-jdk-alpine is amd64-only (no arm64 manifest), which
 # breaks builds on ARM64 hosts with "no match for platform in manifest".
@@ -25,7 +34,7 @@ ENV CLASSPATH /usr/share/java/gson.jar:.
 # ignored rather than failing a run. The -Xshare:on checks fail the build if an archive does
 # not load. The run archive is dumped with gson.jar alone on the classpath: at run time the
 # judge's classpath is gson.jar:., which starts with it, as CDS requires.
-COPY cds/Train.java /opt/cds/train/Train.java
+COPY environments/java/cds/Train.java /opt/cds/train/Train.java
 RUN cd /opt/cds/train \
     && javac -J-XX:DumpLoadedClassList=/opt/cds/javac.lst -cp /usr/share/java/gson.jar:. Train.java \
     && java -Xshare:dump -XX:SharedClassListFile=/opt/cds/javac.lst -XX:SharedArchiveFile=/opt/cds/javac.jsa \
@@ -37,4 +46,7 @@ RUN cd /opt/cds/train \
     && chmod 0644 /opt/cds/*.jsa
 
 # Set the user
+# Root-owned and on the read-only root filesystem: no submission can change it.
+COPY --from=judge-agent /judge-agent /usr/local/bin/judge-agent
+
 USER judge

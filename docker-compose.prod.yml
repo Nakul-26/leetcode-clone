@@ -49,6 +49,11 @@
 #                          its compile or run, and moves the between-submission wipe into the next
 #                          submission's first exec: 4 -> 2 execs per Python run (JUDGE_AGENT_PLAN
 #                          Phase 1).
+#   JUDGE_AGENT_LANGS      (default: empty = off) — languages whose sandboxes run a resident agent
+#                          instead of a docker exec per step: 0 execs per run (JUDGE_AGENT_PLAN
+#                          Phase 2), e.g. python,javascript or all. Needs JUDGE_MERGED_EXECS=true
+#                          and images built from this commit or later; an image without the agent
+#                          falls back to plain execs.
 #   JUDGE_WORKER_CONCURRENCY  (default: 24) — how many submissions can be pulled off RabbitMQ
 #                          and processed concurrently. Deliberately set above the host's core
 #                          count: these workers spend most of their time blocked on Docker API
@@ -372,6 +377,7 @@ services:
       JUDGE_WORKER_CONCURRENCY: ${JUDGE_WORKER_CONCURRENCY:-24}
       JUDGE_SANDBOX_RUNTIME: ${JUDGE_SANDBOX_RUNTIME:-}
       JUDGE_MERGED_EXECS: ${JUDGE_MERGED_EXECS:-false}
+      JUDGE_AGENT_LANGS: ${JUDGE_AGENT_LANGS:-}
       # Which stack this judge's sandboxes belong to, so a second stack on the same server
       # (deploy2 runs two) keeps its sandboxes when this one starts. Defaults to the Compose
       # project name, which Dokploy makes unique per compose.
@@ -483,88 +489,88 @@ services:
   # ── 8. Judge Sandbox Language Environment Images ─────────────────────────────
   judge-java:
     build:
-      context: ./judge-service-go/environments/java
-      dockerfile: Dockerfile
+      context: ./judge-service-go
+      dockerfile: environments/java/Dockerfile
     image: judge-java-env:${JUDGE_IMAGE_TAG:-${COMPOSE_PROJECT_NAME:-latest}}
     networks:
       - assessment-net
 
   judge-js:
     build:
-      context: ./judge-service-go/environments/javascript
-      dockerfile: Dockerfile
+      context: ./judge-service-go
+      dockerfile: environments/javascript/Dockerfile
     image: judge-js-env:${JUDGE_IMAGE_TAG:-${COMPOSE_PROJECT_NAME:-latest}}
     networks:
       - assessment-net
 
   judge-py:
     build:
-      context: ./judge-service-go/environments/python
-      dockerfile: Dockerfile
+      context: ./judge-service-go
+      dockerfile: environments/python/Dockerfile
     image: judge-py-env:${JUDGE_IMAGE_TAG:-${COMPOSE_PROJECT_NAME:-latest}}
     networks:
       - assessment-net
 
   judge-c:
     build:
-      context: ./judge-service-go/environments/c
-      dockerfile: Dockerfile
+      context: ./judge-service-go
+      dockerfile: environments/c/Dockerfile
     image: judge-c-env:${JUDGE_IMAGE_TAG:-${COMPOSE_PROJECT_NAME:-latest}}
     networks:
       - assessment-net
 
   judge-cpp:
     build:
-      context: ./judge-service-go/environments/cpp
-      dockerfile: Dockerfile
+      context: ./judge-service-go
+      dockerfile: environments/cpp/Dockerfile
     image: judge-cpp-env:${JUDGE_IMAGE_TAG:-${COMPOSE_PROJECT_NAME:-latest}}
     networks:
       - assessment-net
 
   judge-csharp:
     build:
-      context: ./judge-service-go/environments/csharp
-      dockerfile: Dockerfile
+      context: ./judge-service-go
+      dockerfile: environments/csharp/Dockerfile
     image: judge-csharp-env:${JUDGE_IMAGE_TAG:-${COMPOSE_PROJECT_NAME:-latest}}
     networks:
       - assessment-net
 
   judge-go:
     build:
-      context: ./judge-service-go/environments/go
-      dockerfile: Dockerfile
+      context: ./judge-service-go
+      dockerfile: environments/go/Dockerfile
     image: judge-go-env:${JUDGE_IMAGE_TAG:-${COMPOSE_PROJECT_NAME:-latest}}
     networks:
       - assessment-net
 
   judge-rust:
     build:
-      context: ./judge-service-go/environments/rust
-      dockerfile: Dockerfile
+      context: ./judge-service-go
+      dockerfile: environments/rust/Dockerfile
     image: judge-rust-env:${JUDGE_IMAGE_TAG:-${COMPOSE_PROJECT_NAME:-latest}}
     networks:
       - assessment-net
 
   judge-ruby:
     build:
-      context: ./judge-service-go/environments/ruby
-      dockerfile: Dockerfile
+      context: ./judge-service-go
+      dockerfile: environments/ruby/Dockerfile
     image: judge-ruby-env:${JUDGE_IMAGE_TAG:-${COMPOSE_PROJECT_NAME:-latest}}
     networks:
       - assessment-net
 
   judge-php:
     build:
-      context: ./judge-service-go/environments/php
-      dockerfile: Dockerfile
+      context: ./judge-service-go
+      dockerfile: environments/php/Dockerfile
     image: judge-php-env:${JUDGE_IMAGE_TAG:-${COMPOSE_PROJECT_NAME:-latest}}
     networks:
       - assessment-net
 
   judge-kotlin:
     build:
-      context: ./judge-service-go/environments/kotlin
-      dockerfile: Dockerfile
+      context: ./judge-service-go
+      dockerfile: environments/kotlin/Dockerfile
     image: judge-kotlin-env:${JUDGE_IMAGE_TAG:-${COMPOSE_PROJECT_NAME:-latest}}
     networks:
       - assessment-net

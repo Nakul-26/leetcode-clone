@@ -1,3 +1,12 @@
+# The sandbox agent (cmd/judge-agent, docs/judge/JUDGE_AGENT_PLAN.md Phase 2), built from the
+# judge's own source: the build context is judge-service-go/ (see the docker-compose files).
+FROM golang:alpine AS judge-agent
+WORKDIR /src
+COPY go.mod go.sum ./
+COPY pkg/agentproto ./pkg/agentproto
+COPY cmd/judge-agent ./cmd/judge-agent
+RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /judge-agent ./cmd/judge-agent
+
 FROM golang:1.24-alpine
 
 # Install any necessary build tools
@@ -23,11 +32,14 @@ RUN mkdir -p /opt/gocache /tmp/warm && cd /tmp/warm \
  && go mod init solution && go build -o main . \
  && cd / && rm -rf /tmp/warm /tmp/go && chmod -R a+rX /opt/gocache
 
-COPY judge-warmup /usr/local/bin/judge-warmup
+COPY environments/go/judge-warmup /usr/local/bin/judge-warmup
 RUN chmod 755 /usr/local/bin/judge-warmup
 
 # Set the working directory
 WORKDIR /app
 
 # Set the user
+# Root-owned and on the read-only root filesystem: no submission can change it.
+COPY --from=judge-agent /judge-agent /usr/local/bin/judge-agent
+
 USER judge

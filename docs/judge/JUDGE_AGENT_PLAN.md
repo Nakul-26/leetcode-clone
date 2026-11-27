@@ -3,7 +3,8 @@
 **Written:** 2026-11-06. **Status:** Phase 0 done; Phase 1 built behind `JUDGE_MERGED_EXECS`
 (2026-11-07, results below). **Enabled on all four judges on 2026-11-22** (testing and production,
 deploy2 and deploy4). Testing load test with two judges: Python 3,731/min, C++ 1,128/min, Java 989/min
-at 40 concurrent, 0 errors, no prep failures. A/B decision for Phase 2 pending.
+at 40 concurrent, 0 errors, no prep failures. **Phase 2 built 2026-11-24 (Option B, no new
+capabilities) behind `JUDGE_AGENT_LANGS`**, off by default; results below.
 **Why:** with two judges the peak is ~1.7x one judge (`docs/judge/SECOND_JUDGE.md`). Both servers run out
 of CPU, and the top consumers are `dockerd`, `containerd` and `runc`, not the submissions: every run
 pays for several Docker API calls and several new `runc` processes. Cutting that helps every judge,
@@ -182,6 +183,69 @@ Either way:
   runs against both paths; plus agent-specific ones (submission kills the agent, floods stdout,
   forks to the pids limit, tries to write to the agent's fds).
 
+#### Phase 2 as built (2026-11-24): Option B
+
+`JUDGE_AGENT_LANGS=python,javascript` (or `all`; empty = off, the default; wired in both prod
+compose files). Code: `cmd/judge-agent` (the agent), `pkg/agentproto` (wire format),
+`pkg/executor/agent.go` (the judge's side). Every language image gets the agent at
+`/usr/local/bin/judge-agent` (root-owned, on the read-only root filesystem) from a build stage
+that compiles it from the judge's source, so the images' build context is now `judge-service-go/`.
+
+**How it fits in.** The agent answers the executor's three exec calls (`createExec`, `startExec`,
+`inspectExec` in `dockercalls.go`) for the containers and users it covers: an exec for the judge
+user goes to the runner, one for root to the keeper, with the same command, working directory,
+stdin, streamed stdout/stderr and exit code (128 + signal for a killed process, as `docker exec`
+reports). Everything above those calls is unchanged and keeps its tests: the deferred wipe and
+upload (`prep.go`), the batch runner scripts, time limits, output caps, memory limits
+(`docker update`) and CPU time (`docker stats`), both from outside the sandbox. The one step that
+changes is the kill between tests and submissions: `pkill -u judge` would kill the runner, so the
+keeper does it in-process (no fork, so it works while a fork bomb holds every pid) and spares the
+runner, identified by pid and start time.
+
+**No new privileges.** Same capabilities (`KILL` only), same guard, `no-new-privileges`, no network,
+read-only root filesystem, memory and pids limits.
+
+- The keeper is root: a submission cannot signal, trace or read it.
+- The runner is the judge user and non-dumpable (`PR_SET_DUMPABLE 0`): a submission cannot trace
+  it or open its memory, environment or file descriptors (the judge's stream).
+- A submission can still signal the runner or change what it can change without privilege. All of
+  it fails that submission only:
+  - killed: the run reports 137 (as a killed process always did); the next command first has the
+    keeper kill every judge-user process, then starts a new runner.
+  - stopped (`SIGSTOP`): the run times out; the cancel gets no answer within 1 s, so the runner is
+    replaced. One stopped later by a leftover process is caught by the reset's ping.
+  - nice value, scheduling policy, CPU affinity, I/O priority or resource limits changed (all pass to
+    children): the runner compares them with its start values before every command and on the
+    reset's ping, and refuses to run anything once one differs; it is replaced.
+- Every command starts through `judge-agent spawn`, which sets the process's `oom_score_adj` to 1000
+  before it becomes the command, so the OOM killer takes the program, not the agent.
+- An image without the agent (or of another protocol version) makes that container use plain execs
+  for its whole life.
+
+**Measured** (deploy2, `TestAgentRunsWithoutExecs`, stdin problem with 3 tests, merged execs on,
+10 submissions per mode on one container, reset between):
+
+| | execs / submission | wall time / submission |
+|---|---|---|
+| Python, agent off → on | 2 → 0 | 96 → 52 ms (−46%) |
+| JavaScript | 2 → 0 | 133 → 93 ms (−30%) |
+| C++ | 3 → 0 | 399 → 334 ms (−16%) |
+| Java | 3 → 0 | 644 → 571 ms (−11%) |
+
+A container's first use starts the agent: 2 execs, once per container (100-500 runs).
+
+**Tests** (`agent_integration_test.go`, all pass): a submission cannot read the runner's
+fds/memory/environ/maps, list its fds or ptrace it; kills every process it can; stops the runner
+during its run and, through a leftover process, after it; renices the runner, narrows its CPU
+affinity and lowers its CPU/file/address-space limits; fork bomb; over the memory limit (MLE as
+before, runner not replaced); leaves a process running. After each, the next submission on the same
+container gets correct verdicts, on time, with untouched limits. The whole integration suite also passes with
+`JUDGE_AGENT_LANGS=all` (all 11 languages, 658 tests, as without the agent), and
+`TestAgentGoroutinesEndWithContainer` checks the judge keeps nothing per removed container.
+
+Next: enable on the testing judges (`JUDGE_AGENT_LANGS=all` on Test GO Judge and test-judge-worker,
+after a redeploy builds the new images), load test, then production.
+
 ### Phase 3 (optional): CPU time without Docker stats
 
 With a root agent (Option A), the agent can read the container's own `cpu.stat` (read-only cgroup
@@ -198,7 +262,7 @@ Docker calls per run. Only after Phase 2 has run in production for a while.
 
 ## Open questions
 
-- Option A or B (security trade-off above).
+- ~~Option A or B~~: B, built 2026-11-24.
 - Whether per-test (non-batched) paths are worth moving to the agent, or only the batched ones.
 - gVisor (`JUDGE_SANDBOX_RUNTIME=runsc`): the agent works there too, but exec costs differ; measure
   separately if gVisor goes to production.

@@ -81,6 +81,7 @@ services:
       JUDGE_WORKER_CONCURRENCY: ${JUDGE_WORKER_CONCURRENCY:-24}
       JUDGE_SANDBOX_RUNTIME: ${JUDGE_SANDBOX_RUNTIME:-}
       JUDGE_MERGED_EXECS: ${JUDGE_MERGED_EXECS:-false}
+      JUDGE_AGENT_LANGS: ${JUDGE_AGENT_LANGS:-}
       # Which stack this judge's sandboxes belong to, so a second stack on the same server
       # (deploy2 runs two) keeps its sandboxes when this one starts. Defaults to the Compose
       # project name, which Dokploy makes unique per compose.
@@ -212,88 +213,88 @@ services:
   # ── Language images the judge starts its sandboxes from (built on this server) ──
   judge-java:
     build:
-      context: ./judge-service-go/environments/java
-      dockerfile: Dockerfile
+      context: ./judge-service-go
+      dockerfile: environments/java/Dockerfile
     image: judge-java-env:${JUDGE_IMAGE_TAG:-${COMPOSE_PROJECT_NAME:-latest}}
     networks:
       - judge-net
 
   judge-js:
     build:
-      context: ./judge-service-go/environments/javascript
-      dockerfile: Dockerfile
+      context: ./judge-service-go
+      dockerfile: environments/javascript/Dockerfile
     image: judge-js-env:${JUDGE_IMAGE_TAG:-${COMPOSE_PROJECT_NAME:-latest}}
     networks:
       - judge-net
 
   judge-py:
     build:
-      context: ./judge-service-go/environments/python
-      dockerfile: Dockerfile
+      context: ./judge-service-go
+      dockerfile: environments/python/Dockerfile
     image: judge-py-env:${JUDGE_IMAGE_TAG:-${COMPOSE_PROJECT_NAME:-latest}}
     networks:
       - judge-net
 
   judge-c:
     build:
-      context: ./judge-service-go/environments/c
-      dockerfile: Dockerfile
+      context: ./judge-service-go
+      dockerfile: environments/c/Dockerfile
     image: judge-c-env:${JUDGE_IMAGE_TAG:-${COMPOSE_PROJECT_NAME:-latest}}
     networks:
       - judge-net
 
   judge-cpp:
     build:
-      context: ./judge-service-go/environments/cpp
-      dockerfile: Dockerfile
+      context: ./judge-service-go
+      dockerfile: environments/cpp/Dockerfile
     image: judge-cpp-env:${JUDGE_IMAGE_TAG:-${COMPOSE_PROJECT_NAME:-latest}}
     networks:
       - judge-net
 
   judge-csharp:
     build:
-      context: ./judge-service-go/environments/csharp
-      dockerfile: Dockerfile
+      context: ./judge-service-go
+      dockerfile: environments/csharp/Dockerfile
     image: judge-csharp-env:${JUDGE_IMAGE_TAG:-${COMPOSE_PROJECT_NAME:-latest}}
     networks:
       - judge-net
 
   judge-go:
     build:
-      context: ./judge-service-go/environments/go
-      dockerfile: Dockerfile
+      context: ./judge-service-go
+      dockerfile: environments/go/Dockerfile
     image: judge-go-env:${JUDGE_IMAGE_TAG:-${COMPOSE_PROJECT_NAME:-latest}}
     networks:
       - judge-net
 
   judge-rust:
     build:
-      context: ./judge-service-go/environments/rust
-      dockerfile: Dockerfile
+      context: ./judge-service-go
+      dockerfile: environments/rust/Dockerfile
     image: judge-rust-env:${JUDGE_IMAGE_TAG:-${COMPOSE_PROJECT_NAME:-latest}}
     networks:
       - judge-net
 
   judge-ruby:
     build:
-      context: ./judge-service-go/environments/ruby
-      dockerfile: Dockerfile
+      context: ./judge-service-go
+      dockerfile: environments/ruby/Dockerfile
     image: judge-ruby-env:${JUDGE_IMAGE_TAG:-${COMPOSE_PROJECT_NAME:-latest}}
     networks:
       - judge-net
 
   judge-php:
     build:
-      context: ./judge-service-go/environments/php
-      dockerfile: Dockerfile
+      context: ./judge-service-go
+      dockerfile: environments/php/Dockerfile
     image: judge-php-env:${JUDGE_IMAGE_TAG:-${COMPOSE_PROJECT_NAME:-latest}}
     networks:
       - judge-net
 
   judge-kotlin:
     build:
-      context: ./judge-service-go/environments/kotlin
-      dockerfile: Dockerfile
+      context: ./judge-service-go
+      dockerfile: environments/kotlin/Dockerfile
     image: judge-kotlin-env:${JUDGE_IMAGE_TAG:-${COMPOSE_PROJECT_NAME:-latest}}
     networks:
       - judge-net

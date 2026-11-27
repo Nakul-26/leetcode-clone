@@ -10,8 +10,6 @@ import (
 )
 
 func TestPythonCentralIntegration_TimeoutDoesNotLeakGoroutines(t *testing.T) {
-	before := runtime.NumGoroutine()
-
 	exec, p, pc, lang := setupPythonIntegration(t)
 	defer p.Release(pc)
 
@@ -25,6 +23,13 @@ def twoSum(nums, target):
 
 	const runs = 20
 	const tolerance = 5
+
+	// The baseline is taken after one run: a container's first use starts what lives as long as
+	// the container (the pool's watchers and, with JUDGE_AGENT_LANGS, the sandbox agent's two
+	// connections), which is not a leak. A leak per run grows with the runs below.
+	runCentralOnce(t, exec, pc, lang, problem, code)
+	testutil.StabilizeRuntime()
+	before := runtime.NumGoroutine()
 
 	for i := 0; i < runs; i++ {
 		result := runCentralOnce(t, exec, pc, lang, problem, code)
