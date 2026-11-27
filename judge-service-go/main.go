@@ -26,8 +26,8 @@ import (
 
 	"github.com/redis/go-redis/v9"
 
-	"judge-service-go/pkg/central/adapters"
 	"judge-service-go/pkg/capacity"
+	"judge-service-go/pkg/central/adapters"
 	"judge-service-go/pkg/executor"
 	"judge-service-go/pkg/languages"
 	"judge-service-go/pkg/metrics"
@@ -86,6 +86,23 @@ var langPoolAbbrev = map[string]string{
 	"ruby":       "RB",
 	"php":        "PHP",
 	"kotlin":     "KT",
+}
+
+// With adaptive concurrency the pool reacts in seconds rather than half-minutes: it checks
+// every 5 s and may grow again 5 s later (by half its size, AutoscaleConfig.UpByHalf). Without
+// it the old pace stays. The JUDGE_POOL_* variables still override both.
+func autoscaleIntervalDefault() time.Duration {
+	if capacity.Enabled() {
+		return 5 * time.Second
+	}
+	return defaultAutoscaleInterval
+}
+
+func scaleUpCooldownDefault() time.Duration {
+	if capacity.Enabled() {
+		return 5 * time.Second
+	}
+	return defaultScaleUpCooldown
 }
 
 // langPoolMaxDefault is each language's default pool Max when JUDGE_POOL_MAX_<ABBR> is unset.
@@ -1721,11 +1738,12 @@ func main() {
 
 	autoscaleEnabled := isTruthyEnv(os.Getenv("JUDGE_POOL_AUTOSCALE_ENABLED"))
 	autoscaleCfg := pool.AutoscaleConfig{
-		Interval:        getDurationSecondsEnv("JUDGE_POOL_AUTOSCALE_INTERVAL", defaultAutoscaleInterval),
+		Interval:        getDurationSecondsEnv("JUDGE_POOL_AUTOSCALE_INTERVAL", autoscaleIntervalDefault()),
 		UpThresholdMs:   getFloatEnv("JUDGE_POOL_SCALE_UP_THRESHOLD_MS", defaultScaleUpThresholdMs),
 		DownThresholdMs: getFloatEnv("JUDGE_POOL_SCALE_DOWN_THRESHOLD_MS", defaultScaleDownThresholdMs),
-		UpCooldown:      getDurationSecondsEnv("JUDGE_POOL_SCALE_UP_COOLDOWN", defaultScaleUpCooldown),
+		UpCooldown:      getDurationSecondsEnv("JUDGE_POOL_SCALE_UP_COOLDOWN", scaleUpCooldownDefault()),
 		DownCooldown:    getDurationSecondsEnv("JUDGE_POOL_SCALE_DOWN_COOLDOWN", defaultScaleDownCooldown),
+		UpByHalf:        capacity.Enabled(),
 	}
 
 	workerConcurrency := getIntEnv("JUDGE_WORKER_CONCURRENCY", defaultWorkerConcurrency)

@@ -64,12 +64,12 @@ type ContainerPool struct {
 	globalCap  int                              // max containers across ALL languages combined
 	// ceiling lets a language's pool grow past its configured max, up to this many containers
 	// (pkg/capacity, JUDGE_ADAPTIVE_CONCURRENCY). 0 = none. The global cap still applies.
-	ceiling atomic.Int64
-	images     map[string]string                // language -> image name
-	claims     map[string]int                   // language -> bulk workers holding or waiting for one of its containers
-	runtime    string                           // OCI runtime for new containers; "" is the daemon default (runc)
-	maxExecs   int32                            // runs before a container is replaced; 0 = never (SetMaxExecutions)
-	standby    map[string]*PooledContainer      // successors created ahead of their container's retirement
+	ceiling  atomic.Int64
+	images   map[string]string           // language -> image name
+	claims   map[string]int              // language -> bulk workers holding or waiting for one of its containers
+	runtime  string                      // OCI runtime for new containers; "" is the daemon default (runc)
+	maxExecs int32                       // runs before a container is replaced; 0 = never (SetMaxExecutions)
+	standby  map[string]*PooledContainer // successors created ahead of their container's retirement
 }
 
 // NewPool creates a new container pool. globalCap bounds the total container count summed
@@ -501,7 +501,13 @@ func (p *ContainerPool) WarmUp(ctx context.Context, lang string, image string, m
 	p.mu.Lock()
 	p.images[lang] = image
 	if p.availChans[lang] == nil {
-		p.availChans[lang] = make(chan *PooledContainer, max)
+		// Room up to the global cap, not just max: with a ceiling (SetCeiling) a language may
+		// grow past its max, and a full channel would destroy each container made past it.
+		size := max
+		if p.globalCap > size {
+			size = p.globalCap
+		}
+		p.availChans[lang] = make(chan *PooledContainer, size)
 	}
 	p.limits[lang] = LangLimits{Min: min, Max: max}
 	p.targets[lang] = min
@@ -704,29 +710,39 @@ func (p *ContainerPool) convergeLang(ctx context.Context, lang string) {
 	p.mu.Unlock()
 
 	if current < target {
-		// create missing containers
+		// Create the missing containers, four at a time: one after another, a scale-up by
+		// several (UpByHalf) held the autoscaler, and every other language, for seconds.
 		missing := target - current
+		var wg sync.WaitGroup
+		sem := make(chan struct{}, 4)
 		for i := 0; i < missing; i++ {
-			repl, err := p.newPooledContainer(ctx, image, lang)
-			if err != nil {
-				slog.Error("reconciler: failed to create replacement", "language", lang, "error", err)
-				break
-			}
-			metrics.AddReconcileRepairs(1)
-			p.mu.Lock()
-			if ch2, ok := p.availChans[lang]; ok {
-				select {
-				case ch2 <- repl:
-				default:
-					// Should never happen — the channel is sized to this language's Max at
-					// WarmUp time, and target never exceeds Max, so there's always room.
+			wg.Add(1)
+			sem <- struct{}{}
+			go func() {
+				defer wg.Done()
+				defer func() { <-sem }()
+				repl, err := p.newPooledContainer(ctx, image, lang)
+				if err != nil {
+					slog.Error("reconciler: failed to create replacement", "language", lang, "error", err)
+					return
+				}
+				metrics.AddReconcileRepairs(1)
+				p.mu.Lock()
+				defer p.mu.Unlock()
+				if ch2, ok := p.availChans[lang]; ok {
+					select {
+					case ch2 <- repl:
+					default:
+						// Should never happen: the channel has room up to the global cap
+						// (WarmUp), which no target exceeds.
+						p.removeContainer(repl)
+					}
+				} else {
 					p.removeContainer(repl)
 				}
-			} else {
-				p.removeContainer(repl)
-			}
-			p.mu.Unlock()
+			}()
 		}
+		wg.Wait()
 	} else if current > target {
 		// remove excess available containers (prefer idle ones)
 		excess := current - target
@@ -758,6 +774,10 @@ type AutoscaleConfig struct {
 	DownThresholdMs float64
 	UpCooldown      time.Duration
 	DownCooldown    time.Duration
+	// UpByHalf grows a language by half its target (at least 1) per scale-up instead of by 1:
+	// 4 -> 6 -> 9 -> 13 -> 18, so a burst (an exam starting) is met in a few ticks rather than
+	// one container every interval. Set with adaptive concurrency.
+	UpByHalf bool
 }
 
 // SetCeiling sets how far past its configured max a language's pool may grow while the host has
@@ -857,6 +877,21 @@ func (p *ContainerPool) StartAutoscaler(ctx context.Context, cfg AutoscaleConfig
 						headroom,
 					)
 
+					if cfg.UpByHalf && decision.Action == scaleActionUp {
+						grown := target + target/2
+						if grown < decision.NewTarget {
+							grown = decision.NewTarget
+						}
+						if m := p.effectiveMax(limits); grown > m {
+							grown = m
+						}
+						if room := p.globalCap - p.globalLiveTotal(); grown-target > room {
+							grown = target + room
+						}
+						if grown > decision.NewTarget {
+							decision.NewTarget = grown
+						}
+					}
 					if decision.NewTarget != target {
 						p.mu.Lock()
 						p.targets[lang] = decision.NewTarget
