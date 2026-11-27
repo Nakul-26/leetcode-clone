@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"judge-service-go/pkg/models"
 	"judge-service-go/pkg/workspace"
@@ -21,14 +20,29 @@ const jvmHeapFlag = "-XX:MaxRAMPercentage=75"
 // javaClasspath keeps gson on every Java classpath: the wrappers use it and a submission may too.
 const javaClasspath = "/usr/share/java/gson.jar:."
 
+// The function-mode harnesses (pkg/wrappers/java_single_wrapper.tpl and java_batch_wrapper.tpl)
+// are compiled into judge-java-env at /opt/judge-java/{single,batch}, so a submission compiles
+// only Solution.java: javac 490 -> 299 ms on one core for Two Sum (2026-11-27). The harness
+// source still goes into the workspace, and the compile step falls back to compiling it too
+// when the image has none (one built before this). The harness reads the method's name from
+// judge-function.
+const (
+	javaHarnessSingle = "/opt/judge-java/single"
+	javaHarnessBatch  = "/opt/judge-java/batch"
+)
+
+// javacJVMFlags is javac's own startup tuning (see javacCommand).
+var javacJVMFlags = []string{"-J-XX:TieredStopAtLevel=1", "-J-XX:+UseSerialGC",
+	"-J-Xshare:auto", "-J-XX:SharedArchiveFile=/opt/cds/javac.jsa"}
+
 // javacCommand compiles with startup tuning measured 2026-10-30 in judge-java-env at the pool's
 // 1 CPU (JUDGE_FIX_PLAN T8): javac's own JIT limited to C1 and the serial collector, since a
 // compile is too short for C2 to pay off, and its JDK classes mapped from the class-data
 // archive built into the image. Median compile 3.2 s -> 1.6 s. -Xshare:auto means an image
 // without the archive just runs as before (checked: no warning, output unchanged).
 func javacCommand(sources ...string) []string {
-	return append([]string{"javac", "-J-XX:TieredStopAtLevel=1", "-J-XX:+UseSerialGC",
-		"-J-Xshare:auto", "-J-XX:SharedArchiveFile=/opt/cds/javac.jsa", "-cp", javaClasspath}, sources...)
+	cmd := append([]string{"javac"}, javacJVMFlags...)
+	return append(append(cmd, "-cp", javaClasspath), sources...)
 }
 
 // javaRunCommand runs a compiled program with the run archive (JDK + Gson classes; median
@@ -66,26 +80,43 @@ func prepareJavaWrapper(workDir string, submissionMsg models.SubmissionMessage, 
 		return nil, fmt.Errorf("failed to read template %s: %w", tplPath, err)
 	}
 
-	wrapperCode := strings.ReplaceAll(string(b), "{{FUNCTION_NAME}}", submissionMsg.FunctionName)
-
 	if err := workspace.WriteFile(workDir, "Solution.java", []byte(submissionMsg.Code), 0644); err != nil {
 		return nil, fmt.Errorf("failed to write Solution.java: %w", err)
 	}
-	if err := workspace.WriteFile(workDir, "Main.java", []byte(wrapperCode), 0644); err != nil {
+	if err := workspace.WriteFile(workDir, "Main.java", b, 0644); err != nil {
 		return nil, fmt.Errorf("failed to write Main.java: %w", err)
 	}
-
-	return []string{"Solution.java", "Main.java"}, nil
+	if err := workspace.WriteFile(workDir, "judge-function", []byte(submissionMsg.FunctionName), 0644); err != nil {
+		return nil, fmt.Errorf("failed to write judge-function: %w", err)
+	}
+	return []string{"Solution.java", "Main.java", "judge-function"}, nil
 }
 
+// CompileCommand compiles Solution.java against the prebuilt harness (its TreeNode, ListNode and
+// Node), or, in an image without one, Solution.java and Main.java together as before.
 func (JavaAdapter) CompileCommand() []string {
-	return javacCommand("/app/Solution.java", "/app/Main.java")
+	script := `solution=$1; main=$2; shift 2
+if [ -f ` + javaHarnessSingle + `/Main.class ] && [ -f ` + javaHarnessBatch + `/Main.class ]; then
+	exec javac "$@" -cp /usr/share/java/gson.jar:` + javaHarnessBatch + `:. "$solution"
+fi
+exec javac "$@" -cp ` + javaClasspath + ` "$solution" "$main"`
+	return append([]string{"sh", "-c", script, "javac", "/app/Solution.java", "/app/Main.java"}, javacJVMFlags...)
+}
+
+// javaHarnessRunCommand runs a function-mode submission. gson stays first, so the run class-data
+// archive (built with exactly that classpath) still applies; the prebuilt harness comes before
+// the workspace, so a class the submission names Main cannot stand in for it. In an image
+// without a prebuilt harness the directory does not exist and the one compiled in the
+// workspace is used.
+func javaHarnessRunCommand(harnessDir string, arg string) []string {
+	return []string{"java", jvmHeapFlag, "-XX:+UseSerialGC", "-Xshare:auto", "-XX:SharedArchiveFile=/opt/cds/run.jsa",
+		"-cp", "/usr/share/java/gson.jar:" + harnessDir + ":.", "Main", arg}
 }
 
 func (JavaAdapter) RunCommand(inputB64 string) []string {
-	return javaRunCommand("Main", inputB64)
+	return javaHarnessRunCommand(javaHarnessSingle, inputB64)
 }
 
 func (JavaAdapter) BatchRunCommand(testsB64 string) []string {
-	return javaRunCommand("Main", testsB64)
+	return javaHarnessRunCommand(javaHarnessBatch, testsB64)
 }

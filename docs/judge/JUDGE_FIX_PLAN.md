@@ -160,3 +160,8 @@ Order: P5, P4, P1+P2 (bugs, small) → P6 + P7 (the core fix) → P3 → P8 + P9
 | 2026-10-31 | Done: T9 (Kotlin compiles only the student's file with a prebuilt harness; C# compiles with csc directly. Kotlin 18.9 -> 7.0 s, C# 6.4 -> 4.4 s for 15 tests) |
 | 2026-10-31 | Done: M1 (/run and /raw-run over RabbitMQ request/reply, so any judge can serve them; HTTP fallback) |
 | 2026-10-31 | CI fix: follow-redirects 1.16.2 (high advisory) in both lockfiles, and a test that failed on the 31st of a month |
+| 2026-11-24 | Agent Plan Phase 2: resident sandbox agent (`JUDGE_AGENT_LANGS`), 0 execs per run; Python 2.4x on the testing stack (docs/judge/JUDGE_AGENT_PLAN.md) |
+| 2026-11-27 | Adaptive concurrency (`JUDGE_ADAPTIVE_CONCURRENCY`): workers and pool ceilings follow host CPU; pools grow by half per 5 s step, 4 containers at a time. Fixed: containers made past a language's max were destroyed (idle channel sized to max) |
+| 2026-11-27 | Interactive fairness: a language holds at most its containers + 2 interactive requests (`TryClaimInteractive`, 300 ms wait queue). Mixed test before: Python 4,728 -> 835/min next to C++ and Java |
+| 2026-11-27 | Java function mode: harness prebuilt in judge-java-env (`/opt/judge-java`), javac compiles only Solution.java: 490 -> 299 ms |
+| 2026-11-27 | C++ function mode: judge I/O helper bodies prebuilt (`/opt/judge-cpp/judge_io.o`, used only when its SHA-256 matches the pasted copy): compile 750 -> 530 ms |

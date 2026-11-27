@@ -272,14 +272,46 @@ public class Main {
         return new String(decoded, StandardCharsets.UTF_8);
     }
 
-    private static Method resolveMethod(int argCount) throws NoSuchMethodException {
-        for (Method method : Solution.class.getDeclaredMethods()) {
-            if (method.getName().equals("{{FUNCTION_NAME}}") && method.getParameterCount() == argCount) {
+    // The harness is compiled into judge-java-env once (/opt/judge-java), not with every
+    // submission, so it finds the student's code at run time: the class Solution by name, and
+    // the method's name in judge-function, which the judge writes next to the code.
+    private static Class<?> solutionType;
+    private static String functionName;
+    // Filled in only on the fallback path that builds this file per submission
+    // (wrapper.GenerateWrapper, JUDGE_CENTRAL_COMPARE_JAVA=false), which writes no
+    // judge-function; in the prebuilt harness it stays a marker no method can be named.
+    private static final String FALLBACK_FUNCTION = "{{FUNCTION_NAME}}";
+
+    private static Class<?> solutionClass() throws ClassNotFoundException {
+        if (solutionType == null) {
+            solutionType = Class.forName("Solution");
+        }
+        return solutionType;
+    }
+
+    private static String functionName() {
+        if (functionName == null) {
+            try {
+                functionName = new String(java.nio.file.Files.readAllBytes(java.nio.file.Paths.get("judge-function")),
+                    java.nio.charset.StandardCharsets.UTF_8).trim();
+            } catch (java.io.IOException err) {
+                if (FALLBACK_FUNCTION.startsWith("{{")) {
+                    throw new IllegalStateException("judge-function is missing", err);
+                }
+                functionName = FALLBACK_FUNCTION;
+            }
+        }
+        return functionName;
+    }
+
+    private static Method resolveMethod(int argCount) throws ReflectiveOperationException {
+        for (Method method : solutionClass().getDeclaredMethods()) {
+            if (method.getName().equals(functionName()) && method.getParameterCount() == argCount) {
                 method.setAccessible(true);
                 return method;
             }
         }
-        throw new NoSuchMethodException("method {{FUNCTION_NAME}} with " + argCount + " arguments not found");
+        throw new NoSuchMethodException("method " + functionName() + " with " + argCount + " arguments not found");
     }
 
     private static Object[] prepareArgs(Method method, JsonArray inputs) {
@@ -292,8 +324,12 @@ public class Main {
         return args;
     }
 
-    private static Object invoke(Method method, Object[] args) throws InvocationTargetException, IllegalAccessException {
-        Solution solution = new Solution();
+    private static Object invoke(Method method, Object[] args) throws ReflectiveOperationException {
+        // A fresh instance per test, as before; an exception in its constructor arrives wrapped
+        // in InvocationTargetException and is reported like one from the method.
+        java.lang.reflect.Constructor<?> constructor = solutionClass().getDeclaredConstructor();
+        constructor.setAccessible(true);
+        Object solution = constructor.newInstance();
         return method.invoke(solution, args);
     }
 

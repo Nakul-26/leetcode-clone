@@ -29,6 +29,14 @@ RUN H="$(echo '#include <bits/stdc++.h>' | g++ -O2 -x c++ -H -fsyntax-only - 2>&
 RUN addgroup --system judge && adduser --system --ingroup judge judge
 
 # Set the user
+# The judge I/O helper's function bodies, compiled once (pkg/central/adapters/cpp.go), with the
+# hash a submission's copy must match for the object to be linked into it.
+COPY pkg/wrappers/cpp_judge_io.inc /opt/judge-cpp/judge_io.inc
+RUN printf '#include <bits/stdc++.h>\n#include "/opt/judge-cpp/judge_io.inc"\n' > /tmp/judge_io.cpp \
+    && g++ -O2 -DJUDGE_IO_OBJECT -c -o /opt/judge-cpp/judge_io.o /tmp/judge_io.cpp \
+    && sha256sum /opt/judge-cpp/judge_io.inc | cut -d' ' -f1 > /opt/judge-cpp/judge_io.sha \
+    && rm -f /tmp/judge_io.cpp && chmod -R a+rX /opt/judge-cpp
+
 # Root-owned and on the read-only root filesystem: no submission can change it.
 COPY --from=judge-agent /judge-agent /usr/local/bin/judge-agent
 

@@ -6,6 +6,13 @@
 // nlohmann's templates made up nearly all of a function-mode compile; with this code the
 // wrapper builds at -O2 with the image's precompiled <bits/stdc++.h> (the templates include
 // it first), and the whole compile is about 4.5x faster (5.4 s -> 1.2 s on one core).
+//
+// Its function bodies are compiled into judge-cpp-env once (/opt/judge-cpp/judge_io.o) and
+// linked into each submission, which then compiles only what depends on the problem: the
+// declarations and templates below, the solution and main (750 -> ~450 ms for Two Sum on one
+// core, 2026-11-27). The compile step passes -DJUDGE_IO_PREBUILT for that, and only when the
+// image's copy of this file is byte for byte the one pasted here (judge-io.sha, see
+// adapters/cpp.go); otherwise the bodies below are compiled in as before.
 
 // Data structures
 struct ListNode {
@@ -41,6 +48,16 @@ public:
 #pragma GCC push_options
 #pragma GCC optimize("O1")
 
+
+// inline where the bodies are compiled into the submission (unused ones then cost nothing),
+// plain functions where they are not: in the prebuilt object (JUDGE_IO_OBJECT) and in a
+// submission linked against it (JUDGE_IO_PREBUILT).
+#if defined(JUDGE_IO_PREBUILT) || defined(JUDGE_IO_OBJECT)
+#define JUDGE_IO_DEF
+#else
+#define JUDGE_IO_DEF inline
+#endif
+
 namespace judge_io {
 
 struct Value {
@@ -54,7 +71,99 @@ struct Value {
     std::vector<Value> items;       // Array elements or Object member values
 };
 
-inline const char* kind_name(const Value& v) {
+JUDGE_IO_DEF const char* kind_name(const Value& v);
+JUDGE_IO_DEF std::runtime_error type_error(const char* want, const Value& v);
+JUDGE_IO_DEF Value parse(const std::string& text);
+JUDGE_IO_DEF const Value& field(const Value& v, const std::string& key);
+JUDGE_IO_DEF const Value& at(const Value& inputs, size_t idx);
+
+JUDGE_IO_DEF void from(const Value& v, int& out);
+JUDGE_IO_DEF void from(const Value& v, bool& out);
+JUDGE_IO_DEF void from(const Value& v, std::string& out);
+JUDGE_IO_DEF void from(const Value& v, ListNode*& out);
+JUDGE_IO_DEF void from(const Value& v, TreeNode*& out);
+JUDGE_IO_DEF void from(const Value& v, Node*& out);
+
+template <class T>
+void from(const Value& v, std::vector<T>& out) {
+    if (v.kind != Value::Array) throw type_error("array", v);
+    out.clear();
+    out.reserve(v.items.size());
+    for (const Value& el : v.items) {
+        T x{};
+        from(el, x);
+        out.push_back(std::move(x));
+    }
+}
+
+template <class T>
+T get(const Value& v) {
+    T out{};
+    from(v, out);
+    return out;
+}
+
+JUDGE_IO_DEF void write(std::string& o, std::nullptr_t);
+JUDGE_IO_DEF void write(std::string& o, bool b);
+JUDGE_IO_DEF void write(std::string& o, int x);
+JUDGE_IO_DEF void write(std::string& o, const std::string& s);
+JUDGE_IO_DEF void write(std::string& o, const ListNode* p);
+JUDGE_IO_DEF void write(std::string& o, const TreeNode* root);
+JUDGE_IO_DEF void write(std::string& o, const Node* node);
+
+template <class T>
+void write(std::string& o, const std::vector<T>& v) {
+    o += '[';
+    bool first = true;
+    for (auto&& el : v) {
+        if (!first) o += ',';
+        write(o, el);
+        first = false;
+    }
+    o += ']';
+}
+
+// The batch wrapper points std::cout at this while a test runs, so each test's result line
+// carries what that test printed, kept up to just past the judge's output limit (64 KB) so a
+// print loop cannot fill memory; the judge fails a test that goes over with Output Limit
+// Exceeded. printf bypasses it and still goes to the process's stdout.
+struct CapturedStdout : std::streambuf {
+    static constexpr size_t cap = 64 * 1024 + 1;
+    std::string data;
+    int_type overflow(int_type c) override {
+        if (c == traits_type::eof()) return 0;
+        if (data.size() < cap) data.push_back(static_cast<char>(c));
+        return c;
+    }
+    std::streamsize xsputn(const char* s, std::streamsize n) override {
+        if (data.size() < cap) data.append(s, std::min<size_t>(static_cast<size_t>(n), cap - data.size()));
+        return n;
+    }
+};
+
+JUDGE_IO_DEF CapturedStdout*& captured_stdout();
+JUDGE_IO_DEF void add_captured_stdout(std::string& line);
+
+// One judge result line on stderr: {"test":N,"output":...}, or {"output":...} when test is 0
+// (the single-test wrapper).
+template <class T>
+void print_output(int test, const T& value) {
+    std::string line = "{";
+    if (test > 0) line += "\"test\":" + std::to_string(test) + ",";
+    line += "\"output\":";
+    write(line, value);
+    add_captured_stdout(line);
+    line += "}";
+    std::cerr << line << std::endl;
+}
+
+JUDGE_IO_DEF void print_error(int test, const std::string& message);
+JUDGE_IO_DEF void print_fatal(const std::string& message);
+JUDGE_IO_DEF std::string base64_decode(const std::string& in);
+
+#ifndef JUDGE_IO_PREBUILT
+
+JUDGE_IO_DEF const char* kind_name(const Value& v) {
     switch (v.kind) {
     case Value::Null: return "null";
     case Value::Bool: return "boolean";
@@ -66,7 +175,7 @@ inline const char* kind_name(const Value& v) {
     }
 }
 
-inline std::runtime_error type_error(const char* want, const Value& v) {
+JUDGE_IO_DEF std::runtime_error type_error(const char* want, const Value& v) {
     return std::runtime_error(std::string("type must be ") + want + ", but is " + kind_name(v));
 }
 
@@ -255,10 +364,10 @@ private:
     }
 };
 
-inline Value parse(const std::string& text) { return Parser(text).parse(); }
+JUDGE_IO_DEF Value parse(const std::string& text) { return Parser(text).parse(); }
 
 // The member named key, or a null value when v is not an object or has no such member.
-inline const Value& field(const Value& v, const std::string& key) {
+JUDGE_IO_DEF const Value& field(const Value& v, const std::string& key) {
     static const Value missing;
     if (v.kind == Value::Object) {
         for (size_t k = 0; k < v.keys.size(); k++) {
@@ -269,7 +378,7 @@ inline const Value& field(const Value& v, const std::string& key) {
 }
 
 // The idx-th input argument.
-inline const Value& at(const Value& inputs, size_t idx) {
+JUDGE_IO_DEF const Value& at(const Value& inputs, size_t idx) {
     if (inputs.kind != Value::Array) throw type_error("array", inputs);
     if (idx >= inputs.items.size()) throw std::out_of_range("missing input argument " + std::to_string(idx + 1));
     return inputs.items[idx];
@@ -277,24 +386,24 @@ inline const Value& at(const Value& inputs, size_t idx) {
 
 // Reading: one from() per judge type. A number read into an int truncates, as the
 // judge's other languages do.
-inline void from(const Value& v, int& out) {
+JUDGE_IO_DEF void from(const Value& v, int& out) {
     if (v.kind == Value::Int) out = static_cast<int>(v.i);
     else if (v.kind == Value::Float) out = static_cast<int>(v.f);
     else if (v.kind == Value::Bool) out = v.b;
     else throw type_error("number", v);
 }
 
-inline void from(const Value& v, bool& out) {
+JUDGE_IO_DEF void from(const Value& v, bool& out) {
     if (v.kind != Value::Bool) throw type_error("boolean", v);
     out = v.b;
 }
 
-inline void from(const Value& v, std::string& out) {
+JUDGE_IO_DEF void from(const Value& v, std::string& out) {
     if (v.kind != Value::String) throw type_error("string", v);
     out = v.s;
 }
 
-inline void from(const Value& v, ListNode*& out) {
+JUDGE_IO_DEF void from(const Value& v, ListNode*& out) {
     out = nullptr;
     if (v.kind != Value::Array) return;
     ListNode dummy;
@@ -308,7 +417,7 @@ inline void from(const Value& v, ListNode*& out) {
     out = dummy.next;
 }
 
-inline void from(const Value& v, TreeNode*& out) {
+JUDGE_IO_DEF void from(const Value& v, TreeNode*& out) {
     out = nullptr;
     const std::vector<Value>& a = v.items;
     if (v.kind != Value::Array || a.empty() || a[0].kind == Value::Null) return;
@@ -338,7 +447,7 @@ inline void from(const Value& v, TreeNode*& out) {
 }
 
 // A graph is an adjacency list of 1-based node numbers; the first node is returned.
-inline void from(const Value& v, Node*& out) {
+JUDGE_IO_DEF void from(const Value& v, Node*& out) {
     out = nullptr;
     if (v.kind != Value::Array || v.items.empty()) return;
     size_t n = v.items.size();
@@ -356,31 +465,12 @@ inline void from(const Value& v, Node*& out) {
     out = nodes[0];
 }
 
-template <class T>
-void from(const Value& v, std::vector<T>& out) {
-    if (v.kind != Value::Array) throw type_error("array", v);
-    out.clear();
-    out.reserve(v.items.size());
-    for (const Value& el : v.items) {
-        T x{};
-        from(el, x);
-        out.push_back(std::move(x));
-    }
-}
-
-template <class T>
-T get(const Value& v) {
-    T out{};
-    from(v, out);
-    return out;
-}
-
 // Writing.
-inline void write(std::string& o, std::nullptr_t) { o += "null"; }
-inline void write(std::string& o, bool b) { o += b ? "true" : "false"; }
-inline void write(std::string& o, int x) { o += std::to_string(x); }
+JUDGE_IO_DEF void write(std::string& o, std::nullptr_t) { o += "null"; }
+JUDGE_IO_DEF void write(std::string& o, bool b) { o += b ? "true" : "false"; }
+JUDGE_IO_DEF void write(std::string& o, int x) { o += std::to_string(x); }
 
-inline void write(std::string& o, const std::string& s) {
+JUDGE_IO_DEF void write(std::string& o, const std::string& s) {
     static const char* hex = "0123456789abcdef";
     o += '"';
     for (unsigned char c : s) {
@@ -405,7 +495,7 @@ inline void write(std::string& o, const std::string& s) {
     o += '"';
 }
 
-inline void write(std::string& o, const ListNode* p) {
+JUDGE_IO_DEF void write(std::string& o, const ListNode* p) {
     if (!p) { o += "null"; return; }
     o += '[';
     for (bool first = true; p; p = p->next, first = false) {
@@ -416,7 +506,7 @@ inline void write(std::string& o, const ListNode* p) {
 }
 
 // Level order, with null for missing children and trailing nulls dropped.
-inline void write(std::string& o, const TreeNode* root) {
+JUDGE_IO_DEF void write(std::string& o, const TreeNode* root) {
     if (!root) { o += "null"; return; }
     std::vector<const TreeNode*> order;
     std::queue<const TreeNode*> q;
@@ -441,7 +531,7 @@ inline void write(std::string& o, const TreeNode* root) {
 }
 
 // The adjacency list of the nodes reachable from node, by node number 1..n.
-inline void write(std::string& o, const Node* node) {
+JUDGE_IO_DEF void write(std::string& o, const Node* node) {
     if (!node) { o += "null"; return; }
     std::unordered_map<int, const Node*> seen;
     std::queue<const Node*> q;
@@ -475,62 +565,19 @@ inline void write(std::string& o, const Node* node) {
     o += ']';
 }
 
-template <class T>
-void write(std::string& o, const std::vector<T>& v) {
-    o += '[';
-    bool first = true;
-    for (auto&& el : v) {
-        if (!first) o += ',';
-        write(o, el);
-        first = false;
-    }
-    o += ']';
-}
-
-// The batch wrapper points std::cout at this while a test runs, so each test's result line
-// carries what that test printed, kept up to just past the judge's output limit (64 KB) so a
-// print loop cannot fill memory; the judge fails a test that goes over with Output Limit
-// Exceeded. printf bypasses it and still goes to the process's stdout.
-struct CapturedStdout : std::streambuf {
-    static constexpr size_t cap = 64 * 1024 + 1;
-    std::string data;
-    int_type overflow(int_type c) override {
-        if (c == traits_type::eof()) return 0;
-        if (data.size() < cap) data.push_back(static_cast<char>(c));
-        return c;
-    }
-    std::streamsize xsputn(const char* s, std::streamsize n) override {
-        if (data.size() < cap) data.append(s, std::min<size_t>(static_cast<size_t>(n), cap - data.size()));
-        return n;
-    }
-};
-
-inline CapturedStdout*& captured_stdout() {
+JUDGE_IO_DEF CapturedStdout*& captured_stdout() {
     static CapturedStdout* current = nullptr;
     return current;
 }
 
-inline void add_captured_stdout(std::string& line) {
+JUDGE_IO_DEF void add_captured_stdout(std::string& line) {
     if (CapturedStdout* c = captured_stdout()) {
         line += ",\"stdout\":";
         write(line, c->data);
     }
 }
 
-// One judge result line on stderr: {"test":N,"output":...}, or {"output":...} when test is 0
-// (the single-test wrapper).
-template <class T>
-void print_output(int test, const T& value) {
-    std::string line = "{";
-    if (test > 0) line += "\"test\":" + std::to_string(test) + ",";
-    line += "\"output\":";
-    write(line, value);
-    add_captured_stdout(line);
-    line += "}";
-    std::cerr << line << std::endl;
-}
-
-inline void print_error(int test, const std::string& message) {
+JUDGE_IO_DEF void print_error(int test, const std::string& message) {
     std::string line = "{";
     if (test > 0) line += "\"test\":" + std::to_string(test) + ",";
     line += "\"error\":\"Runtime Error\",\"message\":";
@@ -540,14 +587,14 @@ inline void print_error(int test, const std::string& message) {
     std::cerr << line << std::endl;
 }
 
-inline void print_fatal(const std::string& message) {
+JUDGE_IO_DEF void print_fatal(const std::string& message) {
     std::string line = "{\"fatal\":";
     write(line, message);
     line += "}";
     std::cerr << line << std::endl;
 }
 
-inline std::string base64_decode(const std::string& in) {
+JUDGE_IO_DEF std::string base64_decode(const std::string& in) {
     std::string out;
     std::vector<int> T(256, -1);
     for (int i = 0; i < 64; i++) T["ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"[i]] = i;
@@ -563,6 +610,8 @@ inline std::string base64_decode(const std::string& in) {
     }
     return out;
 }
+
+#endif  // JUDGE_IO_PREBUILT
 
 }  // namespace judge_io
 

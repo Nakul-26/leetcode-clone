@@ -46,6 +46,18 @@ RUN cd /opt/cds/train \
     && chmod 0644 /opt/cds/*.jsa
 
 # Set the user
+# The function-mode harnesses, compiled once here instead of with every submission
+# (pkg/central/adapters/java.go). They find Solution and the method at run time, so they
+# compile without them; the build fails if one still needs Solution.
+COPY pkg/wrappers/java_single_wrapper.tpl /opt/judge-java-src/single/Main.java
+COPY pkg/wrappers/java_batch_wrapper.tpl /opt/judge-java-src/batch/Main.java
+RUN for h in single batch; do \
+      mkdir -p /opt/judge-java/$h \
+      && javac -cp /usr/share/java/gson.jar -d /opt/judge-java/$h /opt/judge-java-src/$h/Main.java \
+      && test -f /opt/judge-java/$h/Main.class && test -f /opt/judge-java/$h/ListNode.class || exit 1; \
+    done \
+    && rm -rf /opt/judge-java-src && chmod -R a+rX /opt/judge-java
+
 # Root-owned and on the read-only root filesystem: no submission can change it.
 COPY --from=judge-agent /judge-agent /usr/local/bin/judge-agent
 

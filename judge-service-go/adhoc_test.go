@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -167,11 +168,18 @@ func TestCompiledStdinLanguagesOptimise(t *testing.T) {
 	// adapters/prelude.go), so compare the compiler flags rather than the whole command.
 	fnFlags := strings.Join(fnCpp.(adapters.CompilingLanguageAdapter).CompileCommand(), " ")
 	stdinFlags := strings.Join(stdinCpp.(interface{ CompileCommand() []string }).CompileCommand(), " ")
-	if !strings.HasPrefix(fnFlags, "g++ -O2 -o ") || !strings.Contains(stdinFlags, "g++ -O2 ") ||
-		strings.Contains(fnFlags+stdinFlags, "-std=") || strings.Contains(fnFlags+stdinFlags, " -f") {
+	// Function mode runs g++ through sh too (it links the prebuilt judge I/O object when the image
+	// has a matching one); both of its g++ lines must be plain -O2. -D does not affect the
+	// precompiled header.
+	if !strings.Contains(fnFlags, "exec g++ -O2 -o ") || !strings.Contains(fnFlags, "exec g++ -O2 -DJUDGE_IO_PREBUILT -o ") ||
+		!strings.Contains(stdinFlags, "g++ -O2 ") ||
+		gxxFlagRe.MatchString(fnFlags) || gxxFlagRe.MatchString(stdinFlags) {
 		t.Errorf("cpp function-mode compile %q and stdin mode %q must both be plain g++ -O2", fnFlags, stdinFlags)
 	}
 }
+
+// gxxFlagRe finds a -std= or -f... option on a g++ command line (not the shell's own [ -f ]).
+var gxxFlagRe = regexp.MustCompile(`g\+\+[^\n]* (-std=|-f[a-z])`)
 
 func containsArg(cmd []string, arg string) bool {
 	for _, part := range cmd {
