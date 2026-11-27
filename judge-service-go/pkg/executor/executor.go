@@ -42,6 +42,10 @@ type Executor struct {
 	// ID the *agentExec it runs.
 	agents     sync.Map
 	agentExecs sync.Map
+
+	// The compile cache (compile_cache.go), nil when off, and each container's image ID.
+	cc       *compileCache
+	imageIDs sync.Map
 }
 
 // maxCapturedOutputBytes caps how much of a single exec's stdout/stderr this process
@@ -59,9 +63,11 @@ const maxCapturedOutputBytes = 1 * 1024 * 1024
 type boundedWriter struct {
 	buf   bytes.Buffer
 	limit int
+	total int // everything written, kept or not
 }
 
 func (w *boundedWriter) Write(p []byte) (int, error) {
+	w.total += len(p)
 	if remaining := w.limit - w.buf.Len(); remaining > 0 {
 		if remaining > len(p) {
 			remaining = len(p)
@@ -100,7 +106,7 @@ func NewExecutor() (*Executor, error) {
 			return nil, fmt.Errorf("failed to create docker client: %w", err)
 		}
 	}
-	return &Executor{cli: cli}, nil
+	return &Executor{cli: cli, cc: newCompileCacheFromEnv()}, nil
 }
 
 // Client returns the underlying Docker client.
@@ -559,6 +565,11 @@ func (e *Executor) copyFilesToContainer(ctx context.Context, containerID string,
 	if err != nil {
 		return err
 	}
+	return e.uploadTar(ctx, containerID, containerWorkDir, tarData)
+}
+
+// uploadTar extracts a workspace tar into containerWorkDir as the judge user.
+func (e *Executor) uploadTar(ctx context.Context, containerID string, containerWorkDir string, tarData []byte) error {
 	if MergedExecsEnabled() {
 		// An exec of its own still, but it also runs any wipe the last reset left pending.
 		if _, stderr, _, err := e.runExecWithUpload(ctx, containerID, getJudgeUser(), containerWorkDir, []string{"true"}, 20*time.Second, tarData); err != nil {
@@ -922,6 +933,13 @@ func (e *Executor) CompileInContainer(ctx context.Context, containerID string, f
 	subCtx, cancel := context.WithTimeout(ctx, submissionTimeout)
 	defer cancel()
 
+	// The same code compiled before with the same compiler: its files instead (compile_cache.go).
+	cacheKey, cacheable := e.compileKey(containerID, hostWorkDir, files, compileCmd)
+	if cacheable && e.restoreCompiled(subCtx, containerID, containerWorkDir, cacheKey) {
+		return "", "", nil
+	}
+	compileStart := time.Now()
+
 	upload, err := e.stageUpload(subCtx, containerID, hostWorkDir, containerWorkDir, files)
 	if err != nil {
 		return "", "", err
@@ -944,6 +962,9 @@ func (e *Executor) CompileInContainer(ctx context.Context, containerID string, f
 			return compileStdout, compileStderr, err
 		}
 		return compileStdout, compileStderr, NewExecutionError(ErrCompilationFailed, err.Error(), -1)
+	}
+	if cacheable {
+		e.keepCompiled(subCtx, containerID, containerWorkDir, cacheKey, time.Since(compileStart))
 	}
 
 	return compileStdout, compileStderr, nil
@@ -1178,6 +1199,13 @@ func (e *Executor) RunRawWithStdin(ctx context.Context, containerID string, file
 	subCtx, cancel := context.WithTimeout(ctx, submissionTimeout)
 	defer cancel()
 
+	// The same code compiled before with the same compiler: its files, and no compile.
+	cacheKey, cacheable := e.compileKey(containerID, hostWorkDir, files, compileCmd)
+	if cacheable && e.restoreCompiled(subCtx, containerID, containerWorkDir, cacheKey) {
+		compileCmd = nil
+		files = nil
+	}
+
 	// The run takes the program's stdin, so in merged mode the upload goes with the compile
 	// only; without one it is an exec of its own.
 	var upload []byte
@@ -1202,7 +1230,11 @@ func (e *Executor) RunRawWithStdin(ctx context.Context, containerID string, file
 
 	if len(compileCmd) > 0 {
 		slog.Info("Compiling raw submission in container", "containerId", containerID, "cmd", compileCmd)
+		compileStart := time.Now()
 		compileStdout, compileStderr, _, err := e.runExecWithUpload(subCtx, containerID, getJudgeUser(), containerWorkDir, rewriteCommandForWorkspace(compileCmd, containerWorkDir), rawCompileTimeout, upload)
+		if err == nil && cacheable {
+			e.keepCompiled(subCtx, containerID, containerWorkDir, cacheKey, time.Since(compileStart))
+		}
 		if IsContainerLost(err) {
 			return "", "", "", -1, err
 		}

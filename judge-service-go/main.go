@@ -1475,9 +1475,12 @@ func startHealthServer(ctx context.Context, containerPool *pool.ContainerPool, p
 		// Merge pool stats with GC/reconciler metrics
 		stats := containerPool.GetStats()
 		metricsSnapshot := metrics.Snapshot()
+		hits, misses, stored := executor.CompileCacheStats()
 		resp := map[string]interface{}{
 			"pool":    stats,
 			"metrics": metricsSnapshot,
+			// JUDGE_COMPILE_CACHE_MB: compiles skipped, compiles run, results kept.
+			"compile_cache": map[string]int64{"hits": hits, "misses": misses, "stored": stored},
 		}
 		json.NewEncoder(w).Encode(resp)
 	})

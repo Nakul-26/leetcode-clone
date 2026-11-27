@@ -5,6 +5,11 @@
 //   npm run loadtest -- quick            python + cpp at 1 and 10 concurrent, 20 s each (~2 min)
 //   npm run loadtest -- full             python, cpp, java at 1/10/20/40 concurrent, 45 s each (~13 min)
 //   npm run loadtest -- full --langs=python,go --levels=5,50 --seconds=30
+//   npm run loadtest -- full --langs=cpp --same-code   every request sends identical code
+//
+// Each request's program ends with a unique comment, so a judge with a compile cache
+// (JUDGE_COMPILE_CACHE_MB) still compiles every one: the numbers stay a measure of real
+// compiles. --same-code leaves the comment out, to measure the cache-hit case on purpose.
 //
 // Reads LOADTEST_KEY (and optionally LOADTEST_BASE) from loadtest/.env or the environment.
 // Every run is saved to loadtest/results/ and compared with the previous run of the same
@@ -59,6 +64,7 @@ if (!base) {
   process.exit(2);
 }
 const flag = (name) => args.find((a) => a.startsWith(`--${name}=`))?.split("=")[1];
+const SAME_CODE = args.includes("--same-code");
 const config = {
   profile: profileName,
   langs: flag("langs")?.split(",") || base.langs,
@@ -82,6 +88,16 @@ const HEADERS = { "Content-Type": "application/json", "x-rapidapi-key": KEY };
 const b64 = (s) => Buffer.from(s).toString("base64");
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+// A comment that makes the source unique, in the language's own comment syntax.
+const HASH_COMMENT = new Set(["python", "ruby"]);
+function uniqueSource(lang, src) {
+  if (SAME_CODE) return src;
+  const tag = `loadtest ${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
+  return src + (HASH_COMMENT.has(lang) ? `# ${tag}
+` : `// ${tag}
+`);
+}
+
 // One request: submit with wait=true, poll if the judge has not finished within the wait.
 async function runOnce(lang) {
   const program = PROGRAMS[lang];
@@ -91,7 +107,7 @@ async function runOnce(lang) {
     let res = await fetch(`${BASE}/submissions?base64_encoded=true&wait=true`, {
       method: "POST",
       headers: HEADERS,
-      body: JSON.stringify({ language_id: program.id, source_code: b64(program.src), stdin: b64(`${n}\n`) })
+      body: JSON.stringify({ language_id: program.id, source_code: b64(uniqueSource(lang, program.src)), stdin: b64(`${n}\n`) })
     });
     if (res.status === 401) throw Object.assign(new Error("401 Unauthorized: the key is wrong, revoked or lacks the codeassess scope"), { fatal: true });
     if (res.status === 429) return { ok: false, ms: Date.now() - t0, why: "429 rate limited" };

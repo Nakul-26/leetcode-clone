@@ -165,3 +165,4 @@ Order: P5, P4, P1+P2 (bugs, small) → P6 + P7 (the core fix) → P3 → P8 + P9
 | 2026-11-27 | Interactive fairness: a language holds at most its containers + 2 interactive requests (`TryClaimInteractive`, 300 ms wait queue). Mixed test before: Python 4,728 -> 835/min next to C++ and Java |
 | 2026-11-27 | Java function mode: harness prebuilt in judge-java-env (`/opt/judge-java`), javac compiles only Solution.java: 490 -> 299 ms |
 | 2026-11-27 | C++ function mode: judge I/O helper bodies prebuilt (`/opt/judge-cpp/judge_io.o`, used only when its SHA-256 matches the pasted copy): compile 750 -> 530 ms |
+| 2026-11-27 | Compile cache for stdin programs (`JUDGE_COMPILE_CACHE_MB`): the same code with the same compiler skips the compile. C++ 418 -> 58 ms, Rust 376 -> 94 ms, Java 624 -> 295 ms per submission. Load test now sends unique code per request (`--same-code` to test hits) |

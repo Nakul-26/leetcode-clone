@@ -84,6 +84,7 @@ services:
       JUDGE_AGENT_LANGS: ${JUDGE_AGENT_LANGS:-}
       JUDGE_ADAPTIVE_CONCURRENCY: ${JUDGE_ADAPTIVE_CONCURRENCY:-false}
       JUDGE_CONCURRENCY_MAX: ${JUDGE_CONCURRENCY_MAX:-}
+      JUDGE_COMPILE_CACHE_MB: ${JUDGE_COMPILE_CACHE_MB:-0}
       # Which stack this judge's sandboxes belong to, so a second stack on the same server
       # (deploy2 runs two) keeps its sandboxes when this one starts. Defaults to the Compose
       # project name, which Dokploy makes unique per compose.

@@ -59,6 +59,9 @@
 #                          JUDGE_POOL_MAX_<LANG>, while work waits and host CPU is under 85%;
 #                          shrinks back when CPU is over 95%. JUDGE_CONCURRENCY_MAX caps it
 #                          (default 1.5x the host's cores). See pkg/capacity.
+#   JUDGE_COMPILE_CACHE_MB (default: 0 = off) — memory for compiled stdin programs, so the same
+#                          code compiled again (Run several times, then Submit) skips the compile.
+#                          256 is plenty. See pkg/executor/compile_cache.go.
 #   JUDGE_WORKER_CONCURRENCY  (default: 24) — how many submissions can be pulled off RabbitMQ
 #                          and processed concurrently. Deliberately set above the host's core
 #                          count: these workers spend most of their time blocked on Docker API
@@ -385,6 +388,7 @@ services:
       JUDGE_AGENT_LANGS: ${JUDGE_AGENT_LANGS:-}
       JUDGE_ADAPTIVE_CONCURRENCY: ${JUDGE_ADAPTIVE_CONCURRENCY:-false}
       JUDGE_CONCURRENCY_MAX: ${JUDGE_CONCURRENCY_MAX:-}
+      JUDGE_COMPILE_CACHE_MB: ${JUDGE_COMPILE_CACHE_MB:-0}
       # Which stack this judge's sandboxes belong to, so a second stack on the same server
       # (deploy2 runs two) keeps its sandboxes when this one starts. Defaults to the Compose
       # project name, which Dokploy makes unique per compose.
