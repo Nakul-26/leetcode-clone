@@ -74,8 +74,9 @@ var ErrUnavailable = errors.New("compile service unavailable")
 
 // Service is one judge's compiler container and the server running in it.
 type Service struct {
-	cli   *docker.Client
-	image string
+	cli       *docker.Client
+	image     string
+	admission *admissionGate
 
 	mu              sync.Mutex
 	containerID     string
@@ -89,7 +90,7 @@ type Service struct {
 
 // New makes a service for the Java image. Nothing starts until the first compile.
 func New(cli *docker.Client, javaImage string) *Service {
-	return &Service{cli: cli, image: javaImage}
+	return &Service{cli: cli, image: javaImage, admission: newAdmissionGate(min(64, envInt("JUDGE_COMPILE_SERVICE_MAX_PENDING", compilerThreads()*2)))}
 }
 
 // CacheIdentity identifies the actual compiler image without widening docker-guard's
@@ -120,6 +121,14 @@ func (s *Service) Stats() (compiles, fallbacks, restarts int64) {
 	return s.compiles.Load(), s.fallbacks.Load(), s.restarts.Load()
 }
 
+// AdmissionStats counts outstanding JVM requests and callers waiting outside it.
+func (s *Service) AdmissionStats() (limit, outstanding, waiting int64) {
+	if s.admission == nil {
+		return 0, 0, 0
+	}
+	return int64(cap(s.admission.slots)), s.admission.outstanding.Load(), s.admission.waiting.Load()
+}
+
 func envInt(name string, def int) int {
 	if v, err := strconv.Atoi(strings.TrimSpace(os.Getenv(name))); err == nil && v > 0 {
 		return v
@@ -130,6 +139,14 @@ func envInt(name string, def int) int {
 // CompileJava compiles the given sources (name -> content) with javac args. ErrUnavailable
 // (or any other error) means: compile in the sandbox instead.
 func (s *Service) CompileJava(ctx context.Context, sources map[string][]byte, args []string) (*Result, error) {
+	admittedAt := time.Now()
+	release, admissionErr := s.admission.acquire(ctx)
+	metrics.RecordStage(metrics.WithLanguage(ctx, "java"), "compiler_admission", time.Since(admittedAt))
+	if admissionErr != nil {
+		return nil, admissionErr
+	}
+	defer release()
+
 	c, err := s.connection(ctx)
 	if err != nil {
 		s.fallbacks.Add(1)
@@ -202,6 +219,13 @@ func safeClassPath(name string) bool {
 func (s *Service) connection(ctx context.Context) (*conn, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.admission != nil {
+		select {
+		case <-s.admission.done:
+			return nil, errAdmissionClosed
+		default:
+		}
+	}
 	if s.conn != nil && !s.conn.isDead() {
 		return s.conn, nil
 	}
@@ -281,6 +305,9 @@ func (s *Service) removeContainerLocked() {
 
 // Close removes the container (judge shutdown).
 func (s *Service) Close() {
+	if s.admission != nil {
+		s.admission.close()
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.conn != nil {
@@ -387,7 +414,7 @@ type reply struct {
 }
 
 func startServer(ctx context.Context, cli *docker.Client, containerID string) (*conn, error) {
-	threads := strconv.Itoa(envInt("JUDGE_COMPILE_SERVICE_THREADS", envInt("JUDGE_COMPILE_SERVICE_CPUS", 2)))
+	threads := strconv.Itoa(compilerThreads())
 	maxCompiles := strconv.Itoa(envInt("JUDGE_COMPILE_SERVICE_RECYCLE", 500))
 	timeoutMs := strconv.Itoa(envInt("JUDGE_COMPILE_SERVICE_TIMEOUT_S", 30) * 1000)
 	ex, err := cli.CreateExec(docker.CreateExecOptions{

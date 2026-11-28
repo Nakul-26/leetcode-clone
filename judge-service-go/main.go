@@ -219,7 +219,8 @@ func compileServiceStats() map[string]int64 {
 		return nil
 	}
 	c, f, r := compileService.Stats()
-	return map[string]int64{"compiles": c, "fallbacks": f, "server_starts": r}
+	limit, outstanding, waiting := compileService.AdmissionStats()
+	return map[string]int64{"compiles": c, "fallbacks": f, "server_starts": r, "max_pending": limit, "outstanding": outstanding, "waiting_admission": waiting}
 }
 
 // interactiveWaitQueueName is the queue an interactive request waits in, for interactiveWaitMs,

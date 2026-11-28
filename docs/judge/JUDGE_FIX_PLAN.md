@@ -170,9 +170,16 @@ Order: P5, P4, P1+P2 (bugs, small) → P6 + P7 (the core fix) → P3 → P8 + P9
 | 2026-11-28 | C++ stdin: a light `<bits/stdc++.h>` (~30 common headers, 80 MB PCH vs 142 MB) first, the full one when a header is missing; C++20 unchanged. Typical program 410 -> 249 ms; regex/random programs fall back (+2% / +100 ms); tested examples matched; removed 2026-11-28 after a conditional-compilation counterexample showed successful compiles can change behavior |
 
 
-2026-11-28 follow-up (working tree, deployment pending): per-language stage histograms and
+2026-11-28 follow-up (first batch on main; rollout to both testing judges required): per-language stage histograms and
 Java compiler queue/work timing; resident Java compiler artifact caching in the existing LRU;
 opt-in direct single-test stdin execution (`JUDGE_STDIN_DIRECT_SINGLE=true`); exclude normal
 batched protocol frames from error diagnostics; remove reduced standard-header substitution
 and explicitly use C++20. Full-header C++ API throughput must be remeasured. Short isolated compiler-only checks measured 3,697/min at two CPUs versus 5,488/min at four; these exclude execution and API overhead. Adaptive compiler
 capacity, compile-before-sandbox scheduling, and native multi-test orchestration remain pending.
+
+
+Compiler admission follow-up: bound active/queued JVM requests (default twice the compiler
+threads, max 64), expose outstanding/admission-wait gauges and timings, bound configured compiler
+threads to 16, and handle cancellation/shutdown without leaking slots or restarting after close.
+CPU quotas and all execution sandbox restrictions are retained. Compile-before-sandbox scheduling
+and adaptive compiler CPU allocation are separate future changes.

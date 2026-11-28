@@ -3,11 +3,13 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -200,5 +202,71 @@ func TestCompileServiceCapacity(t *testing.T) {
 			}
 			t.Logf("compile-only: %d unique programs, %d in flight, %v, %.0f compiles/min", jobs, concurrency, elapsed, float64(jobs)/elapsed.Minutes())
 		})
+	}
+}
+
+func TestCompileAdmissionIntegration(t *testing.T) {
+	t.Setenv("JUDGE_COMPILE_SERVICE_MAX_PENDING", "2")
+	t.Setenv("JUDGE_COMPILE_SERVICE", "java")
+	client, err := executor.NewExecutor()
+	if err != nil {
+		t.Skipf("Docker unavailable: %v", err)
+	}
+	image := languages.GetLanguage("java").ImageRef()
+	if _, err := client.Client().InspectImage(image); err != nil {
+		t.Skipf("Java testing image unavailable: %v", err)
+	}
+	removeInstanceContainers(t, client.Client())
+	svc := compilesvc.New(client.Client(), image)
+	defer svc.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	start, done := make(chan struct{}), make(chan struct{})
+	var peak, queued atomic.Int64
+	go func() {
+		defer close(done)
+		ticker := time.NewTicker(time.Millisecond)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				_, outstanding, waiting := svc.AdmissionStats()
+				if outstanding > peak.Load() {
+					peak.Store(outstanding)
+				}
+				if waiting > queued.Load() {
+					queued.Store(waiting)
+				}
+			}
+		}
+	}()
+	var wg sync.WaitGroup
+	for i := 0; i < 12; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			<-start
+			token := fmt.Sprintf("submission-%02d", i)
+			source := fmt.Sprintf("public class Main { public static final String TOKEN = %q; }", token)
+			res, err := svc.CompileJava(ctx, map[string][]byte{"Main.java": []byte(source)}, nil)
+			if err != nil {
+				t.Error(err)
+				return
+			}
+			if res.Exit != 0 || !bytes.Contains(res.Files["Main.class"], []byte(token)) {
+				t.Errorf("compiler artifacts crossed requests for %s", token)
+			}
+		}(i)
+	}
+	close(start)
+	wg.Wait()
+	cancel()
+	<-done
+	_, outstanding, waiting := svc.AdmissionStats()
+	compiles, fallbacks, _ := svc.Stats()
+	if peak.Load() > 2 || queued.Load() == 0 || outstanding != 0 || waiting != 0 || compiles != 12 || fallbacks != 0 {
+		t.Fatalf("peak=%d queued=%d outstanding=%d waiting=%d compiles=%d fallbacks=%d", peak.Load(), queued.Load(), outstanding, waiting, compiles, fallbacks)
 	}
 }
