@@ -159,9 +159,10 @@ func TestCompiledStdinLanguagesOptimise(t *testing.T) {
 	if !containsArg(fnC.(adapters.CompilingLanguageAdapter).CompileCommand(), "-O2") {
 		t.Errorf("c function-mode compile is not -O2")
 	}
-	// Function-mode C++ must compile with exactly the stdin-mode flags: the image's
-	// precompiled <bits/stdc++.h> was built with them, and g++ silently skips it otherwise
-	// (see adapters/cpp.go).
+	// Function-mode C++ and stdin mode must use the same language standard and optimization
+	// flags: the image's precompiled <bits/stdc++.h> was built with them, and g++ silently
+	// skips it otherwise (see adapters/cpp.go). Stdin mode may add -pipe, which does not
+	// affect precompiled-header compatibility.
 	fnCpp, _ := adapters.GetAdapter("cpp")
 	stdinCpp, _ := adapters.GetStdinAdapter("cpp")
 	// Stdin mode runs g++ through sh (it force-includes prelude.h only when needed, see
@@ -169,10 +170,9 @@ func TestCompiledStdinLanguagesOptimise(t *testing.T) {
 	fnFlags := strings.Join(fnCpp.(adapters.CompilingLanguageAdapter).CompileCommand(), " ")
 	stdinFlags := strings.Join(stdinCpp.(interface{ CompileCommand() []string }).CompileCommand(), " ")
 	// Function mode runs g++ through sh too (it links the prebuilt judge I/O object when the image
-	// has a matching one); both of its g++ lines must be plain -O2. -D does not affect the
-	// precompiled header.
+	// has a matching one). -D and -pipe do not affect the precompiled header.
 	if !strings.Contains(fnFlags, "exec g++ -std=gnu++20 -O2 -o ") || !strings.Contains(fnFlags, "exec g++ -std=gnu++20 -O2 -DJUDGE_IO_PREBUILT -o ") ||
-		!strings.Contains(stdinFlags, "g++ -std=gnu++20 -O2 ") ||
+		!strings.Contains(stdinFlags, "g++ -pipe -std=gnu++20 -O2 ") ||
 		gxxFlagRe.MatchString(strings.ReplaceAll(fnFlags, "-std=gnu++20 ", "")) || gxxFlagRe.MatchString(strings.ReplaceAll(stdinFlags, "-std=gnu++20 ", "")) {
 		t.Errorf("cpp function-mode compile %q and stdin mode %q must both use C++20 and -O2", fnFlags, stdinFlags)
 	}
