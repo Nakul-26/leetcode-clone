@@ -255,3 +255,20 @@ func TestBatchReadyLineStartsTheFirstTestClock(t *testing.T) {
 		t.Fatalf("slow test after ready: processed=%d timedOut=%v", processed, timedOut)
 	}
 }
+
+func TestBatchDiagnosticsExcludeProtocolFrames(t *testing.T) {
+	input := "startup warning\n{not-json}\n{\"ready\":true}\n{\"test\":1,\"output\":0}\n"
+	var diagnostic bytes.Buffer
+	result := models.NewSubmissionResult()
+	processed, _, _, err := streamBatchedResults(result, strings.NewReader(""), strings.NewReader(input), &diagnostic, batchProblem(1), batchWatch{})
+	if err != nil || processed != 1 {
+		t.Fatalf("processed=%d err=%v", processed, err)
+	}
+	text := diagnostic.String()
+	if !strings.Contains(text, "startup warning") || !strings.Contains(text, "not-json") {
+		t.Fatalf("real diagnostics missing: %q", text)
+	}
+	if strings.Contains(text, "ready") || strings.Contains(text, "output") {
+		t.Fatalf("protocol leaked into error log: %q", text)
+	}
+}

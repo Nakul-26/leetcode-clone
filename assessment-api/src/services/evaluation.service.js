@@ -43,7 +43,7 @@ export async function publishSubmissionMessage(messageBody, { queue = QUEUE_NAME
       throw error;
     }
 
-    await sendConfirmed(channel, queue, Buffer.from(JSON.stringify(messageBody)), { persistent: true });
+    await sendConfirmed(channel, queue, Buffer.from(JSON.stringify({ ...messageBody, queuedAtUnixMs: Date.now() })), { persistent: true });
   } catch (err) {
     if (err.status === 503) throw err; // Pass backpressure error through
     console.error("RabbitMQ Publish Error:", err);

@@ -396,6 +396,8 @@ services:
       JUDGE_COMPILE_CACHE_MB: ${JUDGE_COMPILE_CACHE_MB:-0}
       JUDGE_COMPILE_SERVICE: ${JUDGE_COMPILE_SERVICE:-}
       JUDGE_COMPILE_SERVICE_CPUS: ${JUDGE_COMPILE_SERVICE_CPUS:-2}
+      JUDGE_COMPILE_SERVICE_THREADS: ${JUDGE_COMPILE_SERVICE_THREADS:-}
+      JUDGE_STDIN_DIRECT_SINGLE: ${JUDGE_STDIN_DIRECT_SINGLE:-false}
       # Which stack this judge's sandboxes belong to, so a second stack on the same server
       # (deploy2 runs two) keeps its sandboxes when this one starts. Defaults to the Compose
       # project name, which Dokploy makes unique per compose.

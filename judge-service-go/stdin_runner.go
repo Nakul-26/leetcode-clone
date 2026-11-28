@@ -14,6 +14,7 @@ import (
 	"judge-service-go/pkg/central/adapters"
 	"judge-service-go/pkg/comparator"
 	"judge-service-go/pkg/executor"
+	"judge-service-go/pkg/metrics"
 	"judge-service-go/pkg/models"
 	"judge-service-go/pkg/pool"
 	"judge-service-go/pkg/workspace"
@@ -33,6 +34,9 @@ func runSubmissionStdinDetailed(ctx context.Context, exec *executor.Executor, po
 		return nil, false, fmt.Errorf("language %q is not supported for stdin-mode problems", submissionMsg.Language)
 	}
 
+	ctx = metrics.WithLanguage(ctx, submissionMsg.Language)
+	defer metrics.TimeStage(ctx, "stdin_total")()
+
 	submissionWorkspace, err := workspace.NewSubmissionWorkspace(pooledContainer.WorkDir, submissionMsg.SubmissionID)
 	if err != nil {
 		return nil, false, err
@@ -45,7 +49,9 @@ func runSubmissionStdinDetailed(ctx context.Context, exec *executor.Executor, po
 	}()
 
 	source := stdinSourceFor(submissionMsg)
+	prepareStart := time.Now()
 	baseFiles, err := stdinAdapter.PrepareFiles(submissionWorkspace.HostPath, source)
+	metrics.RecordStage(ctx, "prepare", time.Since(prepareStart))
 	if err != nil {
 		return nil, cleanupFailed, err
 	}
@@ -61,6 +67,7 @@ func runSubmissionStdinDetailed(ctx context.Context, exec *executor.Executor, po
 	}
 	compiled := len(compileCmd) > 0
 
+	defer metrics.TimeStage(ctx, "execute_tests")()
 	testTimeout := perTestTimeout(problem)
 	runCmd := stdinAdapter.RunCommand()
 
@@ -74,7 +81,8 @@ func runSubmissionStdinDetailed(ctx context.Context, exec *executor.Executor, po
 	}
 	// All tests in one exec (JUDGE_FIX_PLAN T5) unless switched off or a test is malformed (the
 	// per-test loop below reports those one by one). The inputs go up with the source.
-	batched := stdinBatchEnabled() && stdinTestsWellFormed(problem)
+	batched := stdinBatchEnabled() && stdinTestsWellFormed(problem) &&
+		!(len(problem.TestCases) == 1 && os.Getenv("JUDGE_STDIN_DIRECT_SINGLE") == "true")
 	var upload []string
 	if !compiled {
 		upload = append(upload, baseFiles...)
@@ -239,6 +247,7 @@ func runSubmissionStdinDetailed(ctx context.Context, exec *executor.Executor, po
 // interface, so it can't share the same function without a common
 // compile-command supertype that doesn't otherwise exist.
 func compileStdinSubmission(ctx context.Context, exec *executor.Executor, pooledContainer *pool.PooledContainer, submissionWorkspace *workspace.SubmissionWorkspace, compileCmd []string, files []string, problem models.Problem) error {
+	defer metrics.TimeStage(ctx, "compile")()
 	stdout, stderr, err := exec.CompileInContainer(
 		ctx,
 		pooledContainer.ID,

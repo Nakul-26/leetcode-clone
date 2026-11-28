@@ -159,6 +159,8 @@ func Snapshot() map[string]interface{} {
 		"reconcile_repairs_total":      atomic.LoadInt64(&reconcileRepairsTotal),
 		"container_replacements_total": atomic.LoadInt64(&containerReplacementsTotal),
 		"acquire_wait":                 SnapshotAcquire(),
+		"stages":                       SnapshotStages(),
+		"stage_bucket_bounds_ms":       stageBounds,
 		"docker_calls":                 dockerCalls,
 		"judged_submissions":           judged,
 	}

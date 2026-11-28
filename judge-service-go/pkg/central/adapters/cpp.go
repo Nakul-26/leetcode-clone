@@ -76,7 +76,7 @@ func withJudgeIOHash(workDir string, files []string) ([]string, error) {
 	return append(files, "judge-io.sha"), nil
 }
 
-// -O2, the same as stdin mode, and nothing else: the image's precompiled <bits/stdc++.h> was
+// C++20 and -O2, the same as stdin mode: the image's precompiled <bits/stdc++.h> was
 // built with exactly these flags, and g++ silently skips it when they differ. The wrapper
 // no longer uses nlohmann::json (JUDGE_FIX_PLAN T11), which had made -O2 too slow to build
 // here (-O1 was used instead). Measured 2026-10-30 on one core: 5.4 s -> 1.2 s per compile.
@@ -87,9 +87,9 @@ func withJudgeIOHash(workDir string, files []string) ([]string, error) {
 func (CppAdapter) CompileCommand() []string {
 	script := `out=$1; src=$2; sha=$3; shift 3
 if [ -f ` + cppJudgeIOObject + ` ] && [ -f ` + cppJudgeIOHash + ` ] && [ -f "$sha" ] && [ "$(cat "$sha")" = "$(cat ` + cppJudgeIOHash + `)" ]; then
-	exec g++ -O2 -DJUDGE_IO_PREBUILT -o "$out" "$src" ` + cppJudgeIOObject + `
+	exec g++ -std=gnu++20 -O2 -DJUDGE_IO_PREBUILT -o "$out" "$src" ` + cppJudgeIOObject + `
 fi
-exec g++ -O2 -o "$out" "$src"`
+exec g++ -std=gnu++20 -O2 -o "$out" "$src"`
 	return []string{"sh", "-c", script, "g++", "/app/main", "/app/main.cpp", "/app/judge-io.sha"}
 }
 

@@ -15,6 +15,7 @@ import (
 
 	docker "github.com/fsouza/go-dockerclient"
 
+	"judge-service-go/pkg/metrics"
 	"judge-service-go/pkg/workspace"
 )
 
@@ -573,6 +574,7 @@ func (e *Executor) copyFilesToContainer(ctx context.Context, containerID string,
 
 // uploadTar extracts a workspace tar into containerWorkDir as the judge user.
 func (e *Executor) uploadTar(ctx context.Context, containerID string, containerWorkDir string, tarData []byte) error {
+	defer metrics.TimeStage(ctx, "upload")()
 	if MergedExecsEnabled() {
 		// An exec of its own still, but it also runs any wipe the last reset left pending.
 		if _, stderr, _, err := e.runExecWithUpload(ctx, containerID, getJudgeUser(), containerWorkDir, []string{"true"}, 20*time.Second, tarData); err != nil {
@@ -937,7 +939,7 @@ func (e *Executor) CompileInContainer(ctx context.Context, containerID string, f
 	defer cancel()
 
 	// Compiled outside the sandbox (pkg/compilesvc): the sources and what it produced go in.
-	if handled, outFiles, output, err := e.compileExternally(subCtx, compileCmd, hostWorkDir, files); handled {
+	if handled, outFiles, output, err := e.compileExternally(subCtx, containerID, compileCmd, hostWorkDir, files); handled {
 		if err != nil {
 			return "", output, err
 		}
@@ -971,6 +973,7 @@ func (e *Executor) CompileInContainer(ctx context.Context, containerID string, f
 	}
 
 	compileStdout, compileStderr, _, err := e.runExecWithUpload(subCtx, containerID, getJudgeUser(), containerWorkDir, rewriteCommandForWorkspace(compileCmd, containerWorkDir), timeout, upload)
+	metrics.RecordStage(ctx, "sandbox_compile", time.Since(compileStart))
 	if err != nil {
 		if IsContainerLost(err) {
 			return compileStdout, compileStderr, err
@@ -1216,7 +1219,7 @@ func (e *Executor) RunRawWithStdin(ctx context.Context, containerID string, file
 	// Compiled outside the sandbox (pkg/compilesvc): upload sources and output, no compile here.
 	cacheable := false
 	cacheKey := ""
-	if handled, outFiles, output, err := e.compileExternally(subCtx, compileCmd, hostWorkDir, files); handled {
+	if handled, outFiles, output, err := e.compileExternally(subCtx, containerID, compileCmd, hostWorkDir, files); handled {
 		if err != nil {
 			return "", "", output, -1, err
 		}
@@ -1257,6 +1260,7 @@ func (e *Executor) RunRawWithStdin(ctx context.Context, containerID string, file
 		slog.Info("Compiling raw submission in container", "containerId", containerID, "cmd", compileCmd)
 		compileStart := time.Now()
 		compileStdout, compileStderr, _, err := e.runExecWithUpload(subCtx, containerID, getJudgeUser(), containerWorkDir, rewriteCommandForWorkspace(compileCmd, containerWorkDir), rawCompileTimeout, upload)
+		metrics.RecordStage(ctx, "sandbox_compile", time.Since(compileStart))
 		if err == nil && cacheable {
 			e.keepCompiled(subCtx, containerID, containerWorkDir, cacheKey, time.Since(compileStart))
 		}
@@ -1281,7 +1285,9 @@ func (e *Executor) RunRawWithStdin(ctx context.Context, containerID string, file
 		}
 	}
 
+	runStart := time.Now()
 	runStdout, runStderr, runExit, runErr := e.runExecWithStdin(subCtx, containerID, getJudgeUser(), containerWorkDir, rewriteCommandForWorkspace(runCmd, containerWorkDir), timeout, stdinData)
+	metrics.RecordStage(ctx, "raw_execute", time.Since(runStart))
 
 	// Reset limit AFTER execution completes. Bounded on its own timeout for the same
 	// reason as RunInContainerStream's equivalent reset — see comment there.

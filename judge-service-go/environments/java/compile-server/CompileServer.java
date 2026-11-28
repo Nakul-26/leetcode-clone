@@ -116,7 +116,14 @@ public final class CompileServer {
             }
             final Request r = req;
             started.incrementAndGet();
-            Future<Reply> f = workers.submit(() -> compile(compiler, r));
+            long queuedAt = System.nanoTime();
+            Future<Reply> f = workers.submit(() -> {
+                long began = System.nanoTime();
+                Reply result = compile(compiler, r);
+                result.queueNanos = began - queuedAt;
+                result.compileNanos = System.nanoTime() - began;
+                return result;
+            });
             watchers.submit(() -> {
                 Reply reply;
                 try {
@@ -146,6 +153,8 @@ public final class CompileServer {
     private static final class Reply {
         long id;
         int exit;
+        long queueNanos;
+        long compileNanos;
         String output;
         Map<String, String> files = new HashMap<>();
 
@@ -153,6 +162,8 @@ public final class CompileServer {
             JsonObject o = new JsonObject();
             o.addProperty("id", id);
             o.addProperty("exit", exit);
+            o.addProperty("queueNanos", queueNanos);
+            o.addProperty("compileNanos", compileNanos);
             o.addProperty("output", output == null ? "" : output);
             JsonObject fs = new JsonObject();
             for (Map.Entry<String, String> e : files.entrySet()) {

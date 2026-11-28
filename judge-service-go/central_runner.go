@@ -763,18 +763,30 @@ loop:
 				err = ev.err
 				break loop
 			}
-			if stderrCopy.Len() < maxBatchedStderrCopy {
-				stderrCopy.Write(ev.text)
+			// stderr carries protocol frames as well as real diagnostics. Copying
+			// every passing result into the error log duplicates student output,
+			// wastes serialization/I/O, and labels healthy runs as failures.
+			copyDiagnostic := func() {
+				room := maxBatchedStderrCopy - stderrCopy.Len()
+				if room > len(ev.text) {
+					room = len(ev.text)
+				}
+				if room > 0 {
+					stderrCopy.Write(ev.text[:room])
+				}
 			}
 			line := strings.TrimSpace(string(ev.text))
 			if line == "" || !strings.HasPrefix(line, "{") {
+				copyDiagnostic()
 				continue
 			}
 			var out batchedTestExecOutput
 			if json.Unmarshal([]byte(line), &out) != nil {
+				copyDiagnostic()
 				continue
 			}
 			if out.Fatal != "" {
+				copyDiagnostic()
 				err = fmt.Errorf("wrapper fatal error: %s", out.Fatal)
 				break loop
 			}
@@ -801,6 +813,7 @@ loop:
 			// Only the next test's line counts. Student code can write to the same stream, so
 			// a repeated or out-of-order line (a copy of a passing test's) must not count again.
 			if out.Test != processed+1 || out.Test > len(problem.TestCases) {
+				copyDiagnostic()
 				continue
 			}
 

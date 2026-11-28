@@ -614,6 +614,9 @@ func handleRawRun(containerPool *pool.ContainerPool, ex *executor.Executor, usag
 			return
 		}
 
+		r = r.WithContext(metrics.WithLanguage(r.Context(), lang.ID))
+		defer metrics.TimeStage(r.Context(), "raw_total")()
+
 		// Clamp caller-supplied limits defensively — this endpoint trusts assessment-api,
 		// but a bug or misconfiguration there shouldn't be able to pin a container forever
 		// or starve the sandbox's own memory ceiling.
@@ -637,7 +640,9 @@ func handleRawRun(containerPool *pool.ContainerPool, ex *executor.Executor, usag
 		acquireCtx, acquireCancel := context.WithTimeout(r.Context(), 30*time.Second)
 		defer acquireCancel()
 
+		acquireStart := time.Now()
 		pooledContainer := containerPool.Acquire(acquireCtx, lang.ID)
+		metrics.RecordStage(r.Context(), "raw_acquire", time.Since(acquireStart))
 		if pooledContainer == nil {
 			http.Error(w, "No available containers (request timed out waiting for resource)", http.StatusServiceUnavailable)
 			return
@@ -962,6 +967,8 @@ func StartPeriodicOrphanGC(ctx context.Context, cli *docker.Client, interval tim
 // memory limit), so nothing from one submission is visible to the next. If the reset fails
 // the container cannot be trusted clean and is discarded instead.
 func finishWithContainer(containerPool *pool.ContainerPool, ex *executor.Executor, container *pool.PooledContainer, discard bool, reason string) {
+	stageCtx := metrics.WithLanguage(context.Background(), container.Language)
+	defer metrics.TimeStage(stageCtx, "reset_release")()
 	// Every job that used a container ends here, so this is the denominator for Docker calls per job.
 	metrics.RecordJudgedSubmission()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -985,6 +992,7 @@ func finishWithContainer(containerPool *pool.ContainerPool, ex *executor.Executo
 const storeResultsTimeout = 15 * time.Second
 
 func processAndStoreResults(ctx context.Context, executionPath string, stdout, stderr string, execErr error, submissionMsg models.SubmissionMessage, submissionsCollection *mongo.Collection, problemsCollection *mongo.Collection, usageEventsCollection *mongo.Collection, redisClient *redis.Client) {
+	defer metrics.TimeStage(metrics.WithLanguage(ctx, submissionMsg.Language), "store_notify")()
 	ctx, cancel := context.WithTimeout(ctx, storeResultsTimeout)
 	defer cancel()
 
@@ -1252,6 +1260,18 @@ func processSubmission(interactive bool, d amqp.Delivery, ch *amqp.Channel, retr
 		return
 	}
 
+	if languages.GetLanguage(submissionMsg.Language) != nil {
+		ctx = metrics.WithLanguage(ctx, submissionMsg.Language)
+	}
+	if submissionMsg.QueuedAtUnixMs > 0 {
+		age := time.Since(time.UnixMilli(submissionMsg.QueuedAtUnixMs))
+		// Separate hosts' clocks can differ. Ignore impossible/skewed samples.
+		if age >= 0 && age < 24*time.Hour {
+			metrics.RecordStage(ctx, "queue_age_at_delivery", age)
+		}
+	}
+	defer metrics.TimeStage(ctx, "delivery_total")()
+
 	// An ad-hoc submission carries its own tests and has no stored problem to
 	// fetch, so the Problem is built in memory. Everything downstream — strategy
 	// dispatch, the container pool, retries, persistence and metering — then
@@ -1323,6 +1343,7 @@ func processSubmission(interactive bool, d amqp.Delivery, ch *amqp.Channel, retr
 		defer releaseClaim()
 	}
 
+	acquireStart := time.Now()
 	// Acquire a container from the pool with a timeout
 	acquireCtx, acquireCancel := context.WithTimeout(ctx, 30*time.Second)
 	defer acquireCancel()
@@ -1336,6 +1357,7 @@ func processSubmission(interactive bool, d amqp.Delivery, ch *amqp.Channel, retr
 	} else {
 		pooledContainer = containerPool.AcquireBulk(acquireCtx, lang.ID, bulkContainerReserve)
 	}
+	metrics.RecordStage(ctx, "acquire", time.Since(acquireStart))
 	if pooledContainer == nil {
 		retryLater(ctx, d, ch, retryQueueName, submissionsCollection, submissionMsg, "no free "+lang.ID+" container",
 			fmt.Sprintf("No available %s execution containers after %d retries", lang.ID, submissionMsg.RetryCount))

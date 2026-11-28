@@ -61,8 +61,9 @@ type compileCache struct {
 }
 
 type compileCacheEntry struct {
-	key string
-	tar []byte
+	key    string
+	tar    []byte
+	output string // successful compiler diagnostics, preserved on external-cache hits
 }
 
 // newCompileCacheFromEnv reads JUDGE_COMPILE_CACHE_MB; nil means off.
@@ -76,18 +77,28 @@ func newCompileCacheFromEnv() *compileCache {
 }
 
 func (c *compileCache) get(key string) ([]byte, bool) {
+	data, _, ok := c.getWithOutput(key)
+	return data, ok
+}
+
+func (c *compileCache) getWithOutput(key string) ([]byte, string, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	el, ok := c.m[key]
 	if !ok {
-		return nil, false
+		return nil, "", false
 	}
 	c.ll.MoveToFront(el)
-	return el.Value.(*compileCacheEntry).tar, true
+	e := el.Value.(*compileCacheEntry)
+	return e.tar, e.output, true
 }
 
 func (c *compileCache) put(key string, data []byte) {
-	if int64(len(data)) > c.max {
+	c.putWithOutput(key, data, "")
+}
+
+func (c *compileCache) putWithOutput(key string, data []byte, output string) {
+	if int64(len(data)+len(output)) > c.max {
 		return
 	}
 	c.mu.Lock()
@@ -96,14 +107,14 @@ func (c *compileCache) put(key string, data []byte) {
 		c.ll.MoveToFront(el)
 		return
 	}
-	c.m[key] = c.ll.PushFront(&compileCacheEntry{key: key, tar: data})
-	c.size += int64(len(data))
+	c.m[key] = c.ll.PushFront(&compileCacheEntry{key: key, tar: data, output: output})
+	c.size += int64(len(data) + len(output))
 	for c.size > c.max {
 		old := c.ll.Back()
 		e := old.Value.(*compileCacheEntry)
 		c.ll.Remove(old)
 		delete(c.m, e.key)
-		c.size -= int64(len(e.tar))
+		c.size -= int64(len(e.tar) + len(e.output))
 	}
 	c.stored.Add(1)
 }

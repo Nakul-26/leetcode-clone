@@ -7,21 +7,22 @@ import (
 )
 
 type SubmissionMessage struct {
-	SchemaVersion string        `json:"schemaVersion"`
-	SubmissionID  string        `json:"submissionId"`
-	ProblemID     string        `json:"problemId"`
-	Language      string        `json:"language"`
-	Code          string        `json:"code"`
-	Tests         []TestCase    `json:"tests"`
-	ProblemType   ProblemType   `json:"problemType,omitempty"`
-	FunctionName  string        `json:"functionName"`
-	Parameters    []Parameter   `json:"parameters,omitempty"`
-	ReturnType    string        `json:"returnType,omitempty"`
-	CompareMode   string        `json:"compareMode,omitempty"`
-	CompareConfig CompareConfig `json:"compareConfig,omitempty"`
-	RequestID     string        `json:"requestId,omitempty"`
-	RetryCount    int           `json:"retryCount,omitempty"`
-	CollegeID     string        `json:"collegeId,omitempty"`
+	SchemaVersion  string        `json:"schemaVersion"`
+	SubmissionID   string        `json:"submissionId"`
+	ProblemID      string        `json:"problemId"`
+	Language       string        `json:"language"`
+	Code           string        `json:"code"`
+	Tests          []TestCase    `json:"tests"`
+	ProblemType    ProblemType   `json:"problemType,omitempty"`
+	FunctionName   string        `json:"functionName"`
+	Parameters     []Parameter   `json:"parameters,omitempty"`
+	ReturnType     string        `json:"returnType,omitempty"`
+	CompareMode    string        `json:"compareMode,omitempty"`
+	CompareConfig  CompareConfig `json:"compareConfig,omitempty"`
+	RequestID      string        `json:"requestId,omitempty"`
+	QueuedAtUnixMs int64         `json:"queuedAtUnixMs,omitempty"` // original publish time; retained across judge retries
+	RetryCount     int           `json:"retryCount,omitempty"`
+	CollegeID      string        `json:"collegeId,omitempty"`
 	// Which external API key produced this submission, so usage can be attributed
 	// to a paying customer (plan Phase 1). Empty for frontend traffic and for
 	// callers still authenticating with a legacy global shared secret.

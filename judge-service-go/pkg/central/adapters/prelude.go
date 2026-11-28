@@ -266,26 +266,10 @@ func WithPrelude(language, code string) (source string, header string) {
 	return code, ""
 }
 
-// cppLiteCompile compiles a stdin C++ program that includes <bits/stdc++.h> against a lighter
-// one first: judge-cpp-env has /opt/judge-cpp/lite/bits/stdc++.h with the ~30 headers students
-// use (the containers, algorithm, string, I/O, math, numeric, functional, memory, optional ...)
-// and its precompiled header, 80 MB instead of 142 MB. Loading the full one was over half of a
-// typical compile: 400 -> 269 ms on one core (2026-11-28). -I puts it ahead of the real one.
-// C++20 is unchanged.
-//
-// A program that needs a header outside it (regex, random, chrono, format, ...) fails with a
-// "not declared"-type error and is compiled again with the full header, so no program that
-// compiles today is refused. Any other compile error is reported as it is, from one compile.
-// Without the light header (an older image), when prelude.h is needed (a forced include
-// stops any precompiled header from being used) or without <bits/stdc++.h>, it compiles as
-// before.
-const cppLiteCompile = `lite=/opt/judge-cpp/lite
-if [ -f "$lite/bits/stdc++.h.gch" ] && [ ! -s ` + PreludeHeaderFile + ` ] && grep -qE '^[[:space:]]*#[[:space:]]*include[[:space:]]*<bits/stdc\+\+\.h>' main.cpp; then
-	if g++ -O2 -I"$lite" -o main main.cpp 2>judge-lite.err; then cat judge-lite.err >&2; rm -f judge-lite.err; exit 0; fi
-	if ! grep -qE "was not declared|is not a member of|does not name a|has not been declared|incomplete type|is not a template|not a class, namespace, or enumeration|no member named" judge-lite.err; then cat judge-lite.err >&2; rm -f judge-lite.err; exit 1; fi
-	rm -f judge-lite.err
-fi
-exec g++ -O2 ` + forceIncludeIfNeeded + ` -o main main.cpp`
+// cppStdinCompile uses the complete standard header and fixes the language standard.
+// A reduced bits/stdc++.h can change successful programs through conditional
+// compilation; retrying only failed compiles cannot preserve its semantics.
+const cppStdinCompile = `exec g++ -std=gnu++20 -O2 ` + forceIncludeIfNeeded + ` -o main main.cpp`
 
 // forceIncludeIfNeeded is the shell fragment that adds `-include prelude.h` only when the
 // file is non-empty.

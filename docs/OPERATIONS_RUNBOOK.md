@@ -128,9 +128,11 @@ Per-key limits are set on the key itself (`PATCH /api/admin/api-clients/:id`) an
 | `JUDGE_MERGED_EXECS` | `false` | `true` sends a submission's files in the same exec as its compile or run, and moves the wipe between submissions into the next submission's first exec (4 -> 2 execs per Python run, [Agent Plan](./judge/JUDGE_AGENT_PLAN.md) Phase 1). Turn it on for one judge first and load test |
 | `JUDGE_AGENT_LANGS` | empty (off) | Languages whose sandboxes run the resident agent: `python,javascript`, or `all`. A container then gets two long-lived execs when first used and no exec per run (Python ~1.8x faster per submission, [Agent Plan](./judge/JUDGE_AGENT_PLAN.md) Phase 2). Needs `JUDGE_MERGED_EXECS=true` and images rebuilt from the agent commit on; an image without the agent falls back to plain execs. Turn it on for the testing judges first and load test |
 | `JUDGE_ADAPTIVE_CONCURRENCY` | `false` | `true` adjusts concurrency to the host's free CPU every 2 s: more interactive workers than `JUDGE_INTERACTIVE_WORKERS`, and each language's pool past its `JUDGE_POOL_MAX_<LANG>`, while work waits and host CPU is under 85%; one step back when it is over 95% for two readings (whoever uses it, e.g. the other stack on deploy2); back to the configured numbers after a minute without waiting work. Never below the configured numbers or above `JUDGE_CONCURRENCY_MAX` (default 1.5x cores) or the global pool cap (`pkg/capacity`). It also makes the pool autoscaler check every 5 s instead of 15 s and grow a language by half its size per step (4 -> 6 -> 9 -> 13 -> 18) instead of by one, creating 4 containers at a time; `JUDGE_POOL_AUTOSCALE_INTERVAL` / `JUDGE_POOL_SCALE_UP_COOLDOWN` still override |
-| `JUDGE_COMPILE_CACHE_MB` | `0` (off) | Memory (MB) per judge for compiled stdin programs. A program compiled before with the same compiler (byte-identical source, same image) gets its files instead of being compiled: students Run several times and then Submit the same code. Measured per submission on deploy2: C++ 418 -> 58 ms, Rust 376 -> 94 ms, Java 624 -> 295 ms. Only successful compiles, taken before the program runs, regular files only (`pkg/executor/compile_cache.go`). `/stats` shows `compile_cache` hits and misses. 256 is plenty. The load test adds a unique comment to every program so it still measures real compiles (`--same-code` for the cache-hit case) |
+| `JUDGE_COMPILE_CACHE_MB` | `0` (off) | Memory (MB) per judge for compiled stdin programs. A program compiled before with the same compiler (byte-identical source, same image) gets its files instead of being compiled: students Run several times and then Submit the same code. Measured per submission on deploy2: C++ 418 -> 58 ms, Rust 376 -> 94 ms, Java 624 -> 295 ms. Only successful compiles, taken before the program runs, regular files only (`pkg/executor/compile_cache.go`). Resident Java compiler results share this same bounded LRU; their key also includes the actual compiler image and backend identity. Compiler warnings are retained on Java service cache hits. Changed source still recompiles. `/stats` shows `compile_cache` hits and misses. 256 is plenty. The load test adds a unique comment to every program so it still measures real compiles (`--same-code` for the cache-hit case) |
 | `JUDGE_COMPILE_SERVICE` | empty (off) | `java`: stdin-mode Java (submissions and Run) compiles in a resident javac instead of starting a new javac in every sandbox. One compiler container per judge, locked down like a sandbox (no network, read-only, not root, no capabilities, pids/memory limits; annotation processing forced off, so submitted code never runs there). The class files go into the sandbox, which runs the program as before; compile errors read exactly as before. The server hands over to a fresh one every `JUDGE_COMPILE_SERVICE_RECYCLE` compiles (500) without losing requests. Measured per Java submission: 536 -> 351 ms, compile CPU ~340 -> ~60 ms. Falls back to the sandbox if unavailable. `/stats` shows `compile_service` |
-| `JUDGE_COMPILE_SERVICE_CPUS` | `2` | CPUs (and compiler threads) for the compiler container |
+| `JUDGE_COMPILE_SERVICE_CPUS` | `2` | CPU quota for the Java compiler container. This is separate from adaptive judge-worker concurrency; increasing worker count does not increase this quota |
+| `JUDGE_COMPILE_SERVICE_THREADS` | compiler CPU count | Compile threads in the resident Java service. Passed through by both Compose files; empty uses the CPU count. Tune with compiler queue/work timings and host CPU/memory measurements, rather than raising it alone |
+| `JUDGE_STDIN_DIRECT_SINGLE` | `false` | Experimental: `true` sends a single-test stdin submission through the existing direct execution path, avoiding the batching shell, per-test output files, and base64 protocol. Multiple tests keep the batched path. Test on testing first; this is not the legacy `/raw-run` endpoint |
 | `JUDGE_IMAGE_TAG` | the Dokploy compose name (`COMPOSE_PROJECT_NAME`) | Tag of the language images this stack builds and runs (`judge-<lang>-env:<tag>`), so two stacks on one server don't replace each other's images. Must equal the `image:` tags in the compose file, which use the same default |
 | `JUDGE_INSTANCE` | the Dokploy compose name (`COMPOSE_PROJECT_NAME`) | Labels this judge's sandboxes. A judge cleans up only its own, so two stacks' judges can share a server. Leave it unset unless two judges on one server have the same compose name |
 | `JUDGE_RPC_CONCURRENCY` | 16 | Run, reference checks and raw runs this judge takes at once from the `judge_rpc` queue |
@@ -375,3 +377,68 @@ fix waiting for its turn.
 | **`usageevents` is kept forever** | Contains tenant, user and client identifiers | Set a retention policy (an owner decision) |
 | **Stuck rows if the judge dead-letters a message** | The row stays `Pending`/`In Queue` | Watch `deadLetters`; ad-hoc rows expire in 24 h |
 | **Idempotency** | No idempotency keys: a retried `POST` after a timeout can run and be counted twice | Documented for clients |
+
+
+### Stdin throughput profiling (2026-11-28)
+
+The judge's internal `/stats` response exposes `metrics.stages`, grouped by language,
+and `metrics.stage_bucket_bounds_ms`. Each stage has cumulative count, total milliseconds,
+maximum milliseconds, and non-cumulative histogram buckets (the last bucket is above the
+largest published bound). Take snapshots before/after a run: mean latency over that interval
+is the change in total divided by the change in count. The reported maximum is since startup,
+not an interval maximum. Timings are wall time and can overlap; do not sum nested stages.
+
+Stages include queue age at delivery, acquisition, preparation, compilation, artifact upload,
+test execution, persistence/notification, reset/release, and total delivery/runner time.
+`queue_age_at_delivery` requires an updated API publisher and includes delay/retries since
+original publish; it is not an exclusive broker-only measurement. It uses host clocks, so
+negative or day-old samples are ignored. `compiler_queue` and `compiler_work` require the
+updated Java image; they distinguish thread-queue delay from compilation/artifact work.
+The Java service uses one monotonic clock for these two durations. No source or student IDs
+are metric labels.
+
+Successful batched protocol frames are not error diagnostics and are no longer copied into
+error logs. Genuine non-protocol stderr and fatal messages are still retained, and per-test
+student stderr remains part of the result.
+
+The reduced `bits/stdc++.h` optimization was removed: a source using conditional compilation
+compiled successfully under both headers but generated different program logic. Stdin and
+function-mode C++ now explicitly use `-std=gnu++20 -O2`, and the image builds the complete
+precompiled header with matching flags. Old light-header throughput numbers are historical,
+not a promise for this corrected path. Rebuild the C++ image when deploying this change.
+
+Next experiments, still pending: compiler CPU/thread sweep under mixed language load;
+compile-before-sandbox admission; native agent orchestration for multiple stdin tests;
+prewarming compiler successors. There is no new automatic compiler scaling in this change.
+
+When running Go tests remotely, keep build/module caches outside the source package tree,
+or use explicit package patterns (`go test . ./cmd/... ./pkg/...`) so `./...` cannot accidentally
+walk a dependency cache. Use a unique `judgetest-...` instance, bounded CPU/memory/logs and a
+hard timeout; verify test containers are removed afterward. Never reuse a deployed stack's
+instance label for integration tests.
+
+
+Controlled checks on deploy2 (2026-11-28, temporary containers; no deployed settings changed):
+
+| Check | Baseline | Candidate | Scope |
+| --- | --- | --- | --- |
+| Single-test Python | 25.1 ms | 23.4 ms | Median of five warm compile/run/reset samples; direct-single flag off/on |
+| Single-test C++ | 331.4 ms | 331.3 ms | Same comparison, complete header, cache disabled; no meaningful change |
+| Single-test Java | 148.2 ms | 123.8 ms | Same comparison, warm compiler, cache disabled |
+| Java compile-only | 3,697 compiles/min | 5,488 compiles/min | Two vs four CPUs/threads; 80 unique trivial programs, eight in flight, five warmups |
+
+These are short controlled samples, not sustained API throughput. The CPU comparison ran
+sequentially and needs a longer mixed-language comparison before selecting deployment limits.
+The direct-single flag stays off by default. Unit suite passed on Linux; targeted integration
+checks covered direct/batched parity, stdout/stderr, output limits, timeouts, Java cache reuse,
+compiler recycling/concurrency, and multi-test verdicts for Python/C++/Go/Java/Kotlin/C#.
+The updated Java source was also run directly in an isolated container to verify its framed
+reply includes successful class artifacts and nonzero compiler queue/work timings.
+
+
+Pre-push isolation regression check (2026-11-28): runner memory/fd/environment/ptrace
+access denied; killing the runner did not affect the next submission; priority/affinity/resource
+limit tampering did not carry over; fork/memory limits, leftover-process cleanup, Go/Python/Java
+workspace reset, deferred wipe, and failed-wipe discard checks all passed. These checks retain
+the existing sandbox restrictions; they are regression evidence, not a proof against every
+kernel/compiler vulnerability.

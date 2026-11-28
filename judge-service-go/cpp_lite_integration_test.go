@@ -11,8 +11,8 @@ import (
 	"judge-service-go/pkg/models"
 )
 
-// The light <bits/stdc++.h> (adapters.cppLiteCompile): stdin C++ programs get the same
-// verdicts and the same compile errors as with only the full header, faster.
+// Compatibility comparison against an older full-header image. Reduced-header
+// substitution was removed after a successful-compile semantic regression.
 // JUDGE_LITE_BASELINE_TAG names an image tag without the light header to compare with.
 func TestCppLiteHeader(t *testing.T) {
 	baseline := os.Getenv("JUDGE_LITE_BASELINE_TAG")

@@ -171,10 +171,10 @@ func TestCompiledStdinLanguagesOptimise(t *testing.T) {
 	// Function mode runs g++ through sh too (it links the prebuilt judge I/O object when the image
 	// has a matching one); both of its g++ lines must be plain -O2. -D does not affect the
 	// precompiled header.
-	if !strings.Contains(fnFlags, "exec g++ -O2 -o ") || !strings.Contains(fnFlags, "exec g++ -O2 -DJUDGE_IO_PREBUILT -o ") ||
-		!strings.Contains(stdinFlags, "g++ -O2 ") ||
-		gxxFlagRe.MatchString(fnFlags) || gxxFlagRe.MatchString(stdinFlags) {
-		t.Errorf("cpp function-mode compile %q and stdin mode %q must both be plain g++ -O2", fnFlags, stdinFlags)
+	if !strings.Contains(fnFlags, "exec g++ -std=gnu++20 -O2 -o ") || !strings.Contains(fnFlags, "exec g++ -std=gnu++20 -O2 -DJUDGE_IO_PREBUILT -o ") ||
+		!strings.Contains(stdinFlags, "g++ -std=gnu++20 -O2 ") ||
+		gxxFlagRe.MatchString(strings.ReplaceAll(fnFlags, "-std=gnu++20 ", "")) || gxxFlagRe.MatchString(strings.ReplaceAll(stdinFlags, "-std=gnu++20 ", "")) {
+		t.Errorf("cpp function-mode compile %q and stdin mode %q must both use C++20 and -O2", fnFlags, stdinFlags)
 	}
 }
 

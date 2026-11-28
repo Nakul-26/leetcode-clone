@@ -37,6 +37,7 @@ import (
 
 	docker "github.com/fsouza/go-dockerclient"
 
+	"judge-service-go/pkg/metrics"
 	"judge-service-go/pkg/pool"
 	"judge-service-go/pkg/workspace"
 )
@@ -76,11 +77,12 @@ type Service struct {
 	cli   *docker.Client
 	image string
 
-	mu          sync.Mutex
-	containerID string
-	conn        *conn
-	failures    int
-	retryAfter  time.Time
+	mu              sync.Mutex
+	containerID     string
+	compilerImageID string // immutable for this container; cleared when it is removed
+	conn            *conn
+	failures        int
+	retryAfter      time.Time
 
 	compiles, fallbacks, restarts atomic.Int64
 }
@@ -88,6 +90,29 @@ type Service struct {
 // New makes a service for the Java image. Nothing starts until the first compile.
 func New(cli *docker.Client, javaImage string) *Service {
 	return &Service{cli: cli, image: javaImage}
+}
+
+// CacheIdentity identifies the actual compiler image without widening docker-guard's
+// named-image allowlist. A restarted container may resolve a rebuilt tag differently.
+func (s *Service) CacheIdentity() (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.containerID != "" {
+		if s.compilerImageID != "" {
+			return s.compilerImageID, nil
+		}
+		container, err := s.cli.InspectContainerWithOptions(docker.InspectContainerOptions{ID: s.containerID})
+		if err != nil {
+			return "", err
+		}
+		s.compilerImageID = container.Image
+		return s.compilerImageID, nil
+	}
+	image, err := s.cli.InspectImage(s.image)
+	if err != nil {
+		return "", err
+	}
+	return image.ID, nil
 }
 
 // Stats reports compiles served, compiles sent back to the sandbox and server starts.
@@ -137,6 +162,10 @@ func (s *Service) CompileJava(ctx context.Context, sources map[string][]byte, ar
 	if reply.Exit < 0 {
 		s.fallbacks.Add(1)
 		return nil, fmt.Errorf("%w: refused: %s", ErrUnavailable, reply.Output)
+	}
+	if reply.CompileNanos > 0 {
+		metrics.RecordStage(metrics.WithLanguage(ctx, "java"), "compiler_queue", time.Duration(reply.QueueNanos))
+		metrics.RecordStage(metrics.WithLanguage(ctx, "java"), "compiler_work", time.Duration(reply.CompileNanos))
 	}
 	res := &Result{Exit: reply.Exit, Output: reply.Output, Files: map[string][]byte{}}
 	for name, b64 := range reply.Files {
@@ -242,6 +271,7 @@ func (s *Service) startLocked(ctx context.Context) (*conn, error) {
 }
 
 func (s *Service) removeContainerLocked() {
+	s.compilerImageID = ""
 	if s.containerID == "" {
 		return
 	}
@@ -351,7 +381,9 @@ type reply struct {
 	Files   map[string]string `json:"files"`
 	// Retire: the server reached its recycle count. New compiles go to a fresh server; this
 	// one is closed once nothing is pending on it.
-	Retire bool `json:"retire"`
+	Retire       bool  `json:"retire"`
+	QueueNanos   int64 `json:"queueNanos"`
+	CompileNanos int64 `json:"compileNanos"`
 }
 
 func startServer(ctx context.Context, cli *docker.Client, containerID string) (*conn, error) {
