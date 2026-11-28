@@ -144,7 +144,7 @@ var StdinAdapterRegistry = map[string]StdinLanguageAdapter{
 	},
 	"cpp": compiledStdinAdapter{
 		name: "cpp", fileName: "main.cpp",
-		compileCmd: []string{"sh", "-c", "g++ -O2 " + forceIncludeIfNeeded + " -o main main.cpp"},
+		compileCmd: []string{"sh", "-c", cppLiteCompile}, // the light <bits/stdc++.h> first (prelude.go)
 		runCmd:     []string{"/app/main"},
 	},
 	"go": compiledStdinAdapter{

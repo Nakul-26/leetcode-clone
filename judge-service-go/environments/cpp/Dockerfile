@@ -29,6 +29,16 @@ RUN H="$(echo '#include <bits/stdc++.h>' | g++ -O2 -x c++ -H -fsyntax-only - 2>&
 RUN addgroup --system judge && adduser --system --ingroup judge judge
 
 # Set the user
+# A light <bits/stdc++.h> for stdin programs (pkg/central/adapters/prelude.go cppLiteCompile):
+# the headers students use, precompiled with exactly the compile's flags (-O2), 80 MB instead of
+# 142 MB to load per compile. The check fails the build if g++ would not use it.
+RUN mkdir -p /opt/judge-cpp/lite/bits \
+    && for h in cassert cctype cfloat climits cmath cstdint cstdio cstdlib cstring algorithm array bitset deque functional iomanip iostream iterator limits list map memory numeric optional queue set sstream stack string string_view tuple unordered_map unordered_set utility vector; do echo "#include <$h>"; done > /opt/judge-cpp/lite/bits/stdc++.h \
+    && g++ -O2 -x c++-header /opt/judge-cpp/lite/bits/stdc++.h -o /opt/judge-cpp/lite/bits/stdc++.h.gch \
+    && printf '#include <bits/stdc++.h>\nint main() {}\n' > /tmp/lite-check.cpp \
+    && g++ -O2 -I/opt/judge-cpp/lite -H -o /tmp/lite-check /tmp/lite-check.cpp 2>&1 | grep -q '^! /opt/judge-cpp/lite/bits/stdc++.h.gch' \
+    && rm -f /tmp/lite-check /tmp/lite-check.cpp && chmod -R a+rX /opt/judge-cpp/lite
+
 # The judge I/O helper's function bodies, compiled once (pkg/central/adapters/cpp.go), with the
 # hash a submission's copy must match for the object to be linked into it.
 COPY pkg/wrappers/cpp_judge_io.inc /opt/judge-cpp/judge_io.inc
