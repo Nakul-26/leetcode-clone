@@ -268,8 +268,11 @@ func WithPrelude(language, code string) (source string, header string) {
 
 // cppStdinCompile uses the complete standard header and fixes the language standard.
 // A reduced bits/stdc++.h can change successful programs through conditional
-// compilation; retrying only failed compiles cannot preserve its semantics.
-const cppStdinCompile = `exec g++ -std=gnu++20 -O2 ` + forceIncludeIfNeeded + ` -o main main.cpp`
+// compilation; retrying only failed compiles cannot preserve its semantics. -pipe streams
+// compiler intermediates directly to the assembler instead of writing temporary files. A
+// bounded single-core profile showed a small, consistent improvement without changing flags
+// that determine C++ semantics or PCH compatibility.
+const cppStdinCompile = `exec g++ -pipe -std=gnu++20 -O2 ` + forceIncludeIfNeeded + ` -o main main.cpp`
 
 // forceIncludeIfNeeded is the shell fragment that adds `-include prelude.h` only when the
 // file is non-empty.

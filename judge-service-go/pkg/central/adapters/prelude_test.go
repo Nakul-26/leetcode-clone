@@ -67,6 +67,14 @@ func TestCppPreludeKeepsBitsStdcAndOwnNames(t *testing.T) {
 	}
 }
 
+func TestCppStdinCompileUsesPipeWithFullHeaderFlags(t *testing.T) {
+	for _, flag := range []string{"g++ -pipe", "-std=gnu++20", "-O2", "-o main main.cpp", forceIncludeIfNeeded} {
+		if !strings.Contains(cppStdinCompile, flag) {
+			t.Errorf("C++ stdin compile command %q is missing %q", cppStdinCompile, flag)
+		}
+	}
+}
+
 func TestJavaPreludeJoinsImportsOntoLineOne(t *testing.T) {
 	code := "public class Main {\n    public static void main(String[] args) {\n        Scanner sc = new Scanner(System.in);\n        List<Integer> a = new ArrayList<>();\n        System.out.println(new BigInteger(\"1\"));\n    }\n}\n"
 	out := javaSource(code)
