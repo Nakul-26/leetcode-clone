@@ -62,6 +62,11 @@
 #   JUDGE_COMPILE_CACHE_MB (default: 0 = off) — memory for compiled stdin programs, so the same
 #                          code compiled again (Run several times, then Submit) skips the compile.
 #                          256 is plenty. See pkg/executor/compile_cache.go.
+#   JUDGE_COMPILE_SERVICE  (default: empty = off) — java: stdin-mode Java compiles in a resident
+#                          javac (one locked-down compiler container per judge) instead of a new
+#                          javac in every sandbox: ~340 -> ~60 ms of CPU per compile.
+#                          JUDGE_COMPILE_SERVICE_CPUS (default 2) sizes it. Falls back to the
+#                          sandbox when unavailable. See pkg/compilesvc.
 #   JUDGE_WORKER_CONCURRENCY  (default: 24) — how many submissions can be pulled off RabbitMQ
 #                          and processed concurrently. Deliberately set above the host's core
 #                          count: these workers spend most of their time blocked on Docker API
@@ -389,6 +394,8 @@ services:
       JUDGE_ADAPTIVE_CONCURRENCY: ${JUDGE_ADAPTIVE_CONCURRENCY:-false}
       JUDGE_CONCURRENCY_MAX: ${JUDGE_CONCURRENCY_MAX:-}
       JUDGE_COMPILE_CACHE_MB: ${JUDGE_COMPILE_CACHE_MB:-0}
+      JUDGE_COMPILE_SERVICE: ${JUDGE_COMPILE_SERVICE:-}
+      JUDGE_COMPILE_SERVICE_CPUS: ${JUDGE_COMPILE_SERVICE_CPUS:-2}
       # Which stack this judge's sandboxes belong to, so a second stack on the same server
       # (deploy2 runs two) keeps its sandboxes when this one starts. Defaults to the Compose
       # project name, which Dokploy makes unique per compose.

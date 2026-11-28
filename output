@@ -1,0 +1,16 @@
+lications:~$ docker start examportal-exam-sandbox-eyazdd-mongo-1 examportal-go-judge-ifal7h-mongo-1
+sleep 20
+docker logs --tail 5 examportal-exam-sandbox-eyazdd-mongo-1 2>&1 | grep -o '"msg":"[^"]*"'
+examportal-exam-sandbox-eyazdd-mongo-1
+examportal-go-judge-ifal7h-mongo-1
+"msg":"client metadata"
+"msg":"Connection accepted"
+"msg":"client metadata"
+"msg":"Connection accepted"
+"msg":"client metadata"
+deploy@serverforapplications:~$ docker rm friendly_rosalind elegant_shtern zealous_euler friendly_benz
+friendly_rosalind
+elegant_shtern
+zealous_euler
+friendly_benz
+deploy@serverforapplications:~$

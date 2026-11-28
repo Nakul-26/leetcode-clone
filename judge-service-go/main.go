@@ -28,6 +28,7 @@ import (
 
 	"judge-service-go/pkg/capacity"
 	"judge-service-go/pkg/central/adapters"
+	"judge-service-go/pkg/compilesvc"
 	"judge-service-go/pkg/executor"
 	"judge-service-go/pkg/languages"
 	"judge-service-go/pkg/metrics"
@@ -208,6 +209,17 @@ func getDurationSecondsEnv(name string, def time.Duration) time.Duration {
 		}
 	}
 	return def
+}
+
+// compileService is the resident Java compiler, nil when JUDGE_COMPILE_SERVICE is off.
+var compileService *compilesvc.Service
+
+func compileServiceStats() map[string]int64 {
+	if compileService == nil {
+		return nil
+	}
+	c, f, r := compileService.Stats()
+	return map[string]int64{"compiles": c, "fallbacks": f, "server_starts": r}
 }
 
 // interactiveWaitQueueName is the queue an interactive request waits in, for interactiveWaitMs,
@@ -1480,7 +1492,8 @@ func startHealthServer(ctx context.Context, containerPool *pool.ContainerPool, p
 			"pool":    stats,
 			"metrics": metricsSnapshot,
 			// JUDGE_COMPILE_CACHE_MB: compiles skipped, compiles run, results kept.
-			"compile_cache": map[string]int64{"hits": hits, "misses": misses, "stored": stored},
+			"compile_cache":   map[string]int64{"hits": hits, "misses": misses, "stored": stored},
+			"compile_service": compileServiceStats(),
 		}
 		json.NewEncoder(w).Encode(resp)
 	})
@@ -1789,6 +1802,16 @@ func main() {
 	// Initialize Docker Executor
 	executor, err := executor.NewExecutor()
 	failOnError(err, "Failed to create Docker executor")
+
+	// The resident Java compiler (pkg/compilesvc, JUDGE_COMPILE_SERVICE=java): stdin-mode Java
+	// compiles there instead of in each sandbox. Off unless set; falls back to the sandbox.
+	if compilesvc.Enabled("java") {
+		if java := languages.GetLanguage("java"); java != nil {
+			compileService = compilesvc.New(executor.Client(), java.ImageRef())
+			executor.SetExternalCompiler(compileService)
+			slog.Info("compile service on", "language", "java", "image", java.ImageRef())
+		}
+	}
 
 	// Initialize Container Pool
 	containerPool := pool.NewPool(executor.Client(), globalCap)
@@ -2161,6 +2184,9 @@ func main() {
 	// 3. Cleanup pool
 	slog.Info("Cleaning up container pool...")
 	containerPool.Shutdown(context.Background())
+	if compileService != nil {
+		compileService.Close()
+	}
 
 	slog.Info("Shutdown complete.")
 }

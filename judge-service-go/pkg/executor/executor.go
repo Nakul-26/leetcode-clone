@@ -46,6 +46,9 @@ type Executor struct {
 	// The compile cache (compile_cache.go), nil when off, and each container's image ID.
 	cc       *compileCache
 	imageIDs sync.Map
+
+	// ext compiles some programs outside the sandbox (external_compiler.go); nil when off.
+	ext ExternalCompiler
 }
 
 // maxCapturedOutputBytes caps how much of a single exec's stdout/stderr this process
@@ -933,6 +936,17 @@ func (e *Executor) CompileInContainer(ctx context.Context, containerID string, f
 	subCtx, cancel := context.WithTimeout(ctx, submissionTimeout)
 	defer cancel()
 
+	// Compiled outside the sandbox (pkg/compilesvc): the sources and what it produced go in.
+	if handled, outFiles, output, err := e.compileExternally(subCtx, compileCmd, hostWorkDir, files); handled {
+		if err != nil {
+			return "", output, err
+		}
+		if err := e.copyFilesToContainer(subCtx, containerID, hostWorkDir, containerWorkDir, append(append([]string(nil), files...), outFiles...)); err != nil {
+			return "", "", err
+		}
+		return "", output, nil
+	}
+
 	// The same code compiled before with the same compiler: its files instead (compile_cache.go).
 	cacheKey, cacheable := e.compileKey(containerID, hostWorkDir, files, compileCmd)
 	if cacheable && e.restoreCompiled(subCtx, containerID, containerWorkDir, cacheKey) {
@@ -1199,11 +1213,22 @@ func (e *Executor) RunRawWithStdin(ctx context.Context, containerID string, file
 	subCtx, cancel := context.WithTimeout(ctx, submissionTimeout)
 	defer cancel()
 
-	// The same code compiled before with the same compiler: its files, and no compile.
-	cacheKey, cacheable := e.compileKey(containerID, hostWorkDir, files, compileCmd)
-	if cacheable && e.restoreCompiled(subCtx, containerID, containerWorkDir, cacheKey) {
+	// Compiled outside the sandbox (pkg/compilesvc): upload sources and output, no compile here.
+	cacheable := false
+	cacheKey := ""
+	if handled, outFiles, output, err := e.compileExternally(subCtx, compileCmd, hostWorkDir, files); handled {
+		if err != nil {
+			return "", "", output, -1, err
+		}
+		files = append(append([]string(nil), files...), outFiles...)
 		compileCmd = nil
-		files = nil
+	} else {
+		// The same code compiled before with the same compiler: its files, and no compile.
+		cacheKey, cacheable = e.compileKey(containerID, hostWorkDir, files, compileCmd)
+		if cacheable && e.restoreCompiled(subCtx, containerID, containerWorkDir, cacheKey) {
+			compileCmd = nil
+			files = nil
+		}
 	}
 
 	// The run takes the program's stdin, so in merged mode the upload goes with the compile

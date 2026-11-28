@@ -273,8 +273,9 @@ type agentConn struct {
 	replies map[uint64]chan *agentproto.Msg
 	seq     uint64
 
-	dead     chan struct{}
-	deadOnce sync.Once
+	dead      chan struct{}
+	deadOnce  sync.Once
+	closeOnce sync.Once
 }
 
 func (c *agentConn) isDead() bool {
@@ -308,11 +309,15 @@ func (c *agentConn) markDead() {
 // can (and the runner with them) or exceeds its memory limit.
 const lostAgentExitCode = 137
 
+// close may be called from several places (a replaced runner, the kill, shutdown) and only
+// does its work once: go-dockerclient's CloseWaiter panics when closed a second time.
 func (c *agentConn) close() {
-	_ = c.in.Close()
-	if c.cw != nil {
-		_ = c.cw.Close()
-	}
+	c.closeOnce.Do(func() {
+		_ = c.in.Close()
+		if c.cw != nil {
+			_ = c.cw.Close()
+		}
+	})
 	c.markDead()
 }
 

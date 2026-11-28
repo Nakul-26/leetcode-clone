@@ -58,6 +58,10 @@ RUN for h in single batch; do \
     done \
     && rm -rf /opt/judge-java-src && chmod -R a+rX /opt/judge-java
 
+# The resident Java compiler (pkg/compilesvc), run in a compiler container of its own.
+COPY environments/java/compile-server/CompileServer.java /opt/judge-java/compile-server-src/CompileServer.java
+RUN javac -cp /usr/share/java/gson.jar -d /opt/judge-java/compile-server /opt/judge-java/compile-server-src/CompileServer.java     && test -f /opt/judge-java/compile-server/CompileServer.class     && rm -rf /opt/judge-java/compile-server-src && chmod -R a+rX /opt/judge-java/compile-server
+
 # Root-owned and on the read-only root filesystem: no submission can change it.
 COPY --from=judge-agent /judge-agent /usr/local/bin/judge-agent
 

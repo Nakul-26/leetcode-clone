@@ -94,6 +94,7 @@ func setupIntegration(t *testing.T, languageID string) (*executor.Executor, *poo
 	t.Cleanup(func() {
 		p.Shutdown(context.Background())
 	})
+	removeInstanceContainers(t, exec.Client())
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
 	if err := p.WarmUp(ctx, lang.ID, lang.ImageRef(), 1, 1); err != nil {
@@ -143,4 +144,23 @@ func runCertificationTest(t *testing.T, exec *executor.Executor, pc *pool.Pooled
 		t.Fatalf("container reset failed: %v", err)
 	}
 	return result
+}
+
+// removeInstanceContainers removes, when the test ends (passed, failed or not), every container
+// labelled with this run's JUDGE_INSTANCE: sandboxes a pool did not get back, compiler
+// containers. Only with an instance set, so a run without one cannot touch anyone else's.
+func removeInstanceContainers(t *testing.T, cli *docker.Client) {
+	inst := pool.Instance()
+	if inst == "" {
+		return
+	}
+	t.Cleanup(func() {
+		cs, err := cli.ListContainers(docker.ListContainersOptions{All: true, Filters: map[string][]string{"label": {pool.InstanceLabelKey + "=" + inst}}})
+		if err != nil {
+			return
+		}
+		for _, c := range cs {
+			_ = cli.RemoveContainer(docker.RemoveContainerOptions{ID: c.ID, Force: true})
+		}
+	})
 }
