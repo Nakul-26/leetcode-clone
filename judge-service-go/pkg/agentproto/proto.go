@@ -17,7 +17,7 @@ import (
 
 // Version changes whenever the protocol does; the judge refuses an agent of another version and
 // falls back to plain execs for that container.
-const Version = "1"
+const Version = "2"
 
 // MaxFrame bounds one frame. The largest are exec requests carrying a workspace tar or a
 // program's stdin; output travels in chunks of at most ChunkSize.
@@ -34,6 +34,7 @@ const (
 	OpPing      = "ping"      // runner: report whether its state is still untouched; replies pong
 	OpRegister  = "register"  // keeper: Pid is the runner, to be spared by killjudge; replies done
 	OpKillJudge = "killjudge" // keeper: kill every judge-user process (sparing the runner if Spare); replies done
+	OpCPUTime   = "cputime"   // keeper: read the sandbox cgroup CPU counter; replies done
 
 	// Replies and events.
 	OpHello   = "hello"   // first frame from an agent: Version, Pid, Role
@@ -65,11 +66,12 @@ type Msg struct {
 	Err  string `json:"err,omitempty"`
 
 	// hello / register / killjudge
-	Version string `json:"version,omitempty"`
-	Role    string `json:"role,omitempty"`
-	Pid     int    `json:"pid,omitempty"`
-	Spare   bool   `json:"spare,omitempty"`
-	User    string `json:"user,omitempty"` // killjudge: the judge user's name, for a keeper with no runner registered yet
+	Version      string `json:"version,omitempty"`
+	Role         string `json:"role,omitempty"`
+	Pid          int    `json:"pid,omitempty"`
+	Spare        bool   `json:"spare,omitempty"`
+	User         string `json:"user,omitempty"`         // killjudge: the judge user's name, for a keeper with no runner registered yet
+	CPUTimeNanos int64  `json:"cpuTimeNanos,omitempty"` // cputime reply, read by the root keeper
 }
 
 // Write sends one frame. Callers serialise writes to the same stream themselves.

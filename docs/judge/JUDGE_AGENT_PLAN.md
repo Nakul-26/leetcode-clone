@@ -257,11 +257,29 @@ At x240 the servers' load averages were only ~6 (deploy2) and ~4 (deploy4) of 12
 is no longer the limit for Python; the next one is in front of the judges (API, queue or the load
 generator). Next: production, after the testing judges have run it for a while.
 
-### Phase 3 (optional): CPU time without Docker stats
+### Phase 3: CPU time without Docker stats
 
-With a root agent (Option A), the agent can read the container's own `cpu.stat` (read-only cgroup
-files the submission can't change) and report it with the result. That removes the last two
-Docker calls per run. Only after Phase 2 has run in production for a while.
+Implemented locally (2026-11-28) for Option B. The root keeper accepts a dedicated CPU-time
+request and reads only `/sys/fs/cgroup/cpu.stat`, which is mounted read-only inside the sandbox.
+The request carries no path or PID, and the unprivileged runner rejects it. The judge uses this
+cgroup `usage_usec` counter for before/after CPU accounting and records the `agent_cpu_time`
+stage. If the operation is unsupported or the cgroup layout differs, it disables this path for
+that sandbox and falls back to Docker stats. Images with an older agent protocol continue to use
+Docker stats as before.
+
+The keeper-only permission, parser, and fallback have unit coverage. `TestAgentCPUTimeUsesKeeper`
+passed in an isolated, capped deploy4 integration runner against a temporary derived Python
+image: a fresh student process increased measured CPU time, the verdict passed, and no Docker
+stats call was made. The temporary image and labeled containers were removed. A fresh run after
+the cleanup-order test harness adjustment remains useful before rollout. Rebuild judge and
+language images on the testing stack before benchmarking; do not change production settings.
+
+The post-redeploy load run on 2026-11-28 was a control, not a Phase 3 measurement: the active
+testing Python image reported agent protocol 1, and the judge stats snapshot showed two Docker
+stats calls per submission. The local change requires protocol 2, so redeploying the existing
+main build did not include it. Raw API results are saved as
+`loadtest/results/2026-11-28T14-01-47-255Z-full.json` and
+`loadtest/results/2026-11-28T14-07-04-412Z-mixed.json`.
 
 ## Rollout
 

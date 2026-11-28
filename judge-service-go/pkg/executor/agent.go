@@ -31,8 +31,9 @@ import (
 // inspectExec in dockercalls.go): an exec for the judge user is run by the runner, one for root
 // by the keeper, with the same command, working directory, stdin, streamed output and exit
 // code. So every step above them is unchanged and covered by the same tests: the deferred wipe
-// and upload (prep.go), the runner scripts, time limits, output caps, and CPU time and memory
-// limits set from outside the sandbox.
+// and upload (prep.go), the runner scripts, time limits, output caps, and memory limits set from
+// outside the sandbox. CPU time comes from the keeper's read-only cgroup counter, with Docker
+// stats as a compatibility fallback.
 //
 // The one step that changes is killing the judge user's processes: `pkill -u judge` would kill
 // the runner too, so with the agent the keeper does it and spares the runner (killJudge).
@@ -88,6 +89,7 @@ type agentState struct {
 	containerID string
 	mu          sync.Mutex
 	off         bool
+	cpuTimeOff  bool // the keeper could not read this sandbox's immutable cgroup CPU counter
 	keeper      *agentConn
 	runner      *agentConn
 }

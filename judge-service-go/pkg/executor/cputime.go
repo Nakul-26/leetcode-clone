@@ -10,18 +10,26 @@ import (
 	"net/url"
 	"sync/atomic"
 	"time"
+
+	"judge-service-go/pkg/agentproto"
+	"judge-service-go/pkg/metrics"
 )
 
-// ContainerCPUTime is the CPU time used so far by every process in the container (its
-// cgroup's usage counter), read through the Docker stats API (JUDGE_FIX_PLAN F5). The
-// judge reads it before and after a test to judge the time limit on CPU time, which,
-// unlike wall-clock time, does not grow when the server is busy.
-//
-// It is read from outside the sandbox, so a submission cannot forge it. It uses one-shot
-// mode (Docker API 1.41+): without it the daemon waits about a second for a second sample.
-// go-dockerclient's Stats has no one-shot option, so the request is made directly over the
-// client's own HTTP transport.
+// ContainerCPUTime is the cumulative CPU time for the sandbox cgroup. With a compatible
+// resident agent it asks the root keeper to read the fixed, read-only cgroup counter; otherwise
+// it uses Docker's one-shot stats API. Student code cannot write the counter or the keeper's
+// private protocol. The judge samples before and after tests so CPU limits do not grow when the
+// host is busy.
 func (e *Executor) ContainerCPUTime(ctx context.Context, containerID string) (time.Duration, error) {
+	if used, cpu, err := e.containerCPUTimeFromAgent(ctx, containerID); used {
+		if err == nil {
+			return cpu, nil
+		}
+		if ctx.Err() != nil {
+			return 0, ctx.Err()
+		}
+		slog.Warn("sandbox agent CPU counter unavailable; falling back to Docker stats", "containerId", containerID, "error", err)
+	}
 	if cpuStatsDisabled.Load() {
 		return 0, errCPUStatsDisabled
 	}
@@ -64,6 +72,45 @@ func (e *Executor) ContainerCPUTime(ctx context.Context, containerID string) (ti
 		return 0, fmt.Errorf("container stats: no CPU usage reported")
 	}
 	return time.Duration(stats.CPUStats.CPUUsage.TotalUsage), nil
+}
+
+func (e *Executor) containerCPUTimeFromAgent(ctx context.Context, containerID string) (used bool, cpu time.Duration, err error) {
+	st := e.agentActive(containerID)
+	if st == nil {
+		return false, 0, nil
+	}
+	st.mu.Lock()
+	if st.off || st.cpuTimeOff || st.keeper == nil || st.keeper.isDead() {
+		st.mu.Unlock()
+		return false, 0, nil
+	}
+	keeper := st.keeper
+	st.mu.Unlock()
+
+	started := time.Now()
+	requestCtx, cancel := context.WithTimeout(ctx, cpuStatsTimeout)
+	reply, requestErr := keeper.request(requestCtx, &agentproto.Msg{Op: agentproto.OpCPUTime})
+	cancel()
+	metrics.RecordStage(ctx, "agent_cpu_time", time.Since(started))
+	if requestErr == nil && reply != nil && reply.Code == 0 && reply.CPUTimeNanos > 0 {
+		return true, time.Duration(reply.CPUTimeNanos), nil
+	}
+	if requestErr == nil {
+		if reply == nil {
+			requestErr = errors.New("sandbox agent returned an empty CPU-time reply")
+		} else {
+			requestErr = fmt.Errorf("sandbox agent CPU-time reply: %s", reply.Err)
+		}
+	}
+	if ctx.Err() != nil {
+		return true, 0, ctx.Err()
+	}
+	if !errors.Is(requestErr, context.Canceled) {
+		st.mu.Lock()
+		st.cpuTimeOff = true
+		st.mu.Unlock()
+	}
+	return true, 0, requestErr
 }
 
 // A one-shot read takes a few milliseconds. A daemon older than API 1.41 ignores one-shot

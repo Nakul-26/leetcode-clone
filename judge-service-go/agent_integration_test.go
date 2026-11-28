@@ -127,6 +127,36 @@ func TestAgentRunsWithoutExecs(t *testing.T) {
 	}
 }
 
+// TestAgentCPUTimeUsesKeeper verifies the agent samples the immutable cgroup counter without
+// making Docker stats calls, and that the CPU meter still observes work done by a fresh program.
+func TestAgentCPUTimeUsesKeeper(t *testing.T) {
+	exec, p, pc, _ := agentSetup(t, "python")
+	defer p.Release(pc)
+	expectHealthy(t, exec, pc, "cpu-keeper-warm") // boot and register both long-lived agents
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	beforeCalls, _ := metrics.SnapshotDockerCalls()
+	before, err := exec.ContainerCPUTime(ctx, pc.ID)
+	if err != nil {
+		t.Fatalf("CPU time before run: %v", err)
+	}
+	program := "n = int(input())\ns = 0\nfor i in range(3000000): s += i\nprint(n * 2)\n"
+	res := runStdin(t, exec, pc, "python", "cpu-keeper-work", program, echoDouble[:1])
+	if res.Passed != 1 || res.InternalError != "" {
+		t.Fatalf("CPU-metered program verdict: %+v", res)
+	}
+	after, err := exec.ContainerCPUTime(ctx, pc.ID)
+	if err != nil || after <= before {
+		t.Fatalf("CPU time after run = %s, %v; before = %s", after, err, before)
+	}
+	afterCalls, _ := metrics.SnapshotDockerCalls()
+	if afterCalls["stats"].Count != beforeCalls["stats"].Count {
+		t.Fatalf("agent-backed CPU samples made Docker stats calls: before=%d after=%d", beforeCalls["stats"].Count, afterCalls["stats"].Count)
+	}
+	reset(t, exec, pc)
+}
+
 // pyRunner finds the runner from inside a submission: the judge-agent process of the same user.
 const pyRunner = `import os
 def runner_pid():

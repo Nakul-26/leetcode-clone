@@ -12,7 +12,7 @@
 //
 // The sandbox keeps every restriction it has today, and gets no new capability: no network,
 // read-only root filesystem, no-new-privileges, every capability dropped but KILL, memory and
-// pids limits, and CPU time read by the judge from outside.
+// pids limits, and CPU time read by the root keeper from the sandbox's read-only cgroup counter.
 //
 // What the agent adds is two processes a submission could try to interfere with:
 //
@@ -173,6 +173,16 @@ func (a *agent) serve(in io.Reader) int {
 			a.send(a.register(m))
 		case agentproto.OpKillJudge:
 			a.send(a.killJudge(m))
+		case agentproto.OpCPUTime:
+			reply := &agentproto.Msg{Op: agentproto.OpDone, Seq: m.Seq}
+			if a.role != "keeper" {
+				reply.Code, reply.Err = 1, "CPU time is keeper-only"
+			} else if nanos, err := cgroupCPUTimeNanos(); err != nil {
+				reply.Code, reply.Err = 1, err.Error()
+			} else {
+				reply.CPUTimeNanos = nanos
+			}
+			a.send(reply)
 		default:
 			a.send(&agentproto.Msg{Op: agentproto.OpDone, Seq: m.Seq, Code: 1, Err: "unknown op " + m.Op})
 		}
