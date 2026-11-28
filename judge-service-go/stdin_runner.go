@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -19,6 +20,20 @@ import (
 	"judge-service-go/pkg/pool"
 	"judge-service-go/pkg/workspace"
 )
+
+type precompiledStdinKey struct{}
+
+type precompiledStdin struct {
+	hostWorkspace string
+	artifacts     []string
+}
+
+func withPrecompiledStdin(ctx context.Context, hostWorkspace string, artifacts []string) context.Context {
+	return context.WithValue(ctx, precompiledStdinKey{}, precompiledStdin{
+		hostWorkspace: hostWorkspace,
+		artifacts:     append([]string(nil), artifacts...),
+	})
+}
 
 // runSubmissionStdinDetailed executes a ProblemType: stdin submission
 // (pkg/models/problem_type.go): one exec per test case, piping the test's
@@ -55,14 +70,28 @@ func runSubmissionStdinDetailed(ctx context.Context, exec *executor.Executor, po
 	if err != nil {
 		return nil, cleanupFailed, err
 	}
+	precompiledReady := false
+	if prepared, ok := ctx.Value(precompiledStdinKey{}).(precompiledStdin); ok {
+		if err := workspace.CopyWorkspaceFiles(prepared.hostWorkspace, submissionWorkspace.HostPath, prepared.artifacts); err == nil {
+			if err := exec.CopyFiles(ctx, pooledContainer.ID, submissionWorkspace.HostPath, submissionWorkspace.ContainerPath, prepared.artifacts); err == nil {
+				precompiledReady = true
+			} else {
+				slog.Warn("Java pre-acquire artifact upload failed; compiling in sandbox", "error", err)
+			}
+		} else {
+			slog.Warn("Java pre-acquire artifact copy failed; compiling in sandbox", "error", err)
+		}
+	}
 
 	result = startedResult(problem)
 
 	var compileCmd []string
 	if compilingAdapter, ok := stdinAdapter.(adapters.CompilingStdinLanguageAdapter); ok {
 		compileCmd = compilingAdapter.CompileCommand()
-		if err := compileStdinSubmission(ctx, exec, pooledContainer, submissionWorkspace, compileCmd, baseFiles, problem); err != nil {
-			return finalizeExecutionFailure(result, err), cleanupFailed, nil
+		if !precompiledReady {
+			if err := compileStdinSubmission(ctx, exec, pooledContainer, submissionWorkspace, compileCmd, baseFiles, problem); err != nil {
+				return finalizeExecutionFailure(result, err), cleanupFailed, nil
+			}
 		}
 	}
 	compiled := len(compileCmd) > 0
@@ -269,6 +298,36 @@ func compileStdinSubmission(ctx context.Context, exec *executor.Executor, pooled
 		return fmt.Errorf("%w | %s", err, msg)
 	}
 	return nil
+}
+
+func prepareJavaStdin(ctx context.Context, exec *executor.Executor, msg models.SubmissionMessage) (*workspace.SubmissionWorkspace, []string, []string, error) {
+	adapter, ok := adapters.GetStdinAdapter("java")
+	if !ok {
+		return nil, nil, nil, fmt.Errorf("Java stdin adapter is unavailable")
+	}
+	if err := os.MkdirAll(filepath.Join(workspace.RootDir, "judge-preacquire"), 0o777); err != nil {
+		return nil, nil, nil, err
+	}
+	ws, err := workspace.NewSubmissionWorkspace(filepath.Join(workspace.RootDir, "judge-preacquire"), msg.SubmissionID)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	files, err := adapter.PrepareFiles(ws.HostPath, stdinSourceFor(msg))
+	if err != nil {
+		_ = workspace.CleanupSubmissionWorkspace(ws.HostPath)
+		return nil, nil, nil, err
+	}
+	compileCmd := adapters.StdinCompileCommand(adapter)
+	handled, artifacts, output, compileErr := exec.CompileBeforeAcquire(ctx, compileCmd, ws.HostPath, files)
+	if !handled {
+		_ = workspace.CleanupSubmissionWorkspace(ws.HostPath)
+		return nil, nil, nil, nil
+	}
+	if compileErr != nil {
+		_ = workspace.CleanupSubmissionWorkspace(ws.HostPath)
+		return nil, nil, nil, fmt.Errorf("%w | %s", compileErr, output)
+	}
+	return ws, files, artifacts, nil
 }
 
 func stdinTestInput(tc models.TestCase) (string, bool) {

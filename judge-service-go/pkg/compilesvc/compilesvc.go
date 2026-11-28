@@ -652,6 +652,49 @@ func (s *Service) Compile(ctx context.Context, compileCmd []string, hostWorkDir 
 	return true, out, 0, res.Output
 }
 
+// CompileBeforeAcquire compiles Java stdin sources using their judge-owned workspace. It
+// deliberately declines cache hits here until the cache key can be independent of a sandbox.
+func (s *Service) CompileBeforeAcquire(ctx context.Context, compileCmd []string, hostWorkDir string, files []string) (bool, []string, int, string) {
+	if !Enabled("java") || len(compileCmd) == 0 || compileCmd[0] != "javac" {
+		return false, nil, 0, ""
+	}
+	args, sources, ok := javacArgs(compileCmd)
+	if !ok {
+		return false, nil, 0, ""
+	}
+	contents := make(map[string][]byte, len(sources))
+	for _, source := range sources {
+		name := filepathBase(source)
+		if !contains(files, name) {
+			return false, nil, 0, ""
+		}
+		data, _, err := workspace.ReadRegularFile(hostWorkDir, name)
+		if err != nil {
+			return false, nil, 0, ""
+		}
+		contents[name] = data
+	}
+	result, err := s.CompileJava(ctx, contents, args)
+	if err != nil {
+		slog.Warn("compile service: pre-acquire compile unavailable, compiling in sandbox", "error", err)
+		return false, nil, 0, ""
+	}
+	if result.Exit != 0 {
+		return true, nil, result.Exit, result.Output
+	}
+	var filesOut []string
+	for name, data := range result.Files {
+		if !safeClassPath(name) {
+			return false, nil, 0, ""
+		}
+		if err := workspace.WriteFile(hostWorkDir, name, data, 0o644); err != nil {
+			return false, nil, 0, ""
+		}
+		filesOut = append(filesOut, name)
+	}
+	return true, filesOut, 0, result.Output
+}
+
 // javacArgs splits a javac command into the options the server should use and the source
 // files. The JVM options (-J...) are javac's own start-up tuning and do not apply to a warm
 // server. Only the options the judge's own javac commands use are accepted.

@@ -89,6 +89,7 @@ services:
       JUDGE_COMPILE_SERVICE_CPUS: ${JUDGE_COMPILE_SERVICE_CPUS:-2}
       JUDGE_COMPILE_SERVICE_THREADS: ${JUDGE_COMPILE_SERVICE_THREADS:-}
       JUDGE_COMPILE_SERVICE_MAX_PENDING: ${JUDGE_COMPILE_SERVICE_MAX_PENDING:-}
+      JUDGE_PRECOMPILE_BEFORE_ACQUIRE: ${JUDGE_PRECOMPILE_BEFORE_ACQUIRE:-false}
       JUDGE_STDIN_DIRECT_SINGLE: ${JUDGE_STDIN_DIRECT_SINGLE:-false}
       # Which stack this judge's sandboxes belong to, so a second stack on the same server
       # (deploy2 runs two) keeps its sandboxes when this one starts. Defaults to the Compose

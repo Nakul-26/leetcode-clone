@@ -393,6 +393,11 @@ const (
 // caller, so they are clamped here rather than trusted. /raw-run has always done the same;
 // without it a caller could ask for an hour and hold a container for the whole of the
 // submission budget. Zero means "use the default".
+func isCompilationFailure(err error) bool {
+	var executionErr *executor.ExecutionError
+	return errors.As(err, &executionErr) && errors.Is(executionErr.Type, executor.ErrCompilationFailed)
+}
+
 func callerLimits(submissionMsg models.SubmissionMessage) (timeLimitMs int64, memoryLimitMb int64) {
 	timeLimitMs = submissionMsg.TimeLimitMs
 	if timeLimitMs > maxAdHocTimeLimitMs {
@@ -1322,6 +1327,41 @@ func processSubmission(interactive bool, d amqp.Delivery, ch *amqp.Channel, retr
 		return
 	}
 
+	var precompiledWorkspace *workspace.SubmissionWorkspace
+	var precompiledArtifacts []string
+	precompileEnabled := strings.EqualFold(strings.TrimSpace(os.Getenv("JUDGE_PRECOMPILE_BEFORE_ACQUIRE")), "true") &&
+		!interactive && problem.EffectiveType() == models.StdinProblem && lang.ID == "java" &&
+		hasStrategy && isCentralCompareEnabled(lang.ID)
+	if precompileEnabled {
+		precompileCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
+		defer cancel()
+		var precompileErr error
+		precompiledWorkspace, _, precompiledArtifacts, precompileErr =
+			prepareJavaStdin(precompileCtx, executor, submissionMsg)
+		if precompileErr != nil {
+			if isCompilationFailure(precompileErr) {
+				result := startedResult(problem)
+				result = finalizeExecutionFailure(result, precompileErr)
+				resultBytes, marshalErr := result.ToJSON()
+				if marshalErr == nil {
+					processAndStoreResults(ctx, models.ExecutionPathCentral, string(resultBytes), "", nil,
+						submissionMsg, submissionsCollection, problemsCollection, usageEventsCollection, redisClient)
+				}
+				d.Ack(false)
+				return
+			}
+			slog.Warn("Java pre-acquire compile setup failed; using sandbox path", "submissionId", submissionMsg.SubmissionID, "error", precompileErr)
+		}
+	}
+	if precompiledWorkspace != nil {
+		workspaceToClean := precompiledWorkspace
+		defer func() {
+			if cleanupErr := workspace.CleanupSubmissionWorkspace(workspaceToClean.HostPath); cleanupErr != nil {
+				slog.Error("failed to cleanup pre-acquire workspace", "submissionId", submissionMsg.SubmissionID, "error", cleanupErr)
+			}
+		}()
+	}
+
 	// A bulk worker only waits for a container when its language has room for another waiter;
 	// otherwise the message goes back on the queue and this worker takes other work, so one
 	// language's burst cannot block every worker (JUDGE_FIX_PLAN T4). Registered before the
@@ -1380,6 +1420,9 @@ func processSubmission(interactive bool, d amqp.Delivery, ch *amqp.Channel, retr
 		execCtx, cancel := context.WithTimeout(ctx, 120*time.Second)
 		defer cancel()
 
+		if precompiledWorkspace != nil {
+			execCtx = withPrecompiledStdin(execCtx, precompiledWorkspace.HostPath, precompiledArtifacts)
+		}
 		result, cleanupFailed, err := strategy.Run(execCtx, executor, pooledContainer, submissionMsg, problem, adapter)
 		if err != nil {
 			slog.Error("Central execution setup failed", "submissionId", submissionMsg.SubmissionID, "adapter", adapter.Name(), "error", err)

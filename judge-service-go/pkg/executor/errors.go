@@ -52,6 +52,11 @@ func IsContainerLost(err error) bool {
 	return errors.As(err, &execErr) && execErr.ContainerLost
 }
 
+func IsCompilationFailed(err error) bool {
+	var execErr *ExecutionError
+	return errors.As(err, &execErr) && errors.Is(execErr.Type, ErrCompilationFailed)
+}
+
 // lostSandboxExitCode is what an exec reports when the sandbox around it went away. Under
 // gVisor (runsc, JUDGE_FIX_PLAN S3) the memory cgroup covers the whole sandbox, so an OOM
 // kills the sandbox, not just the student's process: the exec ends 128 ("WaitPID failed:

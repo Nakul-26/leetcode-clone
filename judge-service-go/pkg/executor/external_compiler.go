@@ -24,8 +24,31 @@ type ExternalCompiler interface {
 	Compile(ctx context.Context, compileCmd []string, hostWorkDir string, files []string) (handled bool, outFiles []string, exitCode int, output string)
 }
 
+// CompileBeforeAcquire prepares externally compiled artifacts without needing a sandbox.
+// Implementations must return handled=false when the existing sandbox path is required.
+type PreAcquireExternalCompiler interface {
+	CompileBeforeAcquire(ctx context.Context, compileCmd []string, hostWorkDir string, files []string) (handled bool, outFiles []string, exitCode int, output string)
+}
+
 // SetExternalCompiler installs one (nil removes it).
 func (e *Executor) SetExternalCompiler(c ExternalCompiler) { e.ext = c }
+
+// CompileBeforeAcquire enables a safe external compiler to prepare files before sandbox
+// acquisition. The caller retains its workspace through execution and cleanup.
+func (e *Executor) CompileBeforeAcquire(ctx context.Context, compileCmd []string, hostWorkDir string, files []string) (handled bool, outFiles []string, output string, err error) {
+	precompiler, ok := e.ext.(PreAcquireExternalCompiler)
+	if !ok || len(compileCmd) == 0 {
+		return false, nil, "", nil
+	}
+	handled, outFiles, exitCode, output := precompiler.CompileBeforeAcquire(ctx, compileCmd, hostWorkDir, files)
+	if !handled {
+		return false, nil, "", nil
+	}
+	if exitCode != 0 {
+		return true, nil, output, NewExecutionError(ErrCompilationFailed, exitError(exitCode, output).Error(), -1)
+	}
+	return true, outFiles, output, nil
+}
 
 // compileExternally runs compileCmd in the external compiler if it takes it. A failure is the
 // same error CompileInContainer returns for the sandbox's own compile, so the result reads the

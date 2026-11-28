@@ -7,6 +7,19 @@ import (
 	"strings"
 )
 
+func CopyWorkspaceFiles(source, destination string, names []string) error {
+	for _, name := range names {
+		data, info, err := ReadRegularFile(source, name)
+		if err != nil {
+			return err
+		}
+		if err := WriteFile(destination, name, data, info.Mode().Perm()); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func SafeJoin(base, name string) (string, error) {
 	if filepath.IsAbs(name) {
 		return "", fmt.Errorf("absolute paths are not allowed: %q", name)

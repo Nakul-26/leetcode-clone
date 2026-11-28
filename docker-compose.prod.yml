@@ -67,6 +67,8 @@
 #                          javac in every sandbox: ~340 -> ~60 ms of CPU per compile.
 #                          JUDGE_COMPILE_SERVICE_CPUS (default 2) sizes it. Falls back to the
 #                          sandbox when unavailable. See pkg/compilesvc.
+#   JUDGE_PRECOMPILE_BEFORE_ACQUIRE (default: false) â€” compile Java stdin before acquiring a
+#                          sandbox. Requires JUDGE_COMPILE_SERVICE=java.
 #   JUDGE_WORKER_CONCURRENCY  (default: 24) — how many submissions can be pulled off RabbitMQ
 #                          and processed concurrently. Deliberately set above the host's core
 #                          count: these workers spend most of their time blocked on Docker API
@@ -398,6 +400,7 @@ services:
       JUDGE_COMPILE_SERVICE_CPUS: ${JUDGE_COMPILE_SERVICE_CPUS:-2}
       JUDGE_COMPILE_SERVICE_THREADS: ${JUDGE_COMPILE_SERVICE_THREADS:-}
       JUDGE_COMPILE_SERVICE_MAX_PENDING: ${JUDGE_COMPILE_SERVICE_MAX_PENDING:-}
+      JUDGE_PRECOMPILE_BEFORE_ACQUIRE: ${JUDGE_PRECOMPILE_BEFORE_ACQUIRE:-false}
       JUDGE_STDIN_DIRECT_SINGLE: ${JUDGE_STDIN_DIRECT_SINGLE:-false}
       # Which stack this judge's sandboxes belong to, so a second stack on the same server
       # (deploy2 runs two) keeps its sandboxes when this one starts. Defaults to the Compose

@@ -55,6 +55,40 @@ func TestCleanupSubmissionWorkspaceRemovesDirectory(t *testing.T) {
 	}
 }
 
+func TestCopyWorkspaceFilesCopiesOnlyRequestedRegularFiles(t *testing.T) {
+	root := t.TempDir()
+	source := filepath.Join(root, "judge-source")
+	destination := filepath.Join(root, "judge-destination")
+	if err := os.MkdirAll(source, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(destination, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteFile(source, "Main.java", []byte("source"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteFile(source, "Main.class", []byte("artifact"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteFile(source, "ignore.txt", []byte("ignore"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := CopyWorkspaceFiles(source, destination, []string{"Main.java", "Main.class"}); err != nil {
+		t.Fatal(err)
+	}
+	for name, want := range map[string]string{"Main.java": "source", "Main.class": "artifact"} {
+		got, _, err := ReadRegularFile(destination, name)
+		if err != nil || string(got) != want {
+			t.Fatalf("%s: got %q, err %v", name, got, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(destination, "ignore.txt")); !os.IsNotExist(err) {
+		t.Fatalf("unexpected unrequested file, stat err %v", err)
+	}
+}
+
 func TestCleanupSubmissionWorkspaceRejectsContainerRoot(t *testing.T) {
 	base := t.TempDir()
 	containerDir := filepath.Join(base, "judge-123")
